@@ -1,0 +1,510 @@
+[
+  {
+    "name": "gmail tool maps personal",
+    "args": {
+      "tools": [
+        "gmail_read"
+      ],
+      "user_class": "public",
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "messages tool maps personal",
+    "args": {
+      "tools": [
+        "messages_search"
+      ],
+      "user_class": "public",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "public web plus public user stays public",
+    "args": {
+      "tools": [
+        "web_search"
+      ],
+      "user_class": "public",
+      "task": "research"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "public web plus personal user inherits personal",
+    "args": {
+      "tools": [
+        "web_search"
+      ],
+      "user_class": "personal",
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "browser defaults private",
+    "args": {
+      "tools": [
+        "browser"
+      ],
+      "user_class": "public",
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "browser can be explicitly public by trusted caller",
+    "args": {
+      "tools": [
+        "browser"
+      ],
+      "user_class": "public",
+      "browser_visibility": "public",
+      "task": "research"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "unknown tool fails closed",
+    "args": {
+      "tools": [
+        "future_magic_tool"
+      ],
+      "user_class": "public",
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "read local file personal",
+    "args": {
+      "tools": [
+        "read"
+      ],
+      "user_class": "public",
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "openclaw memory personal",
+    "args": {
+      "tools": [
+        "memory_search"
+      ],
+      "user_class": "public",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "file steward personal",
+    "args": {
+      "tools": [
+        "steward_inspect"
+      ],
+      "user_class": "public",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "saved markdown personal",
+    "args": {
+      "tools": [
+        "save_local_markdown"
+      ],
+      "user_class": "public",
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "system status personal",
+    "args": {
+      "tools": [
+        "session_status"
+      ],
+      "user_class": "public",
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "gmail plus web remains personal",
+    "args": {
+      "tools": [
+        "gmail_search",
+        "web_search"
+      ],
+      "user_class": "public",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "messages plus gmail remains personal",
+    "args": {
+      "tools": [
+        "messages_search",
+        "gmail_search"
+      ],
+      "user_class": "public",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "restricted tag overrides public provenance",
+    "args": {
+      "tools": [
+        "web_search"
+      ],
+      "user_class": "public",
+      "tags": [
+        "customer_confidential"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "PRIVATE_AWS",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "no tool personal default",
+    "args": {
+      "tools": [],
+      "user_class": "personal",
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "no tool explicit public lookup",
+    "args": {
+      "tools": [],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "no provenance fails unknown",
+    "args": {
+      "tools": [],
+      "user_class": "none",
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "public frontier request",
+    "args": {
+      "tools": [
+        "web_fetch"
+      ],
+      "user_class": "public",
+      "task": "lookup",
+      "quality": "best"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_235b"
+    }
+  },
+  {
+    "name": "personal best still private aws",
+    "args": {
+      "tools": [
+        "gmail_read"
+      ],
+      "user_class": "public",
+      "task": "lookup",
+      "quality": "best",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "web search known mapping",
+    "args": {
+      "tools": [
+        "web_search"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "web_search",
+      "source": "public_web",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "web fetch known mapping",
+    "args": {
+      "tools": [
+        "web_fetch"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "web_fetch",
+      "source": "public_web",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "gmail search known mapping",
+    "args": {
+      "tools": [
+        "gmail_search"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "gmail_search",
+      "source": "gmail",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "gmail read known mapping",
+    "args": {
+      "tools": [
+        "gmail_read"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "gmail_read",
+      "source": "gmail",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "messages chats known mapping",
+    "args": {
+      "tools": [
+        "messages_chats"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "messages_chats",
+      "source": "messages",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "messages history known mapping",
+    "args": {
+      "tools": [
+        "messages_history"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "messages_history",
+      "source": "messages",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "messages search known mapping",
+    "args": {
+      "tools": [
+        "messages_search"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "messages_search",
+      "source": "messages",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "steward list known mapping",
+    "args": {
+      "tools": [
+        "steward_list"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "steward_list",
+      "source": "file_steward",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "steward move known mapping",
+    "args": {
+      "tools": [
+        "steward_move"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "steward_move",
+      "source": "file_steward",
+      "mapping_reason": "registered-tool"
+    }
+  },
+  {
+    "name": "unknown mapping reason",
+    "args": {
+      "tools": [
+        "not_registered"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "not_registered",
+      "source": "unknown",
+      "mapping_reason": "unknown-tool-fails-closed"
+    }
+  },
+  {
+    "name": "private browser mapping reason",
+    "args": {
+      "tools": [
+        "browser"
+      ],
+      "user_class": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "browser",
+      "source": "browser_private",
+      "mapping_reason": "browser-fails-private"
+    }
+  },
+  {
+    "name": "public browser mapping reason",
+    "args": {
+      "tools": [
+        "browser"
+      ],
+      "user_class": "public",
+      "browser_visibility": "public",
+      "task": "lookup"
+    },
+    "provenance_expect": {
+      "tool": "browser",
+      "source": "browser_public",
+      "mapping_reason": "explicit-public-browser-context"
+    }
+  },
+  {
+    "name": "envelope never contains content",
+    "args": {
+      "tools": [
+        "gmail_read"
+      ],
+      "user_class": "personal",
+      "task": "summarize"
+    },
+    "envelope_expect": {
+      "contains_content": false
+    }
+  },
+  {
+    "name": "authority invariant survives provenance",
+    "args": {
+      "tools": [
+        "gmail_read"
+      ],
+      "user_class": "personal",
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "authority": "MAC_ONLY"
+    }
+  }
+]

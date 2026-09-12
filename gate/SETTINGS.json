@@ -1,0 +1,83 @@
+{
+  "release": "phase10-private80b-quality-router-v1",
+  "mode": "active",
+  "python": "@PYTHON@",
+  "state_directory": "@STATE@/gate",
+  "local_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+  "approval_expiry_seconds": 300,
+  "max_context_bytes": 32768,
+  "max_messages": 128,
+  "max_answer_tokens": 4096,
+  "request_deadline_seconds": 4800,
+  "network_budget_usd": 10,
+  "max_request_usd": 1,
+  "frontier_transport": "openrouter",
+  "models": {
+    "GEMINI_AUDIT": {
+      "id": "google/gemini-3.1-pro-preview",
+      "canonical": "google/gemini-3.1-pro-preview-20260219",
+      "provider": "google-vertex/global",
+      "response_provider": "Google",
+      "input_per_million": 2,
+      "output_per_million": 12,
+      "max_tokens": 2048
+    },
+    "HOSTED_235B": {
+      "id": "qwen/qwen3-235b-a22b-2507",
+      "canonical": "qwen/qwen3-235b-a22b-07-25",
+      "provider": "google-vertex/us-south1",
+      "response_provider": "Google",
+      "input_per_million": 0.25,
+      "output_per_million": 1,
+      "max_tokens": 4096
+    },
+    "MULTIMODAL": {
+      "id": "qwen/qwen3-vl-30b-a3b-instruct",
+      "canonical": "qwen/qwen3-vl-30b-a3b-instruct",
+      "provider": "deepinfra/fp8",
+      "response_provider": "DeepInfra",
+      "input_per_million": 0.15,
+      "output_per_million": 0.6,
+      "max_tokens": 4096
+    },
+    "OPENAI_FRONTIER": {
+      "id": "openai/gpt-6-astra-pro",
+      "canonical": "openai/gpt-6-astra-pro-20260903",
+      "provider": "azure",
+      "response_provider": "Azure",
+      "input_per_million": 10,
+      "output_per_million": 50,
+      "max_tokens": 8192,
+      "completion_parameter": "max_completion_tokens",
+      "direct_model": "gpt-6-astra-20260903"
+    }
+  },
+  "multimodal": {
+    "transport": "openrouter",
+    "local_url": "http://127.0.0.1:18001/v1",
+    "local_model": "mlx-community/Qwen3-VL-30B-A3B-Instruct-4bit",
+    "max_images": 12,
+    "max_video_seconds": 600,
+    "max_file_bytes": 104857600,
+    "max_asset_bytes": 4194304
+  },
+  "gpu": {
+    "auto_start": false,
+    "volume_id": "CONFIGURE_VOLUME_ID",
+    "datacenter": "US-NC-2",
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "image": "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+    "model": "RedHatAI/Qwen3-Next-80B-A3B-Instruct-quantized.w4a16",
+    "alias": "vinceai-qwen80b",
+    "max_hourly_usd": 3,
+    "max_runtime_seconds": 7200,
+    "capacity_wait_seconds": 1800,
+    "readiness_seconds": 2700,
+    "session_idle_seconds": 900,
+    "idle_grace_seconds": 60,
+    "local_port": 18000,
+    "ssh_private_key": "@CONFIG@/runpod_ed25519",
+    "keychain_item": "VinceAI Runpod API"
+  },
+  "direct_openai_retention_authorized": false
+}

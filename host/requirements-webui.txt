@@ -1,0 +1,2 @@
+# Separate optional host UI runtime. Retains the upstream Open WebUI license.
+open-webui==0.11.1

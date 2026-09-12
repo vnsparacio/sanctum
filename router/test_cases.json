@@ -1,0 +1,536 @@
+[
+  {
+    "name": "public web lookup",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "lookup",
+      "aws_state": "stopped"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL",
+      "action": "USE_NOW",
+      "reasoning_tier": "local_4b"
+    }
+  },
+  {
+    "name": "explicit public user summary",
+    "args": {
+      "sources": [
+        "user_public"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "unknown fails personal",
+    "args": {
+      "sources": [
+        "unknown"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "unspecified source fails personal",
+    "args": {
+      "sources": [],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "gmail easy",
+    "args": {
+      "sources": [
+        "gmail"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "messages hard aws stopped",
+    "args": {
+      "sources": [
+        "messages"
+      ],
+      "task": "plan",
+      "aws_state": "stopped"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "HARD",
+      "preferred_route": "PRIVATE_AWS",
+      "action": "ASK_TO_START_AWS"
+    }
+  },
+  {
+    "name": "messages hard aws running",
+    "args": {
+      "sources": [
+        "messages"
+      ],
+      "task": "plan",
+      "aws_state": "running"
+    },
+    "expect": {
+      "preferred_route": "PRIVATE_AWS",
+      "action": "USE_NOW"
+    }
+  },
+  {
+    "name": "Sanctum notes analysis",
+    "args": {
+      "sources": [
+        "vinceai"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "local file research",
+    "args": {
+      "sources": [
+        "local_file"
+      ],
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "HARD",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "credential easy local",
+    "args": {
+      "sources": [
+        "credentials"
+      ],
+      "task": "lookup"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "credential hard private aws",
+    "args": {
+      "sources": [
+        "credentials"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "PRIVATE_AWS",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "public hard hosted",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "research"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_80b"
+    }
+  },
+  {
+    "name": "public architecture frontier",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "architecture"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_235b"
+    }
+  },
+  {
+    "name": "hosted unavailable aws running",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "research",
+      "hosted_state": "unavailable",
+      "aws_state": "running"
+    },
+    "expect": {
+      "preferred_route": "PRIVATE_AWS",
+      "action": "USE_NOW"
+    }
+  },
+  {
+    "name": "hosted unavailable aws stopped",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "research",
+      "hosted_state": "unavailable",
+      "aws_state": "stopped"
+    },
+    "expect": {
+      "preferred_route": "PRIVATE_AWS",
+      "action": "ASK_TO_START_AWS"
+    }
+  },
+  {
+    "name": "mixed public gmail easy inherits personal",
+    "args": {
+      "sources": [
+        "public_web",
+        "gmail"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "mixed public gmail hard private aws",
+    "args": {
+      "sources": [
+        "public_web",
+        "gmail"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "customer confidential tag overrides public source",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "tags": [
+        "customer_confidential"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "health tag stays private",
+    "args": {
+      "sources": [
+        "user_public"
+      ],
+      "tags": [
+        "health"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "LOCAL",
+      "hosted_egress_allowed": false
+    }
+  },
+  {
+    "name": "12k context upgrades easy to hard",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "summarize",
+      "context_tokens": 12000
+    },
+    "expect": {
+      "difficulty": "HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_80b"
+    }
+  },
+  {
+    "name": "60k context upgrades to very hard",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "summarize",
+      "context_tokens": 60000
+    },
+    "expect": {
+      "difficulty": "VERY_HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_235b"
+    }
+  },
+  {
+    "name": "three sources upgrades to hard",
+    "args": {
+      "sources": [
+        "public_web",
+        "browser_public",
+        "user_public"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "HARD",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "best quality public uses frontier",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "lookup",
+      "quality": "best"
+    },
+    "expect": {
+      "difficulty": "VERY_HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_235b"
+    }
+  },
+  {
+    "name": "best quality gmail stays private",
+    "args": {
+      "sources": [
+        "gmail"
+      ],
+      "task": "lookup",
+      "quality": "best",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "public tool selection local",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "tool_select"
+    },
+    "expect": {
+      "difficulty": "EASY",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "public debug hosted",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "debug"
+    },
+    "expect": {
+      "difficulty": "HARD",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "high value personal private aws",
+    "args": {
+      "sources": [
+        "messages"
+      ],
+      "task": "high_value",
+      "aws_state": "stopped"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "PRIVATE_AWS",
+      "action": "ASK_TO_START_AWS"
+    }
+  },
+  {
+    "name": "public browser is public",
+    "args": {
+      "sources": [
+        "browser_public"
+      ],
+      "task": "research"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "private browser is personal",
+    "args": {
+      "sources": [
+        "browser_private"
+      ],
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "work confidential restricted",
+    "args": {
+      "sources": [
+        "user_input"
+      ],
+      "tags": [
+        "work_confidential"
+      ],
+      "task": "summarize"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "LOCAL"
+    }
+  },
+  {
+    "name": "financial account hard restricted",
+    "args": {
+      "sources": [
+        "user_input"
+      ],
+      "tags": [
+        "financial_account"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "unknown task defaults hard",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "something_new"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "HARD",
+      "preferred_route": "HOSTED_REMOTE"
+    }
+  },
+  {
+    "name": "unknown source name fails personal",
+    "args": {
+      "sources": [
+        "mystery_connector"
+      ],
+      "task": "research",
+      "aws_state": "running"
+    },
+    "expect": {
+      "privacy": "PERSONAL",
+      "preferred_route": "PRIVATE_AWS"
+    }
+  },
+  {
+    "name": "restricted hard aws unavailable",
+    "args": {
+      "sources": [
+        "secrets"
+      ],
+      "task": "analyze",
+      "aws_state": "unavailable"
+    },
+    "expect": {
+      "privacy": "RESTRICTED",
+      "preferred_route": "PRIVATE_AWS",
+      "action": "PRIVATE_AWS_UNAVAILABLE",
+      "fallback_route": "LOCAL"
+    }
+  },
+  {
+    "name": "public deep research frontier",
+    "args": {
+      "sources": [
+        "public_web"
+      ],
+      "task": "deep_research"
+    },
+    "expect": {
+      "privacy": "PUBLIC",
+      "difficulty": "VERY_HARD",
+      "preferred_route": "HOSTED_REMOTE",
+      "reasoning_tier": "hosted_235b"
+    }
+  },
+  {
+    "name": "mac authority invariant",
+    "args": {
+      "sources": [
+        "gmail"
+      ],
+      "task": "analyze",
+      "aws_state": "running"
+    },
+    "expect": {
+      "authority": "MAC_ONLY"
+    }
+  }
+]

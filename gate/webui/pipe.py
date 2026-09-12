@@ -1,0 +1,89 @@
+"""
+title: Mac prompt gate
+description: Explicit, approved hybrid reasoning through the existing Mac OpenClaw gate.
+version: 2.0.0
+"""
+import asyncio
+import hashlib
+import json
+import re
+import time
+from pathlib import Path
+
+BASE = Path('@GATE@')
+UNAVAILABLE = 'The Mac gate connection was unavailable. No automatic retry or model fallback was made. An already approved request may have completed; check /gate status before continuing.'
+
+
+def prepare(body, user, metadata, files=None, tools=None):
+    if not isinstance(user, dict) or user.get('role') != 'admin' or not user.get('id'):
+        raise ValueError('This gate requires your authenticated Open WebUI administrator account.')
+    chat = metadata.get('chat_id')
+    if not isinstance(chat, str) or not chat or len(chat) > 256 or chat in ('local', 'new'):
+        raise ValueError('Start a saved Open WebUI chat so approvals have a stable conversation identity.')
+    if files or tools or any(body.get(k) or metadata.get(k) for k in ('files','tools','tool_ids','terminal_id','skill_ids','folder_id')):
+        raise ValueError('Use locally prepared attachment tokens for media. Remove WebUI uploads, tools, skills and project context first.')
+    if any((body.get('features') or {}).values()) or any((metadata.get('features') or {}).values()):
+        raise ValueError('Turn off WebUI search, memory, voice and other extra features for the Mac gate.')
+    rows = body.get('messages')
+    if not isinstance(rows, list) or not rows or rows[-1].get('role') != 'user':
+        raise ValueError('Send a new user command; model replies and tool results cannot approve requests.')
+    message = rows[-1].get('content')
+    if not isinstance(message, str):
+        raise ValueError('The Mac gate currently accepts plain text only.')
+    message = message.strip()
+    if message != '/gate' and not message.startswith(('/gate ', '/gate\n', '/gate\t')):
+        raise ValueError('Use /gate new, then /gate ask your question. This model only accepts explicit /gate commands.')
+    if len(message.encode()) > 32768:
+        raise ValueError('This command exceeds the Mac gate text limit.')
+    identity = hashlib.sha256(json.dumps([user['id'], chat], separators=(',', ':')).encode()).hexdigest()
+    return {'session': identity, 'command': message}
+
+
+async def invoke(request):
+    child = None
+    try:
+        child = await asyncio.create_subprocess_exec('@NODE@', str(BASE/'webui/bridge.mjs'), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=131072)
+        output, _ = await asyncio.wait_for(child.communicate(json.dumps(request).encode()), timeout=40)
+        result=json.loads(output) if len(output)<131072 else {}
+        if result.get('ok') is not True or not isinstance(result.get('text'),str): raise ValueError('connection_unavailable')
+        return result['text']
+    finally:
+        if child and child.returncode is None:
+            child.kill(); await child.wait()
+
+async def poll_result(request, token):
+    # Retry only retrieval of an existing job. Never retry the original command,
+    # an approval, an inference, or another operation with side effects.
+    for attempt in range(3):
+        try: return await invoke({**request,'command':'/gate result '+token})
+        except Exception:
+            if attempt < 2: await asyncio.sleep(2)
+    return 'The local connection was interrupted. Your approved job was not resubmitted. Retrieve its result with /gate result '+token
+
+class Pipe:
+    async def pipe(self, body: dict, __user__: dict=None, __metadata__: dict=None,
+                   __task__: str=None, __files__: list=None, __tools__: dict=None, __event_emitter__=None) -> str:
+        if __task__ or (__metadata__ or {}).get('task'):
+            return '{"title":"Mac gate conversation"}' if 'title' in str(__task__ or (__metadata__ or {}).get('task')).lower() else '{}'
+        try:
+            request=prepare(body,__user__,__metadata__ or {},__files__,__tools__)
+        except ValueError as error: return str(error)
+        try:
+            for relative,expected in json.loads((BASE/'FREEZE.json').read_text()).items():
+                path=BASE/relative
+                if path.is_symlink() or not path.resolve().is_relative_to(BASE) or hashlib.sha256(path.read_bytes()).hexdigest()!=expected: return UNAVAILABLE
+            text=await invoke(request)
+            job=re.search(r'\[Mac gate job:([a-f0-9]{32})\]',text)
+            if not job: return text
+            token=job.group(1); deadline=time.monotonic()+4900
+            while time.monotonic()<deadline:
+                if __event_emitter__:
+                    await __event_emitter__({'type':'status','data':{'description':'Mac gate is assessing or preparing the selected model. No new disclosure is being approved.','done':False}})
+                await asyncio.sleep(4)
+                # Polling retrieves only this existing job; it can never approve or retry it.
+                text=await poll_result(request,token)
+                if '[Mac gate job:'+token+']' not in text:
+                    if __event_emitter__: await __event_emitter__({'type':'status','data':{'description':'Mac gate finished.','done':True}})
+                    return text
+            return 'The job is still pending. Retrieve it with /gate result '+token
+        except (Exception,asyncio.CancelledError): return UNAVAILABLE

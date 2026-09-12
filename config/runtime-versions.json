@@ -1,0 +1,16 @@
+{
+  "verified_date": "2026-09-11",
+  "openclaw": "2026.8.1",
+  "node": "26.8.1",
+  "python": "3.12.14",
+  "open_webui": "0.11.1",
+  "mlx_lm": "0.31.3",
+  "mlx": "0.32.2",
+  "mlx_metal": "0.32.2",
+  "gog": "0.38.1",
+  "imsg": "0.14.2",
+  "jq": "1.7.1-apple",
+  "runpodctl": "2.13.0",
+  "docker_cli": "29.7.2",
+  "notes": "Version snapshots are not upgrades or promises of availability. Optional native tools are installed separately. No model weights or provider resources are included."
+}

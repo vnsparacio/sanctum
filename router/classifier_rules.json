@@ -1,0 +1,82 @@
+{
+  "version": "1.0",
+
+  "restricted_patterns": [
+    {"tag":"credential","regex":"\\b(password|passwd|api[ _-]?key|access[ _-]?key|private[ _-]?key|secret key|bearer token|auth token|session token)\\b"},
+    {"tag":"authentication","regex":"\\b(2fa|mfa|one[- ]time password|otp|recovery code|security question|login credential|oauth token)\\b"},
+    {"tag":"financial_account","regex":"\\b(bank account|routing number|credit card number|debit card number|brokerage account|wallet seed|seed phrase)\\b"},
+    {"tag":"work_confidential","regex":"\\b(confidential|proprietary|nda|under nda|company internal|internal-only|not for distribution)\\b"},
+    {"tag":"work_confidential","regex":"\\b(my|our|this) (customer|client|account)'?s?\\b"},
+    {"tag":"health","regex":"\\b(my (symptoms?|diagnosis|test results?|medications?|medical records?|doctor)|i (have|was diagnosed with|tested positive for))\\b"},
+    {"tag":"legal_sensitive","regex":"\\b(my (divorce|lawsuit|legal case|court case|attorney|lawyer)|our legal case)\\b"},
+    {"tag":"precise_location","regex":"\\b(my home address|my exact address|where i live|my current location)\\b"},
+    {"tag":"secret","regex":"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"},
+    {"tag":"credential","regex":"\\b(AKIA|ASIA)[A-Z0-9]{12,}\\b"},
+    {"tag":"credential","regex":"\\bgh[pousr]_[A-Za-z0-9_]{20,}\\b"}
+  ],
+
+  "personal_patterns": [
+    "\\b(my|our)\\b",
+    "\\b(the|an?|this|that) (email|message|text|conversation|thread|file|document|attachment|screenshot|photo|note)\\b",
+    "\\b(my|our) (email|gmail|inbox|messages?|texts?|imessages?|calendar|files?|downloads?|desktop|documents?|notes?|resume|browser|account|profile|photos?|contacts?)\\b",
+    "\\b(this|that) (email|message|text|conversation|thread|file|document|attachment|screenshot|photo|note)\\b",
+    "\\b(attached|attachment|screenshot i sent|file i sent|uploaded file|pasted below|text below|following message|following email)\\b",
+    "\\b(my|our) (partner|husband|wife|boyfriend|girlfriend|family|dad|father|mom|mother|boss|coworker|manager|team)\\b",
+    "\\b(conversation|chat|messages?) with [A-Z][A-Za-z'’-]+\\b",
+    "(^|\\s)~/",
+    "/Users/",
+    "\\b(local file|on my mac|on my computer|in my downloads|in my desktop)\\b"
+  ],
+
+  "ambiguous_reference_patterns": [
+    "\\b(this|that|these|those|it|they)\\b",
+    "\\b(above|below|earlier|previous|last time|we discussed|we talked about|you said)\\b"
+  ],
+
+  "public_question_prefixes": [
+    "what ",
+    "who ",
+    "when ",
+    "where ",
+    "why ",
+    "how ",
+    "explain ",
+    "define ",
+    "compare ",
+    "describe ",
+    "teach me ",
+    "give me an overview of ",
+    "summarize the ",
+    "write me a generic example of ",
+    "design an architecture for a public ",
+    "what is ",
+    "what are ",
+    "how does ",
+    "how do ",
+    "can you explain ",
+    "can you tell me "
+  ],
+
+  "task_patterns": [
+    {"task":"deep_research","regex":"\\b(deep research|comprehensive research|research this deeply|in-depth research)\\b"},
+    {"task":"architecture","regex":"\\b(architect|architecture|system design|design the system|design an architecture)\\b"},
+    {"task":"debug","regex":"\\b(debug|troubleshoot|why is .* failing|error message|stack trace|fix this error|diagnose this issue)\\b"},
+    {"task":"synthesize","regex":"\\b(synthesize|combine these|pull together|integrate these)\\b"},
+    {"task":"compare","regex":"\\b(compare|versus|\\bvs\\.?\\b|differences? between)\\b"},
+    {"task":"plan","regex":"\\b(plan|roadmap|step[- ]by[- ]step|implementation plan|project plan|walk me through)\\b"},
+    {"task":"research","regex":"\\b(research|investigate|look into|current state|latest information|find out)\\b"},
+    {"task":"analyze","regex":"\\b(analyze|analyse|assess|evaluate|reason through|diagnose)\\b"},
+    {"task":"summarize","regex":"\\b(summarize|summarise|summary|tl;?dr|recap|quick and dirty)\\b"},
+    {"task":"extract","regex":"\\b(extract|parse|pull out|list the fields|turn .* into json|structured data)\\b"},
+    {"task":"draft","regex":"\\b(draft|write me|rewrite|wordsmith|make this more professional|reply to|respond to)\\b"},
+    {"task":"tool_select","regex":"\\b(which tool|what tool|which capability|what capability)\\b"},
+    {"task":"lookup","regex":"\\b(explain|define|describe|teach me|give me an overview|look up|lookup|find|what is|what are|who is|when is|where is|how many|how much)\\b"}
+  ],
+
+  "best_quality_patterns": [
+    "\\b(best possible|best answer|highest quality|frontier model|use the strongest|use your strongest)\\b"
+  ],
+
+  "public_auto_max_chars": 700,
+  "public_auto_max_newlines": 2
+}

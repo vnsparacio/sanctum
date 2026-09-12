@@ -1,0 +1,28 @@
+{
+  "id": "gmail-read-tools",
+  "name": "Gmail Read Tools",
+  "description": "Read-only Gmail search and sanitized message retrieval through a local least-privilege broker.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "gmail_search",
+      "gmail_read"
+    ]
+  },
+  "toolMetadata": {
+    "gmail_search": {
+      "optional": true
+    },
+    "gmail_read": {
+      "optional": true
+    }
+  }
+}

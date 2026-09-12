@@ -1,0 +1,39 @@
+{
+  "id": "vinceai-reliability",
+  "name": "Sanctum reliability",
+  "version": "1.0.0",
+  "description": "Deterministic argument validation, exact utilities, compact results and fail-closed escalation.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "agentToolResultMiddleware": [
+      "openclaw"
+    ],
+    "tools": [
+      "calc",
+      "date_math",
+      "unit_convert",
+      "structured_parse"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "toolMetadata": {
+    "calc": {
+      "optional": true
+    },
+    "date_math": {
+      "optional": true
+    },
+    "unit_convert": {
+      "optional": true
+    },
+    "structured_parse": {
+      "optional": true
+    }
+  }
+}

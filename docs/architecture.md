@@ -1,0 +1,17 @@
+# Architecture
+
+The Mac owns authority: authentication, risk composition, privacy floors, exact disclosure tickets, local tool permissions, provider budgets and GPU ownership. Models reason over packets selected by that authority plane.
+
+`gate/plugin/core.mjs` owns gate sessions, exclusions, revision-bound approval, routing and background results. `local-agent.mjs` invokes the authenticated OpenClaw agent, with loopback endpoint and local model checks. Calling a bare MLX endpoint would lose the tool loop; packaging preserves this distinction. Configurable ports remain loopback-only.
+
+`gate/src/authority.py` validates signed requests and durable one-use nonces. `dispatch.py` composes risk/capability policy. `backends.py` contains tool-free reasoning transports, identity checks, context and cost limits. No failure silently authorizes another provider.
+
+`lifecycle.py` owns locks, allocation intent, leases, capacity wait, readiness and confirmed deletion. `runpod.py` remains a narrow provider adapter. Mac-held credentials are not copied onto the GPU worker. A persistent cache volume survives compute termination. Independent cleanup is required before enabling automatic compute in a deployment.
+
+Local semantic plugins call fixed Unix-socket brokers. The wrappers restrict their underlying service operations. Browser Guard, File Steward approval and reliability hooks remain separate boundaries. Reliability uses captured schemas, one bounded argument repair, provenance-preserving output and a narrow exact-answer verifier. It does not verify arbitrary prose.
+
+The retained `router/` code supports historical deterministic privacy/escalation contracts for reliability. It is not a resurrected learned router or an AWS deployment requirement. Its mock escalation path must not be confused with the current gate's production transport.
+
+## Qualified deployment boundary
+
+MLX and Open WebUI use separate, prefix-owned environments. The gateway stays in the pinned repository npm tree. Both authenticated HTTP processing and interactive saved-chat acceptance exercised the real WebUI filter/pipe, exact audit disclosure, gateway and local model. For gate requests, the boundary filter selects legacy function-calling mode to prevent WebUI 0.11.1 from adding implicit built-in tools; explicit tool/feature requests remain denied. The signed private-80B worker completed a bounded real lifecycle with provider-confirmed deletion. The independent launchd janitor swept successfully before allocation and after restart. These checks do not claim an interactive WebUI GPU conversation or a full logout/reboot test.

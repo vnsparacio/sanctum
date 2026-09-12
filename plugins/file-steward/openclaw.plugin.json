@@ -1,0 +1,9 @@
+{
+  "id":"file-steward",
+  "name":"File Steward",
+  "description":"Narrow local file inventory and approval-gated organization through a deterministic broker.",
+  "version":"0.1.1",
+  "activation":{"onStartup":true},
+  "contracts":{"tools":["steward_list","steward_inspect","steward_create_folder","steward_move","steward_rename","steward_undo_last"]},
+  "configSchema":{"type":"object","additionalProperties":false,"properties":{}}
+}

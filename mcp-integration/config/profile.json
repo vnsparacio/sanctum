@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "id": "vinceai",
+  "name": "Sanctum",
+  "servers": [
+    {
+      "type": "image",
+      "secrets": "default",
+      "tools": [
+        "get_current_time"
+      ],
+      "image": "mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf",
+      "catalogRef": "vinceai-approved:20260907",
+      "snapshot": {
+        "server": {
+          "name": "time",
+          "type": "server",
+          "image": "mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf",
+          "description": "Time and timezone conversion capabilities.",
+          "title": "Time (Reference)",
+          "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+          "readme": "https://desktop.docker.com/mcp/catalog/v3/readme/time.md",
+          "remote": {},
+          "tools": [
+            {
+              "name": "convert_time",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            },
+            {
+              "name": "get_current_time",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            }
+          ],
+          "metadata": {
+            "pulls": 926448,
+            "stars": 9,
+            "githubStars": 90123,
+            "category": "devops",
+            "tags": [
+              "time",
+              "devops"
+            ],
+            "license": "Other",
+            "owner": "modelcontextprotocol"
+          },
+          "disableNetwork": true
+        }
+      }
+    },
+    {
+      "type": "remote",
+      "secrets": "default",
+      "tools": [
+        "hub_repo_search"
+      ],
+      "endpoint": "https://huggingface.co/mcp",
+      "catalogRef": "vinceai-approved:20260907",
+      "snapshot": {
+        "server": {
+          "name": "hugging-face",
+          "type": "remote",
+          "image": "",
+          "description": "Tools for interacting with Hugging Face models, datasets, research papers, and more.",
+          "title": "Hugging Face",
+          "icon": "https://www.google.com/s2/favicons?domain=hf.co&sz=64",
+          "readme": "https://desktop.docker.com/mcp/catalog/v3/readme/hugging-face.md",
+          "remote": {
+            "url": "https://huggingface.co/mcp",
+            "transport_type": "streamable-http"
+          },
+          "tools": [
+            {
+              "name": "hf_whoami",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            },
+            {
+              "name": "hub_repo_search",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            },
+            {
+              "name": "hub_repo_details",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            },
+            {
+              "name": "hf_fs",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            }
+          ],
+          "metadata": {
+            "category": "ai",
+            "tags": [
+              "ai",
+              "machine-learning",
+              "models",
+              "remote"
+            ],
+            "license": "Apache License 2.0",
+            "owner": "docker"
+          }
+        }
+      }
+    },
+    {
+      "type": "image",
+      "image": "mcp/markitdown@sha256:9cb5f26d30b609a1d5560a090371cb9dba84fc32e7df10e5496aa22aa7b52658",
+      "snapshot": {
+        "server": {
+          "name": "markitdown",
+          "type": "server",
+          "image": "mcp/markitdown@sha256:9cb5f26d30b609a1d5560a090371cb9dba84fc32e7df10e5496aa22aa7b52658",
+          "description": "A lightweight MCP server for calling MarkItDown.",
+          "title": "Markitdown",
+          "icon": "https://avatars.githubusercontent.com/u/6154722?v=4",
+          "readme": "https://desktop.docker.com/mcp/catalog/v3/readme/markitdown.md",
+          "remote": {},
+          "volumes": [
+            "@MCP_INPUT@:/mcp-input:ro"
+          ],
+          "tools": [
+            {
+              "name": "convert_to_markdown",
+              "description": "",
+              "container": {
+                "image": "",
+                "command": null,
+                "volumes": null
+              },
+              "parameters": {
+                "type": "",
+                "properties": null,
+                "required": null
+              }
+            }
+          ],
+          "metadata": {
+            "pulls": 143565,
+            "stars": 5,
+            "githubStars": 179018,
+            "category": "productivity",
+            "tags": [
+              "productivity",
+              "markdown",
+              "conversion",
+              "pdf",
+              "docx",
+              "pptx",
+              "xlsx",
+              "html",
+              "audio",
+              "youtube"
+            ],
+            "license": "MIT License",
+            "owner": "microsoft"
+          },
+          "disableNetwork": true
+        }
+      },
+      "tools": [
+        "convert_to_markdown"
+      ],
+      "secrets": "default"
+    }
+  ],
+  "secrets": {
+    "default": {
+      "provider": "docker-desktop-store"
+    }
+  }
+}

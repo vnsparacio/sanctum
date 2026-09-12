@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+REAL="$(cd -- "$(dirname -- "$0")" && pwd)/imsg-read-core"
+
+if [[ "${1:-}" != "history" ]]; then
+  exec "$REAL" "$@"
+fi
+
+CHAT_ID="${2:-}"
+LIMIT="${3:-6}"
+
+[[ "$CHAT_ID" =~ ^[0-9]+$ ]] || {
+  echo "chat id must be numeric" >&2
+  exit 2
+}
+
+[[ "$LIMIT" =~ ^[0-9]+$ ]] || {
+  echo "limit must be numeric" >&2
+  exit 2
+}
+
+FETCH=$((LIMIT + 2))
+if (( FETCH > 12 )); then
+  FETCH=12
+fi
+
+"$REAL" history "$CHAT_ID" "$FETCH"   | jq -cs --argjson n "$LIMIT"       '[.[] | select((.text // "") | length > 0)][0:$n][]'

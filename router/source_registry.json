@@ -1,0 +1,35 @@
+{
+  "registry_version": "1.0",
+  "unknown_tool_source": "unknown",
+  "browser_default_source": "browser_private",
+  "browser_public_source": "browser_public",
+  "tool_sources": {
+    "read": "local_file",
+
+    "web_search": "public_web",
+    "web_fetch": "public_web",
+
+    "memory_search": "openclaw_memory",
+    "memory_get": "openclaw_memory",
+
+    "browser": "browser_private",
+
+    "messages_chats": "messages",
+    "messages_history": "messages",
+    "messages_search": "messages",
+
+    "gmail_search": "gmail",
+    "gmail_read": "gmail",
+
+    "save_local_markdown": "vinceai",
+
+    "steward_list": "file_steward",
+    "steward_inspect": "file_steward",
+    "steward_create_folder": "file_steward",
+    "steward_move": "file_steward",
+    "steward_rename": "file_steward",
+    "steward_undo_last": "file_steward",
+
+    "session_status": "system_status"
+  }
+}

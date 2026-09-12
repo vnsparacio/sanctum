@@ -1,0 +1,11 @@
+# Optional static MCP reference service. Normal host setup does not start it.
+services:
+  mcp-time:
+    profiles: [mcp]
+    image: mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf
+    stdin_open: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]

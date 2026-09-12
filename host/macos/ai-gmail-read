@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+STATE_DIR="${VINCEAI_CONFIG_DIR:-$HOME/.config/vinceai}/gmail-read"
+ACCOUNT_FILE="$STATE_DIR/account"
+GOG_HOME="${VINCEAI_GOOGLE_HOME:-$HOME/.local/share/vinceai/gog-readonly}"
+
+[[ -r "$ACCOUNT_FILE" ]] || { echo "gmail account not configured" >&2; exit 10; }
+ACCOUNT="$(cat "$ACCOUNT_FILE")"
+[[ "$ACCOUNT" == *@*.* ]] || { echo "invalid gmail account config" >&2; exit 10; }
+
+COMMON=(
+  --home "$GOG_HOME"
+  --account "$ACCOUNT"
+  --readonly
+  --gmail-no-send
+  --enable-commands-exact gmail.messages.search,gmail.get
+  --no-input
+  --wrap-untrusted
+  --json
+)
+
+case "${1:-}" in
+  search)
+    [[ "$#" -ge 2 && "$#" -le 3 ]] || { echo "usage: ai-gmail-read search <query> [limit]" >&2; exit 2; }
+    QUERY="$2"
+    LIMIT="${3:-6}"
+    [[ -n "$QUERY" && ${#QUERY} -le 300 ]] || { echo "query must be 1..300 characters" >&2; exit 2; }
+    [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 8 )) || { echo "limit must be 1..8" >&2; exit 2; }
+    set +e
+    OUT="$(GOG_READONLY=1 GOG_GMAIL_NO_SEND=1 gog "${COMMON[@]}" gmail messages search "$QUERY" --max "$LIMIT" --results-only 2> >(cat >&2))"
+    RC=$?
+    set -e
+    if [[ "$RC" -eq 3 ]]; then
+      printf '%s\n' '{"empty":true,"messages":[]}'
+      exit 0
+    fi
+    [[ "$RC" -eq 0 ]] || exit "$RC"
+    printf '%s\n' "$OUT"
+    ;;
+
+  read)
+    [[ "$#" -eq 2 ]] || { echo "usage: ai-gmail-read read <message-id>" >&2; exit 2; }
+    ID="$2"
+    [[ "$ID" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { echo "invalid message id" >&2; exit 2; }
+    GOG_READONLY=1 GOG_GMAIL_NO_SEND=1 gog "${COMMON[@]}" gmail get "$ID" --sanitize-content --results-only
+    ;;
+
+  *)
+    echo "allowed operations: search, read" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,36 @@
+{
+  "id": "calendar-read-tools",
+  "name": "Calendar Read Tools",
+  "description": "Read-only Google Calendar tools over a fixed local broker. Calendar content is untrusted data. No event mutation or RSVP authority exists.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "calendar_calendars",
+      "calendar_events",
+      "calendar_search",
+      "calendar_event"
+    ]
+  },
+  "toolMetadata": {
+    "calendar_calendars": {
+      "optional": true
+    },
+    "calendar_events": {
+      "optional": true
+    },
+    "calendar_search": {
+      "optional": true
+    },
+    "calendar_event": {
+      "optional": true
+    }
+  }
+}

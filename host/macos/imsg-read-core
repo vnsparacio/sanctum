@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMSG="${VINCEAI_IMSG_BIN:-$(command -v imsg)}"
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 64
+}
+
+require_uint() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "expected a non-negative integer"
+}
+
+bounded_limit() {
+  local requested="$1"
+  local maximum="$2"
+
+  require_uint "$requested"
+
+  if (( requested < 1 )); then
+    die "limit must be at least 1"
+  fi
+
+  if (( requested > maximum )); then
+    echo "$maximum"
+  else
+    echo "$requested"
+  fi
+}
+
+[[ -x "$IMSG" ]] || die "imsg not found at $IMSG"
+
+COMMAND="${1:-}"
+
+case "$COMMAND" in
+
+  chats)
+    # Usage:
+    #   ai-imsg-read chats [limit]
+    #
+    # Hard maximum: 10 conversations.
+    LIMIT="$(bounded_limit "${2:-5}" 10)"
+
+    [[ $# -le 2 ]] || die "usage: ai-imsg-read chats [limit]"
+
+    exec "$IMSG" chats \
+      --limit "$LIMIT" \
+      --json
+    ;;
+
+  history)
+    # Usage:
+    #   ai-imsg-read history <chat-id> [limit]
+    #
+    # No attachment access.
+    # Hard maximum: 12 messages.
+    CHAT_ID="${2:-}"
+    [[ -n "$CHAT_ID" ]] || die "usage: ai-imsg-read history <chat-id> [limit]"
+    require_uint "$CHAT_ID"
+
+    LIMIT="$(bounded_limit "${3:-6}" 12)"
+
+    [[ $# -le 3 ]] || die "usage: ai-imsg-read history <chat-id> [limit]"
+
+    exec "$IMSG" history \
+      --chat-id "$CHAT_ID" \
+      --limit "$LIMIT" \
+      --json
+    ;;
+
+  search)
+    # Usage:
+    #   ai-imsg-read search <query> [limit]
+    #
+    # Searches all local Messages history.
+    # Fixed to 'contains' matching.
+    # Hard maximum: 8 results.
+    QUERY="${2:-}"
+    [[ -n "$QUERY" ]] || die "usage: ai-imsg-read search <query> [limit]"
+
+    if (( ${#QUERY} > 200 )); then
+      die "search query exceeds 200 characters"
+    fi
+
+    LIMIT="$(bounded_limit "${3:-5}" 8)"
+
+    [[ $# -le 3 ]] || die "usage: ai-imsg-read search <query> [limit]"
+
+    exec "$IMSG" search \
+      --query "$QUERY" \
+      --match contains \
+      --limit "$LIMIT" \
+      --json
+    ;;
+
+  *)
+    die "permitted commands: chats, history, search"
+    ;;
+esac

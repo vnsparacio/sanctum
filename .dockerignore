@@ -1,0 +1,17 @@
+node_modules/
+.venv/
+.local/
+state/
+logs/
+__pycache__/
+*.pyc
+**/dist/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite*
+*.key
+*.pem
+*.log
+.DS_Store

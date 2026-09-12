@@ -1,0 +1,133 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+umask 077
+
+GOG_HOME="${VINCEAI_GOOGLE_HOME:-$HOME/.local/share/vinceai/gog-readonly}"
+ACCOUNT_FILE="${VINCEAI_CONFIG_DIR:-$HOME/.config/vinceai}/calendar-read/account"
+ALLOW="schema,calendar.calendars,calendar.events,calendar.event"
+
+[ -f "$ACCOUNT_FILE" ] || {
+  printf '{"ok":false,"error":"calendar account state missing"}\n' >&2
+  exit 2
+}
+
+ACCOUNT="$(tr -d '\r\n' < "$ACCOUNT_FILE")"
+[ -n "$ACCOUNT" ] || {
+  printf '{"ok":false,"error":"calendar account state empty"}\n' >&2
+  exit 2
+}
+
+export GOG_HOME
+export GOG_READONLY=1
+export GOG_GMAIL_NO_SEND=1
+
+base=(
+  gog
+  --home "$GOG_HOME"
+  --account "$ACCOUNT"
+  --readonly
+  --gmail-no-send
+  --no-input
+  --enable-commands-exact "$ALLOW"
+  --json
+  --results-only
+)
+
+is_uint() {
+  case "${1:-}" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+bounded_uint() {
+  val="${1:-}"
+  min="$2"
+  max="$3"
+  is_uint "$val" || return 1
+  [ "$val" -ge "$min" ] && [ "$val" -le "$max" ]
+}
+
+safe_text() {
+  value="${1:-}"
+  max="$2"
+  [ "${#value}" -le "$max" ] || return 1
+  case "$value" in
+    *$'\n'*|*$'\r'*) return 1 ;;
+  esac
+  return 0
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  calendars)
+    limit="${1:-20}"
+    bounded_uint "$limit" 1 30 || {
+      printf '{"ok":false,"error":"limit must be 1..30"}\n' >&2
+      exit 2
+    }
+    exec "${base[@]}" calendar calendars --max "$limit"
+    ;;
+
+  events)
+    calendar="${1:-all}"
+    from="${2:-today}"
+    to="${3:--}"
+    days="${4:-1}"
+    limit="${5:-12}"
+    query="${6:--}"
+
+    safe_text "$calendar" 200 || exit 2
+    safe_text "$from" 80 || exit 2
+    safe_text "$to" 80 || exit 2
+    safe_text "$query" 200 || exit 2
+    bounded_uint "$days" 1 365 || exit 2
+    bounded_uint "$limit" 1 20 || exit 2
+
+    args=(calendar events)
+    if [ "$calendar" = "all" ] || [ "$calendar" = "-" ] || [ -z "$calendar" ]; then
+      args+=(--all)
+    else
+      args+=(--cal "$calendar")
+    fi
+
+    if [ "$from" != "-" ] && [ -n "$from" ]; then
+      args+=(--from "$from")
+    fi
+    if [ "$to" != "-" ] && [ -n "$to" ]; then
+      args+=(--to "$to")
+    else
+      args+=(--days "$days")
+    fi
+    if [ "$query" != "-" ] && [ -n "$query" ]; then
+      args+=(--query "$query")
+    fi
+
+    args+=(--max "$limit" --sort start --timezone local)
+    exec "${base[@]}" "${args[@]}"
+    ;;
+
+  event)
+    calendar_id="${1:-}"
+    event_id="${2:-}"
+    [ -n "$calendar_id" ] && [ -n "$event_id" ] || {
+      printf '{"ok":false,"error":"calendar_id and event_id are required"}\n' >&2
+      exit 2
+    }
+    safe_text "$calendar_id" 300 || exit 2
+    safe_text "$event_id" 600 || exit 2
+
+    # Full event details may contain free-form description/location text.
+    # Keep gog's untrusted-content wrapping for this endpoint.
+    exec "${base[@]}" --wrap-untrusted \
+      calendar event "$calendar_id" "$event_id" --timezone local
+    ;;
+
+  *)
+    printf '{"ok":false,"error":"unsupported calendar read operation"}\n' >&2
+    exit 2
+    ;;
+esac

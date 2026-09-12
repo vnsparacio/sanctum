@@ -1,0 +1,24 @@
+{
+  "id": "local-markdown-tools",
+  "name": "Local Markdown Tools",
+  "description": "Create-only local Markdown notes and drafts inside fixed Sanctum folders. No arbitrary paths, overwrite, edit, delete, send, shell, or network authority.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "save_local_markdown"
+    ]
+  },
+  "toolMetadata": {
+    "save_local_markdown": {
+      "optional": true
+    }
+  }
+}

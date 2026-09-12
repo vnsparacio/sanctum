@@ -1,0 +1,14 @@
+{
+  "id": "browser-guard",
+  "name": "Browser Guard",
+  "description": "Restricts OpenClaw browser automation to an isolated profile and gates interactive actions.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "activation": {
+    "onStartup": true
+  }
+}

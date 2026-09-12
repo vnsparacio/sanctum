@@ -1,0 +1,69 @@
+{
+  "default_source_privacy": "PERSONAL",
+  "hosted_tiers": {
+    "HARD": "hosted_80b",
+    "VERY_HARD": "hosted_235b"
+  },
+  "local_tier": "local_4b",
+  "policy_version": "1.0",
+  "private_aws_tier": "private_large",
+  "restricted_tags": [
+    "credential",
+    "secret",
+    "authentication",
+    "financial_account",
+    "customer_confidential",
+    "work_confidential",
+    "health",
+    "legal_sensitive",
+    "precise_location",
+    "identity_sensitive"
+  ],
+  "routing_evidence": "qwen-real-use-benchmark-2026-09-04",
+  "routing_ladder": [
+    "local_4b",
+    "hosted_80b",
+    "hosted_235b"
+  ],
+  "source_privacy": {
+    "authentication": "RESTRICTED",
+    "browser_private": "PERSONAL",
+    "browser_public": "PUBLIC",
+    "credentials": "RESTRICTED",
+    "file_steward": "PERSONAL",
+    "gmail": "PERSONAL",
+    "local_file": "PERSONAL",
+    "messages": "PERSONAL",
+    "openclaw_memory": "PERSONAL",
+    "private_note": "PERSONAL",
+    "public_web": "PUBLIC",
+    "secrets": "RESTRICTED",
+    "system_status": "PERSONAL",
+    "unknown": "PERSONAL",
+    "user_input": "PERSONAL",
+    "user_public": "PUBLIC",
+    "vinceai": "PERSONAL"
+  },
+  "task_difficulty": {
+    "analyze": "HARD",
+    "architecture": "VERY_HARD",
+    "compare": "HARD",
+    "conversation": "EASY",
+    "debug": "HARD",
+    "deep_research": "VERY_HARD",
+    "draft": "EASY",
+    "extract": "EASY",
+    "high_value": "VERY_HARD",
+    "lookup": "EASY",
+    "plan": "HARD",
+    "research": "HARD",
+    "summarize": "EASY",
+    "synthesize": "HARD",
+    "tool_select": "EASY"
+  },
+  "thresholds": {
+    "hard_context_tokens": 12000,
+    "hard_source_count": 3,
+    "very_hard_context_tokens": 60000
+  }
+}

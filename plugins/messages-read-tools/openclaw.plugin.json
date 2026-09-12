@@ -1,0 +1,36 @@
+{
+  "id": "messages-read-tools",
+  "name": "Messages Read Tools",
+  "description": "Read-only access to a locally isolated Messages broker.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "messages_chats",
+      "messages_history",
+      "messages_contact_history",
+      "messages_search"
+    ]
+  },
+  "toolMetadata": {
+    "messages_chats": {
+      "optional": true
+    },
+    "messages_history": {
+      "optional": true
+    },
+    "messages_contact_history": {
+      "optional": true
+    },
+    "messages_search": {
+      "optional": true
+    }
+  }
+}

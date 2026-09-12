@@ -1,0 +1,8 @@
+{
+  "id": "hybrid-ai-prompt-gate",
+  "name": "Mac prompt gate",
+  "description": "Scoped owner Control UI command for classified reasoning with existing local-agent tool permissions",
+  "activation": {"onStartup": true},
+  "commandAliases": [{"name": "gate", "kind": "runtime-slash"}],
+  "configSchema": {"type": "object", "additionalProperties": false}
+}
