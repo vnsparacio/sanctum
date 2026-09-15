@@ -15,6 +15,6 @@ The [complete rename audit](../SANCTUM-RENAME-AUDIT.md) records every original s
 | `vinceai-qwen80b`, Pod ownership prefixes, `/workspace/vinceai`, readiness markers | Model identity, allocation reconciliation, reuse and cleanup must continue to recognize the qualified worker. |
 | Keychain labels and legacy fallback paths containing VinceAI/vinceai | Renaming cannot migrate credentials or personal data implicitly. Prefix-owned deployments explicitly configure private locations. |
 | Telemetry schema, verification symbol/idempotency keys | Preserve compatibility with captured records and one-use verification logic. |
-| `gate/install.py`, old service labels in migration examples | Historical reference-deployment migration material. Fresh installations use `scripts/operator.py`; publishing does not run legacy migration. |
+| `gate/install.py`, old service labels in migration examples | Historical reference-deployment migration material. Fresh installations use `scripts/release_operator.py`; publishing does not run legacy migration. |
 
 New setup generates `org.sanctum.<prefix-hash>.gpu-janitor`. Existing private prefixes remain unchanged and keep their receipts. Configure a fresh prefix for the published release; do not reseal old deployment state to hide drift. Newly created source archives and npm package names use Sanctum.

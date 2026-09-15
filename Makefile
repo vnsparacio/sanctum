@@ -9,7 +9,7 @@ deps:
 build:
 	$(PYTHON) -B scripts/build.py
 setup doctor up status logs down uninstall:
-	$(PYTHON) -B scripts/operator.py $@ --prefix "$(PREFIX)"
+	$(PYTHON) -B scripts/release_operator.py $@ --prefix "$(PREFIX)"
 test:
 	$(PYTHON) -B scripts/test.py
 audit:

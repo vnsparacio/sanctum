@@ -17,6 +17,7 @@ def capacity_rejected(args, error):
 class Runpod:
     def __init__(self, settings):
         self.settings = settings; self.gpu = settings['gpu']
+        if type(self.gpu['local_port']) is not int or not 1024 <= self.gpu['local_port'] <= 65535: raise Refused('private_port_invalid')
         self.cli = BASE / 'runtime/runpodctl'
         self.pin = strict_json((BASE / 'runtime/RUNPODCTL.json').read_text())
 
@@ -125,7 +126,7 @@ class Runpod:
         r = subprocess.run(args + ['-S', socket, '-O', 'check', 'root@' + host], capture_output=True, timeout=10)
         if r.returncode == 0: return
         Path(socket).unlink(missing_ok=True)
-        args += ['-M', '-S', socket, '-f', '-N', '-L', '127.0.0.1:18000:127.0.0.1:8000', '-o', 'ExitOnForwardFailure=yes', 'root@' + host]
+        args += ['-M', '-S', socket, '-f', '-N', '-L', f"127.0.0.1:{self.gpu['local_port']}:127.0.0.1:8000", '-o', 'ExitOnForwardFailure=yes', 'root@' + host]
         r = subprocess.run(args, capture_output=True, timeout=20)
         if r.returncode: raise Refused('tunnel_failed')
 

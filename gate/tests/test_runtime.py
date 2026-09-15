@@ -317,3 +317,22 @@ class Installer(Temp):
         self.assertTrue(self.launch.exists())
 
 if __name__=='__main__':unittest.main()
+
+class IsolatedTunnel(Temp):
+    def test_private_backend_and_ssh_use_the_same_loopback_port(self):
+        from runpod import Runpod
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        self.s['gpu']['local_port']=28001
+        self.assertEqual(Private80BBackend(self.s).url,'http://127.0.0.1:28001/v1')
+        provider=Runpod(self.s)
+        with patch.object(provider,'socket_path',return_value=str(self.root/'test.sock')), patch.object(provider,'ssh_args',return_value=['ssh']), patch('runpod.subprocess.run',side_effect=[SimpleNamespace(returncode=1),SimpleNamespace(returncode=0)]) as run:
+            provider.tunnel('synthetic-pod','192.0.2.1',22)
+        args=run.call_args.args[0]
+        self.assertEqual(args[args.index('-L')+1],'127.0.0.1:28001:127.0.0.1:8000')
+    def test_invalid_tunnel_port_never_reaches_a_transport(self):
+        from runpod import Runpod
+        for value in [True,0,80,65536,'28001']:
+            self.s['gpu']['local_port']=value
+            with self.assertRaises(Refused):Private80BBackend(self.s)
+            with self.assertRaises(Refused):Runpod(self.s)
