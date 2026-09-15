@@ -4,7 +4,7 @@ PREFIX ?= $(CURDIR)/.local
 
 deps:
 	npm ci --ignore-scripts
-	uv venv --python 3.12 .venv
+	uv venv --python 3.12 --allow-existing .venv
 	uv pip install --python .venv/bin/python -r gate/runtime/requirements.txt
 build:
 	$(PYTHON) -B scripts/build.py

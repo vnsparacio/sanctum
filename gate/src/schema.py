@@ -3,6 +3,7 @@ from common import Refused
 
 TIERS = ['LOCAL_4B', 'PRIVATE_80B', 'HOSTED_235B', 'MULTIMODAL', 'OPENAI_FRONTIER']
 REASONS = ['ROUTINE_LANGUAGE', 'CODE_DATA_ANALYSIS', 'TECHNICAL_DEBUGGING', 'MULTISTEP_NUMERIC', 'STRUCTURED_SCHEMA', 'COMPLEX_SYNTHESIS', 'VISUAL_UNDERSTANDING', 'FRONTIER_REQUIRED']
+SOURCE_REASONS = ['CURRENT_OR_CHANGING', 'TECHNICAL_DOCUMENTATION', 'PRODUCT_OR_MODEL_CAPABILITY', 'PRICE_OR_AVAILABILITY', 'LAW_OR_REGULATION', 'CURRENT_ENTITY', 'CURRENT_EVENT', 'RECENT_RESEARCH', 'TRAVEL', 'CURRENT_RECOMMENDATION', 'NICHE_OR_EXTERNALLY_VERIFIABLE', 'SUPPLIED_EVIDENCE_ADEQUATE', 'TRANSFORMATION_ONLY', 'DETERMINISTIC_OR_SELF_CONTAINED']
 def enum(values): return {'type': 'string', 'enum': values}
 def obj(properties): return {'type': 'object', 'properties': properties, 'required': list(properties), 'additionalProperties': False}
 def array(values): return {'type': 'array', 'items': enum(values)}
@@ -14,6 +15,7 @@ SCHEMA = obj({
     'request_role': enum(['explanation', 'transformation', 'personalized_recommendation', 'decision_support', 'proposed_execution', 'other_unknown']),
     'uncertainty': array(['ambiguity', 'missing_context', 'unsupported_input', 'inference_failure', 'weak_training_support', 'conflicting_heads']),
     'quality': obj({'recommended_tier': enum(TIERS), 'reason_codes': array(REASONS)}),
+    'source_need': obj({'classification': enum(['NONE','WEB_HELPFUL','WEB_REQUIRED']), 'reason_codes': array(SOURCE_REASONS)}),
     'context_need': obj({
         'classification': obj({'attachments': enum(['NONE', 'HELPFUL', 'REQUIRED']), 'prior_context': enum(['NONE', 'REQUIRED'])}),
         'answer': obj({'attachments': enum(['NONE', 'HELPFUL', 'REQUIRED']), 'prior_context': enum(['NONE', 'REQUIRED'])})}),
@@ -38,4 +40,8 @@ def validate(value, schema=SCHEMA):
         if value['urgency'] == 'PRESENT' and value['stakes'] == 'NORMAL': raise Refused('contradictory_targets')
         needs = value['context_need']['classification']
         if 'REQUIRED' in needs.values() and not unknown: raise Refused('missing_context_not_unknown')
+        source=value['source_need']; reasons=set(source['reason_codes'])
+        if source['classification']=='NONE' and (not reasons or reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_none')
+        if source['classification']=='WEB_HELPFUL' and not (reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_helpful')
+        if source['classification']=='WEB_REQUIRED' and not (reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_required')
     return value

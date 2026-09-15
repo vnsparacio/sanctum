@@ -3,6 +3,7 @@ from dataclasses import asdict
 from common import Refused, canonical
 from risk_policy import Request, State, Signal, TrustedFacts, compose
 from schema import validate
+from source_policy import decide
 
 
 def assess(packet, state, audit, strong=False):
@@ -30,4 +31,4 @@ def assess(packet, state, audit, strong=False):
         if packet['attachment_summary']['count'] and x['context_need']['answer']['attachments']=='REQUIRED' and route == 'LOCAL_4B': route = 'PRIVATE_80B'
         if route == 'LOCAL_4B' and set(x['quality']['reason_codes']) & {'CODE_DATA_ANALYSIS','TECHNICAL_DEBUGGING','MULTISTEP_NUMERIC','STRUCTURED_SCHEMA','COMPLEX_SYNTHESIS'}:
             route = 'PRIVATE_80B'
-    return {'status':'OK', 'state':asdict(s), 'handling':d.handling, 'urgency':x['urgency'], 'route':route, 'audit':x}
+    return {'status':'OK', 'state':asdict(s), 'handling':d.handling, 'urgency':x['urgency'], 'route':route, 'audit':x, 'source_decision':asdict(decide(packet,x))}

@@ -27,7 +27,7 @@ def settings(root):
     s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;return s
 
 def audit(tier='LOCAL_4B'):
-    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
+    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'source_need':{'classification':'NONE','reason_codes':['DETERMINISTIC_OR_SELF_CONTAINED']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
 
 def packet(): return {'scope':'a'*32,'revision':0,'prompt':'synthetic question','semantic_state':{'high_stakes':False,'privacy_floor':'PERSONAL'},'attachment_summary':{'count':0,'visual_count':0,'document_count':0,'video_count':0},'disclosed':{}}
 def state(): return {'scope':'a'*32,'revision':-1,'high_stakes':False,'privacy_floor':'PERSONAL','request_digest':''}
@@ -141,6 +141,11 @@ class Transport(Temp):
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
+    def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
+        sent=[];grounded={'kind':'GROUNDED_FINAL','text':'documented','grounding':'GROUNDED','citations':[{'sourceId':'s1','url':'https://example.test'}],'inferences':[],'missingReasons':[],'escalation':'NONE'}
+        def send(url,p,headers,**kw):sent.append(p);return chat(canonical(grounded),self.s['models']['HOSTED_235B'])
+        result=Remote(self.s,send,lambda:'test').infer('HOSTED_235B',{'prompt':'current','evidence':{'profile':'HOSTED_RICH'}},'grounded')
+        self.assertEqual(result['grounded'],grounded);self.assertEqual(sent[0]['response_format']['json_schema']['schema']['properties']['kind']['enum'],['GROUNDED_FINAL'])
 
 class FakeProvider:
     def ensure_guard(self):pass

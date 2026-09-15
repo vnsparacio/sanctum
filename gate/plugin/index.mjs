@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createGate,createExecutor } from './core.mjs';
 import { createLocalAgent } from './local-agent.mjs';
+import { createSourceRetrieval } from './source-retrieval.mjs';
+import { currentCapabilityManifest } from '../foundation/manifest.mjs';
 export default {
   id:'hybrid-ai-prompt-gate',name:'Mac privacy-first hybrid gate',
   register(api){
@@ -16,7 +18,15 @@ export default {
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});
-    const gate=createGate({settings,key,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal)});
+    const invokeWeb=async(name,args,proposal)=>{
+      const cfg=api.runtime.config.current(), gateway=cfg.gateway;
+      if(gateway?.bind!=='loopback'||gateway?.auth?.mode!=='token'||!gateway.auth.token)throw Error('source_runtime_unavailable');
+      const response=await fetch(`http://127.0.0.1:${gateway.port}/tools/invoke`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+gateway.auth.token},body:JSON.stringify({name,args,sessionKey:'agent:main:mac-source-'+proposal.requestId.slice(0,32)})});
+      const body=await response.json();if(!response.ok||body?.ok!==true)throw Error('source_tool_failed');
+      return body.result?.details??body.result;
+    };
+    let retrieval=null;
+    const gate=createGate({settings,key,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
     api.registerCommand({name:'gate',description:'Mac-owned hybrid reasoning with exact disclosure approvals',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:gate});
     // A separate launch agent also sweeps after gateway crashes. This timer makes
     // ordinary operation independent of UI polling.

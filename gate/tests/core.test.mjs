@@ -1,12 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute} from '../plugin/core.mjs';
+import {createEvidencePack} from '../foundation/evidence.mjs';
 const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url)));const key=Buffer.alloc(32,1);
 const audit=()=>({context_need:{classification:{attachments:'NONE',prior_context:'NONE'},answer:{attachments:'NONE',prior_context:'NONE'}}});
-function fixture(route='LOCAL_4B',custom){
+function fixture(route='LOCAL_4B',custom,retrieve=null){
   const calls=[];let now=1000000;
   const configured=structuredClone(settings);
-  const gate=createGate({settings:configured,key,now:()=>now,execute:async(b,signal)=>{
+  const gate=createGate({settings:configured,key,now:()=>now,retrieve,execute:async(b,signal)=>{
     calls.push(structuredClone(b));if(custom){const r=await custom(b,signal);if(r)return r;}
-    if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision,high_stakes:route==='OPENAI_FRONTIER'||b.state.high_stakes},route,handling:route==='OPENAI_FRONTIER'?'HIGH_STAKES':'NORMAL',urgency:'ABSENT',audit:audit()};
+    if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision,high_stakes:route==='OPENAI_FRONTIER'||b.state.high_stakes},route,handling:route==='OPENAI_FRONTIER'?'HIGH_STAKES':'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{need:'NONE'}};
     if(b.operation==='media')return {status:'OK',digest:'d'.repeat(64),summary:{count:1,visual_count:1,document_count:0,video_count:0}};
     if(['close','status','sweep'].includes(b.operation))return {status:'OK',gpu:{phase:'OFFLINE',leases:0}};
     return {status:'OK',text:'synthetic answer',escalation:'NONE'};
@@ -18,8 +19,29 @@ function fixture(route='LOCAL_4B',custom){
   return {gate,calls,send,approve,result,advance:n=>now+=n,settings:configured};
 }
 async function ask(f,text='test'){await f.send('new');return f.send('ask '+text);}
+const evidencePack=(need='WEB_REQUIRED',adequacy='ADEQUATE',request={})=>createEvidencePack({requestDigest:request.requestDigest??'c'.repeat(64),scope:request.scope??'a'.repeat(32),revision:request.revision??0,sourceNeed:need,reasonCodes:['CURRENT_OR_CHANGING'],items:adequacy==='ADEQUATE'?[{sourceId:'s1',url:'https://docs.example.test/a',finalUrl:'https://docs.example.test/a',title:'Official',sourceClass:'OFFICIAL_PRIMARY',publishedAt:null,retrievedAt:'2026-01-01T00:00:00Z',fetchStatus:'FETCHED',fragments:[{kind:'FETCHED_CONTENT',text:'Current documented fact.'}],truncated:false,untrusted:true,provenance:{capability:'web_fetch'}}]:[],adequacy,budget:adequacy==='ADEQUATE'?{candidates:1,fetched:1,chars:24}:{candidates:0,fetched:0,chars:0}});
+const sourcedClassification=(b,route='LOCAL_4B',need='WEB_REQUIRED')=>({status:'OK',state:{...b.state,revision:b.packet.revision},route,handling:'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{schema:'sanctum-source/v1',authority:'MAC_POLICY',need,reason_codes:['CURRENT_OR_CHANGING'],query_mode:'PUBLIC_GENERALIZED',request_digest:'c'.repeat(64),scope:b.packet.scope,revision:b.packet.revision,query:{query:'current documented fact'}}});
 test('authentication required; document text cannot approve',async()=>{const f=fixture();await f.send('new',{isAuthorizedSender:false});assert.equal(f.calls.length,0);assert.match((await f.send('ask text')).text,/Start with/);});
 test('nothing disclosed before approval; local agent remains NORMAL default',async()=>{const f=fixture();const p=await ask(f);assert.equal(f.calls.length,0);const r=await f.result(await f.approve(p.text));assert.match(r.text,/LOCAL_4B/);assert.deepEqual(f.calls.map(x=>x.operation),['classify','answer_local']);});
+test('NONE does not invoke Source-First retrieval',async()=>{let retrievals=0;const f=fixture('LOCAL_4B',null,async()=>{retrievals++;});await f.result(await f.approve((await ask(f,'rewrite this')).text));assert.equal(retrievals,0);});
+test('WEB_REQUIRED uses profiled fetched evidence and host-validates citations',async()=>{
+ let retrievals=0;const f=fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Documented.',grounding:'GROUNDED',citations:[{sourceId:'s1',url:'https://docs.example.test/a'}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>{retrievals++;return evidencePack('WEB_REQUIRED','ADEQUATE',request);});
+ const r=await f.result(await f.approve((await ask(f,'current fact')).text));assert.equal(retrievals,1);assert.match(r.text,/Sources:\n\[s1\]/);const request=f.calls.find(x=>x.operation==='answer_local').request.messages[0].content;assert.match(request,/LOCAL_COMPACT/);assert.doesNotMatch(request,/evidence_pack/);
+});
+test('WEB_REQUIRED blocks inadequate evidence and fabricated citations',async()=>{
+ let answers=0;const inadequate=fixture('LOCAL_4B',async b=>{if(b.operation==='classify')return sourcedClassification(b);if(b.operation==='answer_local')answers++;},async request=>evidencePack('WEB_REQUIRED','INADEQUATE',request));
+ let r=await inadequate.result(await inadequate.approve((await ask(inadequate,'current fact')).text));assert.match(r.text,/adequate fetched evidence was unavailable/);assert.equal(answers,0);
+ const fabricated=fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Made up.',grounding:'GROUNDED',citations:[{sourceId:'s9',url:'https://fake.example.test'}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>evidencePack('WEB_REQUIRED','ADEQUATE',request));
+ r=await fabricated.result(await fabricated.approve((await ask(fabricated,'current fact')).text));assert.match(r.text,/grounding validation failed/);assert.doesNotMatch(r.text,/Made up/);
+});
+test('WEB_HELPFUL denied private query continues with explicit partial grounding',async()=>{
+ const f=fixture('LOCAL_4B',async b=>{if(b.operation==='classify'){const r=sourcedClassification(b,'LOCAL_4B','WEB_HELPFUL');r.source_decision.query_mode='EXACT_APPROVAL_REQUIRED';r.source_decision.query={query:''};return r;}if(b.operation==='answer_local')return {status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'A general answer with no web claim.',grounding:'PARTIAL',citations:[],inferences:[],missingReasons:['QUERY_APPROVAL_REQUIRED'],escalation:'NONE'})};},async request=>evidencePack('WEB_HELPFUL','PARTIAL',request));
+ const r=await f.result(await f.approve((await ask(f,'private optional context')).text));assert.match(r.text,/general answer/);assert.doesNotMatch(r.text,/Sources:/);
+});
+test('hosted reasoner receives only its evidence profile under exact answer approval',async()=>{
+ const f=fixture('HOSTED_235B',async b=>b.operation==='classify'?sourcedClassification(b,'HOSTED_235B'):b.operation==='infer'?{status:'OK',text:'Hosted.',escalation:'NONE',grounded:{kind:'GROUNDED_FINAL',text:'Hosted.',grounding:'GROUNDED',citations:[{sourceId:'s1',url:'https://docs.example.test/a'}],inferences:[],missingReasons:[],escalation:'NONE'}}:null,async request=>evidencePack('WEB_REQUIRED','ADEQUATE',request));
+ let r=await f.result(await f.approve((await ask(f,'current hosted fact')).text));assert.match(r.text,/bounded public Source-First evidence/);r=await f.result(await f.approve(r.text));assert.match(r.text,/HOSTED_235B/);const infer=f.calls.find(x=>x.operation==='infer');assert.equal(infer.packet.evidence.profile,'HOSTED_RICH');assert.equal(infer.approval,'exact_disclosure');
+});
 test('audit receives latest prompt only across turns',async()=>{const f=fixture();await f.result(await f.approve((await ask(f,'first private fact')).text));const p=await f.send('ask second question');await f.result(await f.approve(p.text));const b=f.calls.filter(x=>x.operation==='classify').at(-1);assert.equal(b.packet.prompt,'second question');assert.doesNotMatch(JSON.stringify(b.packet),/first private|synthetic answer|history/);});
 test('235 option requires fresh separate disclosure approval',async()=>{const f=fixture();await f.send('new');const p=await f.send('ask-235 test');const r=await f.result(await f.approve(p.text));assert.match(r.text,/Qwen 235B/);assert.equal(f.calls.length,1);await f.result(await f.approve(r.text));assert.equal(f.calls.at(-1).tier,'HOSTED_235B');});
 test('frontier is OpenAI and never Gemini answering',async()=>{const f=fixture('OPENAI_FRONTIER');const r=await f.result(await f.approve((await ask(f)).text));assert.match(r.text,/OpenAI frontier/);await f.result(await f.approve(r.text));assert.equal(f.calls.at(-1).tier,'OPENAI_FRONTIER');});

@@ -15,3 +15,9 @@ export function validateAuditEvent(value){
   const exact=Object.keys(value??{}).sort().join(',')==='capability,correlation,dataClass,destinationClass,durationBucket,outcome,phase,reasonCodes,schema';
   return exact&&isRecord(value)&&value.schema==='sanctum-audit/v1'&&phases.has(value.phase)&&capabilityName(value.capability)&&/^[a-f0-9]{64}$/.test(value.correlation)&&Array.isArray(value.reasonCodes)&&value.reasonCodes.every(code)&&outcomes.has(value.outcome)&&DATA_CLASSES.includes(value.dataClass)&&destinations.has(value.destinationClass)&&durations.has(value.durationBucket);
 }
+
+export function sourceEvent({correlation,sourceNeed,reasonCodes=[],queryClass,retrieval='NOT_ATTEMPTED',candidateBucket='ZERO',fetchedBucket='ZERO',evidenceBucket='ZERO',grounding='NOT_APPLICABLE',outcome='UNKNOWN'}={}){
+ const values={sourceNeed:new Set(['NONE','WEB_HELPFUL','WEB_REQUIRED']),queryClass:new Set(['NONE','PUBLIC_GENERALIZED','EXACT_APPROVED','DENIED']),retrieval:new Set(['NOT_ATTEMPTED','ATTEMPTED','SUCCEEDED','FAILED']),candidateBucket:new Set(['ZERO','ONE','TWO_TO_THREE','FOUR_TO_SIX']),fetchedBucket:new Set(['ZERO','ONE','TWO_TO_THREE']),evidenceBucket:new Set(['ZERO','LT_1K','LT_6K','LT_12K','GTE_12K']),grounding:new Set(['GROUNDED','PARTIAL','INSUFFICIENT','NOT_APPLICABLE'])};
+ if(typeof correlation!=='string'||!values.sourceNeed.has(sourceNeed)||!values.queryClass.has(queryClass)||!values.retrieval.has(retrieval)||!values.candidateBucket.has(candidateBucket)||!values.fetchedBucket.has(fetchedBucket)||!values.evidenceBucket.has(evidenceBucket)||!values.grounding.has(grounding)||!outcomes.has(outcome)||!Array.isArray(reasonCodes)||!reasonCodes.every(code))throw Error('source_event_shape');
+ return deepFreeze({schema:'sanctum-source-audit/v1',correlation:digest(correlation),sourceNeed,reasonCodes:[...reasonCodes],queryClass,retrieval,candidateBucket,fetchedBucket,evidenceBucket,grounding,outcome});
+}
