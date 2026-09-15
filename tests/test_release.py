@@ -1,7 +1,7 @@
 from pathlib import Path
 import importlib.util,json,os,tempfile,unittest,subprocess,sys
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('operator_tools',ROOT/'scripts/operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
+spec=importlib.util.spec_from_file_location('operator_tools',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 class Setup(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.prefix=Path(self.tmp.name).resolve()/'install'
@@ -68,6 +68,23 @@ class Amendments(unittest.TestCase):
   self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
 
 class Publication(unittest.TestCase):
+ def test_project_python_names_do_not_shadow_standard_library(self):
+  excluded={'.git','.venv','node_modules','build','dist','.local','__pycache__'}
+  collisions=[]
+  for path in ROOT.rglob('*.py'):
+   relative=path.relative_to(ROOT)
+   if not set(relative.parts)&excluded and path.stem in sys.stdlib_module_names:
+    collisions.append(str(relative))
+  self.assertEqual(collisions,[])
+
+ def test_script_directory_can_import_pathlib_in_isolated_startup(self):
+  result=subprocess.run(
+   [sys.executable,'-S','-B','-c','from pathlib import Path; print(Path.__name__)'],
+   cwd=ROOT/'scripts',capture_output=True,text=True,
+  )
+  self.assertEqual(result.returncode,0,result.stderr)
+  self.assertEqual(result.stdout.strip(),'Path')
+
  def test_finder_metadata_is_rejected(self):
   spec=importlib.util.spec_from_file_location('publication_audit',ROOT/'scripts/audit.py');audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
   with tempfile.TemporaryDirectory() as td:

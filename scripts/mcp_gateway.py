@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse,importlib.util,json,os,shutil,subprocess,sys
 ROOT=Path(__file__).resolve().parents[1]
-s=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/operator.py');op=importlib.util.module_from_spec(s);s.loader.exec_module(op)
+s=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(s);s.loader.exec_module(op)
 def signature(profile):
  return (profile.get('id'),profile.get('secrets'),[(v.get('secrets'),v.get('type'),v.get('image'),v.get('endpoint'),v.get('tools'),v.get('snapshot',{}).get('server',{})) for v in profile['servers']])
 def main():

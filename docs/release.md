@@ -21,7 +21,7 @@ If either is absent or private, stop and configure an approved public identity y
 from pathlib import Path
 import importlib.util, json, hashlib
 root = Path.cwd()
-spec = importlib.util.spec_from_file_location('op', root/'scripts/operator.py')
+spec = importlib.util.spec_from_file_location('op', root/'scripts/release_operator.py')
 op = importlib.util.module_from_spec(spec); spec.loader.exec_module(op)
 op.verify()
 manifest = json.loads((root/'SOURCE-MANIFEST.json').read_text())

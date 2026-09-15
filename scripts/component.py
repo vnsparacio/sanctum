@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse,os,shutil,subprocess,sys,json,urllib.request
 import importlib.util
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
+spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 p=argparse.ArgumentParser();p.add_argument('component',choices=['mlx','messages','gmail','calendar','markdown','files','webui']);p.add_argument('--prefix',type=Path,default=ROOT/'.local');p.add_argument('--health',action='store_true');p.add_argument('--cache-only',action='store_true');a=p.parse_args();prefix=a.prefix.absolute();op.verify();r=op.verify_install(prefix);env=op.environment(prefix)
 if a.health:
  if a.component not in ('mlx','webui'):raise SystemExit('Health probe is supported for mlx/webui only')

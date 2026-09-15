@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse, importlib.util, os, platform, subprocess
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('release_operator', ROOT/'scripts/operator.py')
+spec = importlib.util.spec_from_file_location('release_operator', ROOT/'scripts/release_operator.py')
 op = importlib.util.module_from_spec(spec); spec.loader.exec_module(op)
 
 def main():

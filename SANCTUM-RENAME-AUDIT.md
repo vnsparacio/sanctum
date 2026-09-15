@@ -170,12 +170,12 @@ Line numbers refer to the source before renaming. Rows may contain both public t
 | `scripts/build.py:7` | CURRENT MACHINE/CONFIG IDENTIFIER | Rename new temporary-directory and generated janitor-label prefixes; do not modify existing deployments. |
 | `scripts/component.py:17` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
 | `scripts/configure.py:32` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:58` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:64` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:65` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:73` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:74` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
-| `scripts/operator.py:76` | CURRENT MACHINE/CONFIG IDENTIFIER | Rename new temporary-directory and generated janitor-label prefixes; do not modify existing deployments. |
+| `scripts/release_operator.py:58` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
+| `scripts/release_operator.py:64` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
+| `scripts/release_operator.py:65` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
+| `scripts/release_operator.py:73` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
+| `scripts/release_operator.py:74` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
+| `scripts/release_operator.py:76` | CURRENT MACHINE/CONFIG IDENTIFIER | Rename new temporary-directory and generated janitor-label prefixes; do not modify existing deployments. |
 | `scripts/test.py:6` | CURRENT MACHINE/CONFIG IDENTIFIER | Rename new temporary-directory and generated janitor-label prefixes; do not modify existing deployments. |
 | `scripts/test.py:7` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |
 | `scripts/test.py:8` | CURRENT MACHINE/CONFIG IDENTIFIER | Preserve qualified environment, scope, model, resource ownership, keychain, fallback path or wire identity; document compatibility contract. |

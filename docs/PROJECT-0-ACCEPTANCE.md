@@ -21,7 +21,7 @@ Project 0 establishes Sanctum as the V1.1 development source and proves that its
 | `scripts/component.py` | `VALID_PROJECT_0_MIGRATION_TOOLING` | Honors a validated private notes destination while retaining the safe default. |
 | `scripts/configure.py` | `VALID_PROJECT_0_MIGRATION_TOOLING` | Adds rollback-protected notes, web, MCP and GPU-port amendments with bounded schemas. |
 | `scripts/mcp_gateway.py` | `VALID_PROJECT_0_MIGRATION_TOOLING` | Verifies a unique three-tool MCP profile and applies resource/network restrictions. |
-| `scripts/operator.py` | `VALID_PROJECT_0_FIX` | Gives the independent GPU janitor the explicit local identity needed for Keychain access. |
+| `scripts/release_operator.py` | `VALID_PROJECT_0_FIX` | Avoids shadowing Python's standard-library `operator` module and gives the independent GPU janitor the explicit local identity needed for Keychain access. |
 | `tests/test_release.py` | `VALID_PROJECT_0_FIX` | Tests publication exceptions, private amendments, refusal paths, rollback and MCP authority drift. |
 
 No change was classified `OUT_OF_SCOPE`, `PRIVATE_DATA_RISK`, or `UNKNOWN_REQUIRES_REVIEW`. The diff does not implement Source-First Web Answering, general private-80B tool parity, Work Mode, learned semantic routing, SkyPilot or a broad refactor.
@@ -29,7 +29,8 @@ No change was classified `OUT_OF_SCOPE`, `PRIVATE_DATA_RISK`, or `UNKNOWN_REQUIR
 ## Independent evidence
 
 - Git ancestry is a straight three-commit Project 0 sequence from qualified V1 commit `83a1edf02c097e75915bd1c4f233963fe26388b7`. Before normalization the remote had only `main` at that V1 commit; all Project 0 commits were local and reachable, with no unrelated commit at risk.
-- A fresh `git archive` contained no Git metadata or private runtime. From that archive, dependency bootstrap, canonical build, all 158 packaged tests, source audit, fresh setup and doctor passed. The dependency review still reports two documented moderate development advisories; no upgrade was used to hide them.
+- A fresh `git archive` contained no Git metadata or private runtime. From that archive, dependency bootstrap, canonical build, all 160 packaged tests, source audit, fresh setup and doctor passed. The dependency review still reports two documented moderate development advisories; no upgrade was used to hide them.
+- GitHub Actions exposed a Linux clean-start failure where `scripts/operator.py` shadowed Python's standard-library `operator` module. Renaming the entry point to `scripts/release_operator.py`, updating every reference and adding isolated-startup plus repository-wide basename regressions fixed the portability defect without changing runtime authority.
 - The audit scanned 183 pre-review source files with zero issues. A second scan compared actual candidate tokens, authority material, account/contact/root/resource bindings and provider credentials against all tracked source without exposing their values; it found no matches.
 - The private candidate passes doctor, local Qwen and WebUI health. All five read-only/local brokers answer their health endpoint. Existing receipts cover the actual calculator path, owner saved-chat gate, replay refusal, bounded public web, Browser Guard, personal read-only sources, File Steward, Markdown, MCP and hosted adapters without retaining personal payloads in source evidence.
 - Provider authentication was independently exercised. The provider reported zero Pods; the configured persistent volume exists in the expected datacenter and retains the required size. GPU autostart is false. The accepted single private-80B receipt records invalid-signature rejection, the expected answer, managed close, provider-confirmed zero compute and preserved storage. Expensive inference was not repeated.

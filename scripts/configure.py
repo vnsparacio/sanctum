@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse,hashlib,importlib.util,json,os,plistlib,re,subprocess,time
 ROOT=Path(__file__).resolve().parents[1]
-s=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/operator.py');op=importlib.util.module_from_spec(s);s.loader.exec_module(op)
+s=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(s);s.loader.exec_module(op)
 TOOLS={'messages':['messages_chats','messages_history','messages_search'],'gmail':['gmail_search','gmail_read'],'calendar':['calendar_calendars','calendar_events','calendar_event'],'markdown':['save_local_markdown'],'files':['steward_list','steward_inspect','steward_create_folder','steward_move','steward_rename','steward_undo_last'],'browser':['browser'],'web':['web_search','web_fetch'],'mcp':['vinceai__get_current_time','vinceai__convert_to_markdown','vinceai__hub_repo_search']}
 
 def active_janitor(prefix):
