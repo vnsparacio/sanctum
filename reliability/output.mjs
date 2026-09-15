@@ -1,4 +1,5 @@
 import {failure} from './runtime.mjs';
+import {createToolResultEnvelope} from '../gate/foundation/contracts.mjs';
 const LOCAL=new Set(['calc','date_math','unit_convert']);
 const OMIT=new Set(['tookMs','durationMs','requestId','request_id','debug','debugInfo','providerDebug']);
 const KEEP=new Set(['id','file_id','chat_id','message_id','event_id','calendar_id','calendarId','cursor','next_cursor','nextPageToken','source','policy','provenance','privacy','authority','approval','approvalId','code','url','uri']);
@@ -61,4 +62,12 @@ export function modelResult(name,result,options){
  const envelope=normalize(name,result,options);
  const media=(result?.content??[]).filter(x=>x.type!=='text');
  return {...result,isError:result?.isError===true||!envelope.ok,content:[{type:'text',text:JSON.stringify(envelope)},...media],details:envelope};
+}
+
+// Compatibility view for the shared foundation. `normalize` remains the
+// model-facing shape so existing tool prompts and source-grounding semantics do
+// not change while later reasoners receive a typed boundary.
+export function capabilityResultEnvelope(name,result,{capabilityDigest,executionState,resultOptions,repairRules=[],verifier='UNKNOWN',rollback='NONE'}={}){
+ const normalized=normalize(name,result,resultOptions);
+ return createToolResultEnvelope({capability:name,capabilityDigest,executionState:executionState??(normalized.ok?'COMPLETED':'COMPLETION_UNKNOWN'),result:normalized,provenance:normalized.source??name,dataClass:normalized.untrusted?'PERSONAL':'PUBLIC',untrusted:normalized.untrusted===true,truncated:normalized.truncated===true,repairRules,verifier,rollback});
 }

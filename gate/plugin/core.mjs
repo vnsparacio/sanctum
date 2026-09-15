@@ -1,11 +1,13 @@
 import { randomBytes, createHash, createHmac } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import {CONTRACT_VERSION,digest as contractDigest,egressMatches,validateEgressDecision} from '../foundation/contracts.mjs';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
 const TIERS=['LOCAL_4B','PRIVATE_80B','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER'];
 const ALIASES={local:'LOCAL_4B','4b':'LOCAL_4B','80b':'PRIVATE_80B','235b':'HOSTED_235B',vision:'MULTIMODAL',multimodal:'MULTIMODAL',frontier:'OPENAI_FRONTIER',openai:'OPENAI_FRONTIER'};
+const destinationFor=(settings,tier)=>({GEMINI_AUDIT:{kind:'REASONER',service:'google-vertex',model:'GEMINI_AUDIT'},PRIVATE_80B:{kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_80B'},HOSTED_235B:{kind:'REASONER',service:'google-vertex',model:'HOSTED_235B'},MULTIMODAL:{kind:'REASONER',service:settings.multimodal.transport==='local'?'loopback':'deepinfra',model:'MULTIMODAL'},OPENAI_FRONTIER:{kind:'REASONER',service:settings.frontier_transport==='openai'?'openai':'azure',model:'OPENAI_FRONTIER'}}[tier]);
 export function eligibleRoute(route,excluded,{highStakes=false,tools=false,visual=false}={}){
   if(!excluded.has(route))return route;
   if(highStakes||tools)throw Error('The required tier is excluded for this session. Re-include it to proceed; authority and risk rules are unchanged.');
@@ -56,13 +58,16 @@ export function createGate({settings,key,execute,now=()=>Date.now()}){
   function cancel(s){s.generation++;s.pending=null;s.abort?.abort();s.abort=null;s.busy=false;s.job=null;}
   function ticket(s,operation,tier,packet,after={}){
     const token=id(),serialized=JSON.stringify(packet);
-    s.pending={id:token,operation,tier,packet:structuredClone(packet),after:structuredClone(after),generation:s.generation,expires:now()+settings.approval_expiry_seconds*1000,digest:hash(serialized)};
+    const destination=destinationFor(settings,tier);
+    const egress={schema:CONTRACT_VERSION,outcome:'ASK',capability:'reasoner_inference',capabilityDigest:contractDigest({operation,tier}),requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation}),packetDigest:contractDigest(packet),scope:s.state.scope,revision:s.revision,dataClasses:['PERSONAL'],destination,purpose:operation==='classify'?'RISK_CLASSIFICATION':'ANSWER_GENERATION',expires:now()/1000+settings.approval_expiry_seconds,oneUse:true,approvalState:'PENDING',reasonCodes:['EXACT_OWNER_DISCLOSURE_REQUIRED']};
+    if(!validateEgressDecision(egress,now()/1000).ok)throw Error(FAIL);
+    s.pending={id:token,operation,tier,packet:structuredClone(packet),after:structuredClone(after),egress,generation:s.generation,expires:now()+settings.approval_expiry_seconds*1000,digest:hash(serialized)};
     const context=operation==='classify'?packet.disclosed??{}:packet;
     const extras=[context.history?'earlier gate messages (including any tool-derived information in their replies)':null,context.media_ref?'the selected local attachment snapshot':null].filter(Boolean);
-    const destination={GEMINI_AUDIT:'Gemini audit through OpenRouter / Google Vertex',PRIVATE_80B:'your private Runpod 80B',HOSTED_235B:'Qwen 235B through OpenRouter / Google Vertex',MULTIMODAL:settings.multimodal.transport==='local'?'local Qwen3-VL 30B':'Qwen3-VL 30B through OpenRouter / DeepInfra',OPENAI_FRONTIER:settings.frontier_transport==='openai'?'OpenAI API (ChatGPT model family; direct API retention policy)':'OpenAI frontier (GPT-6 Astra Pro) through OpenRouter / Azure'}[tier];
+    const displayDestination={GEMINI_AUDIT:'Gemini audit through OpenRouter / Google Vertex',PRIVATE_80B:'your private Runpod 80B',HOSTED_235B:'Qwen 235B through OpenRouter / Google Vertex',MULTIMODAL:settings.multimodal.transport==='local'?'local Qwen3-VL 30B':'Qwen3-VL 30B through OpenRouter / DeepInfra',OPENAI_FRONTIER:settings.frontier_transport==='openai'?'OpenAI API (ChatGPT model family; direct API retention policy)':'OpenAI frontier (GPT-6 Astra Pro) through OpenRouter / Azure'}[tier];
     const purpose=operation==='classify'?'assess risk, quality and context needs':'generate an answer';
     const cost=tier==='PRIVATE_80B'?` GPU cap $${settings.gpu.max_hourly_usd}/hour; ${settings.gpu.max_runtime_seconds/3600}-hour managed-Pod runtime limit. The final lease closes compute while preserving the cache volume.`:` Per-call budget cap $${settings.max_request_usd}.`;
-    return {text:`Approval needed: send the current prompt${extras.length?' plus '+extras.join(' and '):' only (no raw history, attachments or tool data)'} to ${destination} to ${purpose}.${cost} This grants no tool or action permission.\n\nPacket ${s.pending.digest.slice(0,12)} · expires in ${settings.approval_expiry_seconds/60} minutes.\nTo approve this exact disclosure once: /gate approve ${token}\nTo keep it local: /gate cancel`};
+    return {text:`Approval needed: send the current prompt${extras.length?' plus '+extras.join(' and '):' only (no raw history, attachments or tool data)'} to ${displayDestination} to ${purpose}.${cost} This grants no tool or action permission.\n\nPacket ${s.pending.digest.slice(0,12)} · expires in ${settings.approval_expiry_seconds/60} minutes.\nTo approve this exact disclosure once: /gate approve ${token}\nTo keep it local: /gate cancel`};
   }
   function packetFor(s){return {scope:s.state.scope,revision:s.revision,prompt:s.prompt,semantic_state:{high_stakes:s.state.high_stakes,privacy_floor:'PERSONAL'},attachment_summary:s.media?.summary??{count:0,visual_count:0,document_count:0,video_count:0},disclosed:{}};}
   function selected(s,needs){
@@ -196,6 +201,9 @@ export function createGate({settings,key,execute,now=()=>Date.now()}){
       const p=s.pending;
       if(!p||p.id!==args.slice(8).trim()||p.generation!==s.generation||now()>=p.expires||hash(JSON.stringify(p.packet))!==p.digest)return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};
       if(active>=4)return {text:'The gate is busy. Approval remains pending; try shortly.'};
+      const egress={...p.egress,outcome:'ALLOW_ONCE',approvalState:'CONSUMED'};
+      const claim={requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation:p.operation}),packetDigest:contractDigest(p.packet),scope:s.state.scope,revision:s.revision,capability:'reasoner_inference',capabilityDigest:contractDigest({operation:p.operation,tier:p.tier}),dataClasses:['PERSONAL'],purpose:p.operation==='classify'?'RISK_CLASSIFICATION':'ANSWER_GENERATION',destination:destinationFor(settings,p.tier)};
+      if(!egressMatches(egress,claim,now()/1000).ok)return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};
       s.pending=null;return launch(s,p.operation,p.tier,p.packet,p.after);
     }
     const match=args.match(/^(ask|ask-235|ask-strong)\s+([\s\S]+)$/);

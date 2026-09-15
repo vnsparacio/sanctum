@@ -1,6 +1,6 @@
 # Testing and evidence
 
-Default tests are synthetic and credential-free. `make test` covers the gate's Python/Node policy and lifecycle contracts, signed worker replay, media preparation, installer rollback boundaries, reliability validation/utilities/source semantics, MCP policy, plugin fixtures and new isolated setup boundaries.
+Default tests are synthetic and credential-free. `make test` covers the gate's Python/Node policy and lifecycle contracts, signed worker replay, media preparation, installer rollback boundaries, reliability validation/utilities/source semantics, capability contracts/manifest/egress/verifier semantics, MCP policy, plugin fixtures and new isolated setup boundaries.
 
 Historical installer tests now use synthetic prior-function bodies in temporary databases. They exercise compare-before-write and rollback semantics without requiring an earlier installed release. The historical upgrade adapter is disabled as a public command; new setup does not invoke it.
 
@@ -14,4 +14,4 @@ Keep live UI, MLX inference, optional source semantics, provider-policy checks, 
 
 ## Release qualification
 
-The suite now includes two additional packaging regressions: a fake model executable on PATH is never adopted, and an existing runtime is preserved by bootstrap. The configured-private-MCP-input and browser-session implicit-tool regressions bring the expected complete count to 151. The Sanctum publication-metadata regression adds one: 152 total (gate 93, reliability 29, MCP 8, packaging 11, plugins 11). Final executed counts and live evidence are recorded in [acceptance](acceptance.md). The [dependency exception](dependency-review.md) concerns Node test tooling only. Keep private test credentials, approval IDs, raw account data and runtime state out of source and CI.
+The Project 0 accepted suite contains 160 tests. Project 1 acceptance adds thirteen tests across the capability foundation, gate and local adapter. They cover observed registration/schema projection, unknown and duplicate capability drift, proposal authority exclusion, all authority outcomes, exact egress scope, destination mutation, tri-state verification, result/audit bounds, and local reasoner-adapter equivalence. The complete packaged count is 173. Final live Project 0 evidence remains recorded in [acceptance](acceptance.md); the Project 1 source review is in [Project 1 acceptance](PROJECT-1-ACCEPTANCE.md). The [dependency exception](dependency-review.md) concerns Node test tooling only. Keep private test credentials, approval IDs, raw account data and runtime state out of source and CI.

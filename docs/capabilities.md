@@ -6,6 +6,8 @@ The package supplies those sources and boundaries. The default isolated configur
 
 No messaging/email sending, calendar mutation, generic deletion, arbitrary shell or remote access to Mac tools is included. File move/rename/undo remain approval-gated. Bigger models can hallucinate and failed policy/long-context cases remain relevant.
 
+The capability manifest is a runtime projection, not an authority list: it separately records declaration, observed/pinned registration, captured-schema equality, configured exposure and implementation source. The build observes compiled Sanctum plugin registrations and rejects declaration or schema drift; pinned core/MCP/web adapters remain narrow reviewed exceptions. Runtime configuration can remove exposure but cannot create support for an unknown tool. Schema capture, plugin text or a model proposal never grants permission. A registered tool whose schema is missing is non-exposed and fails closed. The shared proposal/result contracts retain existing bounded repair, provenance, untrusted markers, result truncation and rollback behavior; they do not broaden any capability.
+
 Image downsampling limits OCR. Video support is sampled frames only, without audio or continuous coverage. PDFs are bounded text extraction. Large, encrypted or unsupported inputs may be refused. Context limits are explicit; V1 has no mature general RAG system.
 
 A restart can lose process-local gate jobs while GPU ownership remains durable. Closing a tab is not guaranteed to close a lease immediately. Provider/network/Mac outages can delay deletion and continue billing. Local-only operation, all-container deployment, universal factual accuracy and multi-tenant isolation are not promised.

@@ -3,7 +3,8 @@ const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.ur
 const audit=()=>({context_need:{classification:{attachments:'NONE',prior_context:'NONE'},answer:{attachments:'NONE',prior_context:'NONE'}}});
 function fixture(route='LOCAL_4B',custom){
   const calls=[];let now=1000000;
-  const gate=createGate({settings,key,now:()=>now,execute:async(b,signal)=>{
+  const configured=structuredClone(settings);
+  const gate=createGate({settings:configured,key,now:()=>now,execute:async(b,signal)=>{
     calls.push(structuredClone(b));if(custom){const r=await custom(b,signal);if(r)return r;}
     if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision,high_stakes:route==='OPENAI_FRONTIER'||b.state.high_stakes},route,handling:route==='OPENAI_FRONTIER'?'HIGH_STAKES':'NORMAL',urgency:'ABSENT',audit:audit()};
     if(b.operation==='media')return {status:'OK',digest:'d'.repeat(64),summary:{count:1,visual_count:1,document_count:0,video_count:0}};
@@ -14,7 +15,7 @@ function fixture(route='LOCAL_4B',custom){
   const send=(args,extra={})=>gate({...ctx,...extra,args});
   const approve=async text=>send('approve '+text.match(/\/gate approve ([a-f0-9]{32})/)[1]);
   const result=async job=>{const id=job.text.match(/job:([a-f0-9]{32})/)[1];for(let i=0;i<20;i++){await new Promise(r=>setImmediate(r));const r=await send('result '+id);if(!r.text.includes('[Mac gate job:'))return r;}throw Error('job not done');};
-  return {gate,calls,send,approve,result,advance:n=>now+=n};
+  return {gate,calls,send,approve,result,advance:n=>now+=n,settings:configured};
 }
 async function ask(f,text='test'){await f.send('new');return f.send('ask '+text);}
 test('authentication required; document text cannot approve',async()=>{const f=fixture();await f.send('new',{isAuthorizedSender:false});assert.equal(f.calls.length,0);assert.match((await f.send('ask text')).text,/Start with/);});
@@ -27,6 +28,7 @@ test('private auto grant scopes prompt only',async()=>{const f=fixture('PRIVATE_
 test('private80 is automatically eligible by default',async()=>{const f=fixture('PRIVATE_80B');const r=await f.result(await f.approve((await ask(f)).text));assert.match(r.text,/PRIVATE_80B/);assert.equal(f.calls.length,2);assert.equal(f.calls.at(-1).approval,'session_private_prompt');});
 test('replay expiry cross-session approval rejected',async()=>{const f=fixture();const p=await ask(f);const token=p.text.match(/\/gate approve ([a-f0-9]{32})/)[1];assert.match((await f.send('approve '+token,{sessionKey:'other'})).text,/Start with/);f.advance(300001);assert.match((await f.send('approve '+token)).text,/invalid/);assert.equal(f.calls.length,0);});
 test('approval used once',async()=>{const f=fixture();const p=await ask(f);await f.result(await f.approve(p.text));assert.match((await f.approve(p.text)).text,/invalid/);});
+test('destination policy change invalidates an already issued approval',async()=>{const f=fixture('OPENAI_FRONTIER');let p=await ask(f);let r=await f.result(await f.approve(p.text));assert.match(r.text,/OpenAI frontier/);f.settings.frontier_transport=f.settings.frontier_transport==='openai'?'openrouter':'openai';assert.match((await f.approve(r.text)).text,/invalid/);assert.equal(f.calls.length,1);});
 test('replacement cancels earlier ticket',async()=>{const f=fixture();const p=await ask(f);await f.send('ask replacement');assert.match((await f.approve(p.text)).text,/invalid/);});
 test('attachment contents do not enter initial audit; answering asks separately',async()=>{const f=fixture('MULTIMODAL');await f.send('new');await f.send('attach '+'a'.repeat(64));const r=await f.result(await f.approve((await f.send('ask describe the image')).text));const b=f.calls.find(x=>x.operation==='classify');assert.deepEqual(b.packet.disclosed,{});assert.doesNotMatch(JSON.stringify(b.packet),/media_ref|aaaa/);assert.match(r.text,/selected local attachment/);});
 test('required classification context produces second exact ticket',async()=>{let n=0;const f=fixture('MULTIMODAL',b=>{
