@@ -71,3 +71,16 @@ class Publication(unittest.TestCase):
   with tempfile.TemporaryDirectory() as td:
    base=Path(td);(base/'.DS_Store').write_bytes(b'\x00\x80metadata')
    self.assertIn(('.DS_Store','private/generated Finder metadata'),audit.scan(base))
+
+ def test_baseline_path_exception_is_limited_to_exact_declarations(self):
+  spec=importlib.util.spec_from_file_location('publication_audit',ROOT/'scripts/audit.py');audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
+  with tempfile.TemporaryDirectory() as td:
+   base=Path(td);(base/'docs').mkdir();p=base/'docs/V1.1-LIVE-BASELINE.md'
+   p.write_text('\n'.join(audit.BASELINE_DECLARATIONS))
+   self.assertEqual(audit.scan(base),[])
+   p.write_text(p.read_text()+'\n/Users/'+'example-owner/private/account')
+   self.assertIn(('docs/V1.1-LIVE-BASELINE.md','owner_home'),audit.scan(base))
+   p.write_text('prefix '+audit.BASELINE_DECLARATIONS[0])
+   self.assertIn(('docs/V1.1-LIVE-BASELINE.md','owner_home'),audit.scan(base))
+   p.write_text('\n'.join(audit.BASELINE_DECLARATIONS));(base/'other.md').write_text(audit.BASELINE_DECLARATIONS[0])
+   self.assertIn(('other.md','owner_home'),audit.scan(base))

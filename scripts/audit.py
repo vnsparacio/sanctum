@@ -8,7 +8,13 @@ def sources(root=ROOT):
  for base,dirs,files in os.walk(root,followlinks=False):
   dirs[:]=sorted(d for d in dirs if d not in SKIP)
   for n in sorted(files):yield Path(base)/n
-PATTERNS={'private_key':r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----','provider_key':r'\b(?:sk-[A-Za-z0-9_-]{24,}|ghp_[A-Za-z0-9]{30,}|AKIA[A-Z0-9]{16})\b','owner_home':r'/Users/(?!example(?:/|\b)|<)[a-zA-Z][a-zA-Z0-9_-]+/'}
+PATTERNS={'private_key':r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----','provider_key':r'\b(?:sk-[A-Za-z0-9_-]{24,}|ghp_[A-Za-z0-9]{30,}|AKIA[A-Z0-9]{16})\b','owner_home':r'/Users/(?!example(?:/|$)|<)[a-zA-Z][a-zA-Z0-9_-]+/'}
+# Exact public source-location declarations requested for the V1.1 baseline.
+# No directory-wide exemption: additional home bindings in the same file fail.
+BASELINE_DECLARATIONS = (
+ '`/Users/tter/Projects/sanctum` is the development source of truth.',
+ '`/Users/tter/Projects/hybrid-ai` is legacy reference/rollback only.',
+)
 def scan(root=ROOT):
  issues=[]
  for p in sources(root):
@@ -21,7 +27,10 @@ def scan(root=ROOT):
   text=p.read_text(errors='replace')
   if rel!='scripts/audit.py':
    for label,pattern in PATTERNS.items():
-    if re.search(pattern,text):issues.append((rel,label))
+    review_text=text
+    if label=='owner_home' and rel=='docs/V1.1-LIVE-BASELINE.md':
+     review_text='\n'.join(line for line in text.splitlines() if line not in BASELINE_DECLARATIONS)
+    if re.search(pattern,review_text):issues.append((rel,label))
  return issues
 
 def docs():

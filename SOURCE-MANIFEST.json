@@ -168,12 +168,14 @@
   "router/shadow_bridge_test.py": "c3bd2502fb44ffd6c9043f5cee9954cf069ca90000c9162e6fac10e2e5fce141",
   "router/source_registry.json": "b8d33d09aeb579ea884b26e0fedc7c4ced7375f5f5387eb273009d06fe6d9656",
   "router/test_cases.json": "4902d44cfc941472d4f8a347ad8b1d62340ebc3570f944712dcbfa3270660535",
-  "scripts/audit.py": "c8a962598bf9b8ba14823f001f701f0a7de3dfb308ddd450de8546b8a3bc164c",
+  "scripts/audit.py": "33440004b0de904780206115897eaba4a22e9d36f24fc3e731cfcd4da86c506d",
   "scripts/bootstrap.py": "2e167205be77d13d65e5bd68b0c1bea2090c65a804b3f9194b376dd816d29828",
   "scripts/build.py": "e2f3c55baad943c77cce7d1890c607c582069ae77e4b0132a430bf50fed4f9c6",
   "scripts/component.py": "5da31176202b5ca56d3ebeca1439eae80cb71986fd1c9258a5d64555a875d693",
   "scripts/configure.py": "904eac6de978d3c67f778ce2ceace1b31da04057ebf7d56b65c7eb2f37daa098",
   "scripts/operator.py": "0a12b90546c51fff4ad5dfb26e410b5a9653974c108ce525683a7cf13d2de7f2",
   "scripts/test.py": "00f6f5079946128b5afe9da6cb5309ba1b793a439fc418491556be4f10be2534",
-  "tests/test_release.py": "9e35e20b7b7c535333a47dfa5031832d5662f9838f450b145389e8f1cceed1bb"
+  "tests/test_release.py": "57bc4336caee63af8a39faddd218d46a37a587f6f1aa99f8308b5f4dd436f6f0",
+  "AGENTS.md": "36b406759d96e3d819c4bc016327d778c6f1bfb081fcd2d5985f1f0f8e586d99",
+  "docs/V1.1-LIVE-BASELINE.md": "be222d62b153ab0d282f45e6bdbad240cf5076cd2420408ef356609e086ec3ef"
 }
