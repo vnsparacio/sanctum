@@ -13,6 +13,8 @@ class Setup(unittest.TestCase):
   self.assertEqual((self.prefix/'state/gate/authority.key').stat().st_mode&0o777,0o600)
   self.assertEqual((self.prefix/'config/contacts.json').read_text(),'{}\n')
   self.assertEqual(op.environment(self.prefix)['VINCEAI_MCP_INPUT_DIR'],str(self.prefix/'mcp-input'))
+  import plistlib
+  self.assertEqual(plistlib.loads((self.prefix/'config/gpu-janitor.plist').read_bytes())['EnvironmentVariables']['USER'],os.environ.get('USER','vinceai'))
  def test_drift_refuses_without_overwrite(self):
   op.setup(self.prefix);p=self.prefix/'config/openclaw.json';p.write_text('{}');
   with self.assertRaises(ValueError):op.setup(self.prefix)
@@ -84,3 +86,28 @@ class Publication(unittest.TestCase):
    self.assertIn(('docs/V1.1-LIVE-BASELINE.md','owner_home'),audit.scan(base))
    p.write_text('\n'.join(audit.BASELINE_DECLARATIONS));(base/'other.md').write_text(audit.BASELINE_DECLARATIONS[0])
    self.assertIn(('other.md','owner_home'),audit.scan(base))
+
+class IntegrationAmendments(unittest.TestCase):
+ setUp=Setup.setUp
+ def module(self):
+  spec=importlib.util.spec_from_file_location('integration_config',ROOT/'scripts/configure.py');mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod);return mod
+ def test_isolated_mcp_notes_and_tunnel_rollback(self):
+  op.setup(self.prefix);before=(self.prefix/'receipt.json').read_bytes();notes=self.prefix.parent/'notes';notes.mkdir()
+  self.module().configure(self.prefix,{'integrations':['mcp'],'notes_dir':str(notes),'gpu':{'local_port':28001}})
+  op.verify_install(self.prefix);cfg=json.loads((self.prefix/'config/openclaw.json').read_text());server=cfg['mcp']['servers']['vinceai']
+  self.assertEqual(server['toolFilter']['include'],['get_current_time','convert_to_markdown','hub_repo_search'])
+  self.assertIn(str(self.prefix),server['args']);self.assertIn('exec',cfg['tools']['deny'])
+  self.assertTrue(json.loads((self.prefix/'config/mcp-profile.json').read_text())['id'].startswith('sanctum-'))
+  self.assertEqual(op.environment(self.prefix)['VINCEAI_NOTES_DIR'],str(notes));self.assertFalse(json.loads((self.prefix/'gate/SETTINGS.json').read_text())['gpu']['auto_start'])
+  self.module().rollback(self.prefix,next((self.prefix/'state/amendments').iterdir()));self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
+ def test_reject_source_symlink_and_overlapping_port_without_mutation(self):
+  op.setup(self.prefix);before=(self.prefix/'receipt.json').read_bytes();link=self.prefix.parent/'link';link.symlink_to(self.prefix)
+  for proposal in [{'notes_dir':str(ROOT)},{'notes_dir':str(link)},{'notes_dir':'relative'},{'gpu':{'local_port':True}},{'gpu':{'local_port':28080}},{'gpu':{'local_port':28000}},{'gpu':{'local_port':70000}},{'integrations':['mcp'],'command':'exec'}]:
+   with self.assertRaises(ValueError):self.module().configure(self.prefix,proposal)
+   self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
+ def test_mcp_profile_signature_covers_transport_mounts_and_tools(self):
+  spec=importlib.util.spec_from_file_location('mcp_gateway',ROOT/'scripts/mcp_gateway.py');mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+  base=json.loads((ROOT/'mcp-integration/config/profile.json').read_text())
+  for field,value in [('endpoint','https://example.com'),('tools',['unreviewed']),('image','unreviewed')]:
+   changed=json.loads(json.dumps(base));changed['servers'][0][field]=value;self.assertNotEqual(mod.signature(base),mod.signature(changed))
+  changed=json.loads(json.dumps(base));changed['servers'][2]['snapshot']['server']['volumes']=['/:/mcp-input'];self.assertNotEqual(mod.signature(base),mod.signature(changed))

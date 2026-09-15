@@ -118,7 +118,9 @@ class Remote:
 class Private80BBackend:
     def __init__(self, settings, send=http):
         self.settings, self.send = settings, send
-        self.url = 'http://127.0.0.1:18000/v1'
+        port = settings['gpu']['local_port']
+        if type(port) is not int or not 1024 <= port <= 65535: raise Refused('private_port_invalid')
+        self.url = f'http://127.0.0.1:{port}/v1'
         self.model = settings['gpu']['alias']
 
     def health_check(self, smoke=False):

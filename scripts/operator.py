@@ -74,7 +74,7 @@ def setup(prefix,gateway_port=28789,mlx_port=28080):
  env['VINCEAI_MCP_INPUT_DIR']=str(prefix/'mcp-input')
  write(prefix/'config/environment.json',json.dumps(env,indent=2)+'\n')
  label='org.sanctum.'+hashlib.sha256(str(prefix).encode()).hexdigest()[:12]+'.gpu-janitor'
- service={'Label':label,'ProgramArguments':[python,'-B',str(prefix/'gate/manage.py'),'sweep'],'RunAtLoad':True,'StartInterval':30,'ProcessType':'Background','EnvironmentVariables':env,'StandardOutPath':'/dev/null','StandardErrorPath':'/dev/null'}
+ service={'Label':label,'ProgramArguments':[python,'-B',str(prefix/'gate/manage.py'),'sweep'],'RunAtLoad':True,'StartInterval':30,'ProcessType':'Background','EnvironmentVariables':{**env,'USER':os.environ.get('USER','vinceai')},'StandardOutPath':'/dev/null','StandardErrorPath':'/dev/null'}
  write(prefix/'config/gpu-janitor.plist',plistlib.dumps(service).decode())
  # Freeze only the newly rendered candidate, after source/build verification.
  freeze={str(p.relative_to(prefix/'gate')):sha(p) for p in (prefix/'gate').rglob('*') if p.is_file()}

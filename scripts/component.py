@@ -14,7 +14,7 @@ if a.health:
   if a.component=='webui' and result.get('status') is not True:raise ValueError('WebUI not healthy')
  except Exception:raise SystemExit('Component unavailable or identity mismatch; inspect its private log and start the candidate component. No fallback was used.')
  print('Healthy:',a.component);raise SystemExit(0)
-env['VINCEAI_NOTES_DIR']=str(prefix/'notes');env['VINCEAI_GOOGLE_HOME']=str(prefix/'state/google-readonly')
+env.setdefault('VINCEAI_NOTES_DIR',str(prefix/'notes'));env['VINCEAI_GOOGLE_HOME']=str(prefix/'state/google-readonly')
 python=str(ROOT/'.venv/bin/python');brokers={'messages':'messages-read-broker.py','gmail':'gmail-read-broker.py','calendar':'calendar-read-broker.py','markdown':'local-markdown-broker.py','files':'file-steward-broker.py'}
 if a.component in brokers:
  if a.component in ('messages','gmail','calendar') and (not (prefix/'config'/(a.component+'.enabled')).is_file() or (prefix/'config'/(a.component+'.enabled')).read_text().strip()!='enabled'):raise SystemExit('Configure the read-only integration and create config/'+a.component+'.enabled first; see docs/installation.md')
