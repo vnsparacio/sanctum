@@ -11,4 +11,4 @@ Reasoning is replaceable. Authority stays on the Mac.
 - Reuse cached Qwen weights through cache-only startup. Do not run competing heavy model servers on a memory-constrained Mac.
 - Keep GPU autostart off until the independent janitor and private resource references are validated. Confirm managed allocation/lease cleanup before stopping supervision; preserve persistent volumes.
 - Stop at actual owner OAuth, UI enrollment or macOS permission checkpoints and provide the exact local action. Never request secrets in chat. Distinguish historical qualification, automated contracts and newly observed live behavior.
-- Project 0B is not complete until the pending acceptance gates in the baseline document pass. Do not begin Project 1.
+- Project 0B implementation is accepted within the bounds in docs/V1.1-LIVE-BASELINE.md. Next is Project 0C review. Do not begin Project 1 without a separate request.
