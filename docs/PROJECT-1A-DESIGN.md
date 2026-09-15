@@ -37,7 +37,7 @@ The retained `router/` is historical deterministic privacy/escalation contract e
 | Audit | Reliability logs no prompts/arguments/results/IDs; gate network accounting and lifecycle state are bounded; shadow logs are metadata-only | Schemas and correlation semantics are fragmented. There is no single content-minimized event contract for proposal → decisions → execution → verification |
 | Rollback | File Steward transactions/undo, configure rollback, installer rollback, GPU reconciliation, and preserved volumes are strong | Rollback support is not declared on the capability/result contract, so a reasoner cannot safely distinguish reversible, create-only, and irreversible/none |
 
-Two observed mismatches demonstrate the need for derivation rather than another list: `messages_contact_history` is registered by its plugin but is absent from both `scripts/configure.py` exposure and `reliability/schema-snapshot.json`; `calendar_search` is registered and snapshotted but is absent from configured exposure. Project 1A does not silently enable, remove, or repair either mismatch.
+Two observed mismatches demonstrate the need for derivation rather than another list: `messages_contact_history` and `calendar_search` are registered by their plugins but absent from both configured exposure and `reliability/schema-snapshot.json`. Project 1A does not silently enable, remove, or repair either mismatch.
 
 The schema snapshot also includes disabled or non-exposed core capabilities such as memory tools. A schema snapshot is therefore useful compatibility evidence, but it is not a capability manifest or an authorization policy.
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {createReasonerAdapter} from '../foundation/contracts.mjs';
 
 export function buildLocalRequest(body, config, localModel) {
   if(body.operation!=='answer_local' || body.approval!=='local_only')throw Error('wrong_operation');
@@ -54,4 +55,17 @@ export function createLocalAgent({getConfig,localModel,fetchImpl=fetch,timeoutMs
     }catch{return {status:'UNAVAILABLE'};}
     finally{clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
   };
+}
+
+// This is intentionally a final-answer adapter only. The existing OpenClaw
+// agent loop still owns local tools and their Mac-side hooks; this wrapper does
+// not grant a second tool path or alter the request sent by createLocalAgent.
+export function createLocalReasonerAdapter(options){
+ const agent=createLocalAgent(options);
+ return createReasonerAdapter({id:'LOCAL_4B',kind:'OPENCLAW_LOCAL_AGENT',supportsToolProposals:false,invoke:async(request,signal)=>{
+   const latest=request.messages?.at(-1);
+   const body={operation:'answer_local',approval:'local_only',request:{scope:request.scope,revision:request.revision,messages:[latest],operation_revision:''},state:request.state};
+   const result=await agent(body,signal);
+   return result.status==='OK'?{kind:'FINAL',text:result.text}:{kind:'FINAL',unavailable:true};
+ }});
 }

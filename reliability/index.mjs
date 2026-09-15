@@ -10,6 +10,8 @@ import {modelResult} from './output.mjs';
 import {logger} from './telemetry.mjs';
 import {rules} from './registry.mjs';
 import {createVerification} from './verification.mjs';
+import {deriveCapabilityManifest} from '../gate/foundation/manifest.mjs';
+import {validateToolProposal} from '../gate/foundation/contracts.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function python(script,payload,signal){
  return new Promise(resolve=>{
@@ -32,6 +34,9 @@ export default {
  register(api){
   const schemas=JSON.parse(fs.readFileSync(path.join(ROOT,'schema-snapshot.json'),'utf8'));
   const validators=compile([...schemas.filter(s=>!utilityTools.some(u=>u.name===s.name)),...utilityTools]);
+  // The capture supplies schemas; current runtime configuration supplies exposure.
+  // Policy metadata is Mac-owned in the shared foundation, never model supplied.
+  const manifest=deriveCapabilityManifest({schemas:[...schemas.filter(s=>!utilityTools.some(u=>u.name===s.name)),...utilityTools],declaredTools:[...validators.keys()],runtimeConfig:api.runtime?.config?.current?.()??{tools:{alsoAllow:[...validators.keys()]}}});
   const record=logger(path.join(process.env.VINCEAI_STATE_DIR ?? path.join(ROOT,'state'),'failures.jsonl'),[...validators.keys()],rules.map(r=>r.id));
   // Artifact pins prevent use of stale repair schemas after an owner/runtime upgrade.
   const pins=JSON.parse(fs.readFileSync(path.join(ROOT,'runtime-pins.json'),'utf8'));
@@ -53,6 +58,8 @@ export default {
   api.on('before_tool_call',async(event,ctx)=>{
    if(verification.proposed(ctx?.runId??event.runId,event.toolName))return {block:true,blockReason:JSON.stringify(failure('VERIFICATION_FAILED','Exact-answer verification failed. No further tools may execute in this run.'))};
    if(!intact){record({tool:event.toolName,code:'UNKNOWN_SCHEMA',outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure('SCHEMA_SNAPSHOT_STALE','Operator must recapture schemas after a runtime upgrade.'))};}
+   const proposal=validateToolProposal({schema:'sanctum-capability/v1',proposalId:String(event.toolCallId??ctx?.toolCallId??'unknown'),requestId:String(ctx?.runId??event.runId??'local'),revision:0,reasoner:'LOCAL_4B',capability:event.toolName,capabilityDigest:manifest.byName.get(event.toolName)?.digest??'0'.repeat(64),arguments:event.params},manifest);
+   if(!proposal.ok){record({tool:event.toolName,code:proposal.code,outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure(proposal.code))};}
    let p=prepare(event.toolName,event.params,validators);
    const key=`${ctx?.runId??event.runId??'unknown'}:${event.toolCallId??ctx?.toolCallId??'unknown'}`;
    const prior=preparedCalls.get(key);preparedCalls.delete(key);
@@ -102,5 +109,8 @@ export default {
    }
    return {result};
   },{runtimes:['openclaw']});
+  // Read-only metadata for trusted diagnostics/tests; it contains schemas and
+  // policy labels, never private runtime state or approval material.
+  api.capabilityManifest=manifest;
  }
 };
