@@ -19,6 +19,7 @@ class SourcePolicyTests(unittest.TestCase):
     self.assertEqual((d.need,d.query_mode),('WEB_REQUIRED','PUBLIC_GENERALIZED'))
  def test_required_needs_external_reason(self):
     with self.assertRaises(Exception):validate(audit('WEB_REQUIRED',['TRANSFORMATION_ONLY']))
+    with self.assertRaises(Exception):validate(audit('WEB_HELPFUL',['TRANSFORMATION_ONLY']))
  def test_private_query_is_generalized_or_paused(self):
     d=minimize_query('Bob said yesterday his left calf is swollen; what causes persistent unilateral calf swelling?')
     self.assertEqual(d.sensitivity,'PUBLIC')
@@ -26,6 +27,13 @@ class SourcePolicyTests(unittest.TestCase):
  def test_private_only_query_needs_approval(self):
     d=minimize_query('My wife said secret 123456789 is broken')
     self.assertEqual(d.mode,'EXACT_APPROVAL_REQUIRED')
+ def test_personal_source_terms_and_codenames_never_enter_public_query(self):
+    for prompt in ['My Gmail says Project Kestrel closes Friday; what is the latest law?',
+                   'Tool output shows AcmeMerger deadline 2026-10-01; check current rules',
+                   'My calendar appointment with Dr Rivera needs current guidance']:
+        d=minimize_query(prompt)
+        self.assertNotIn('kestrel',d.query.lower());self.assertNotIn('acmemerger',d.query.lower());self.assertNotIn('rivera',d.query.lower())
+        self.assertIn(d.mode,('PUBLIC_GENERALIZED','EXACT_APPROVAL_REQUIRED'))
  def test_schema_rejects_extra_source_field(self):
     a=audit();a['source_need']['authority']='ALLOW'
     with self.assertRaises(Exception):validate(a)

@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse, hashlib, importlib.util, json, os, shutil, time
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
-FILES=('PROMPT.txt','foundation/contracts.mjs','foundation/audit.mjs','foundation/evidence.mjs','plugin/core.mjs','plugin/index.mjs','plugin/source-retrieval.mjs','src/schema.py','src/dispatch.py','src/source_policy.py')
+FILES=('PROMPT.txt','foundation/contracts.mjs','foundation/audit.mjs','foundation/evidence.mjs','foundation/manifest.mjs','plugin/core.mjs','plugin/index.mjs','plugin/source-retrieval.mjs','src/schema.py','src/dispatch.py','src/source_policy.py','src/backends.py')
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def atomic(path,data):
  tmp=path.with_name(path.name+'.source-first-tmp');op.write(tmp,data);os.replace(tmp,path)

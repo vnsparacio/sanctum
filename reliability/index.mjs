@@ -10,7 +10,7 @@ import {modelResult} from './output.mjs';
 import {logger} from './telemetry.mjs';
 import {rules} from './registry.mjs';
 import {createVerification} from './verification.mjs';
-import {deriveCapabilityManifest,PINNED_ADAPTER_TOOLS} from '../gate/foundation/manifest.mjs';
+import {deriveCapabilityManifest,PINNED_ADAPTER_TOOLS,publishCapabilityManifest} from '../gate/foundation/manifest.mjs';
 import {validateToolProposal} from '../gate/foundation/contracts.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function python(script,payload,signal){
@@ -56,6 +56,7 @@ export default {
   if(syntheticRuntime)adaptedTools.push(...PINNED_ADAPTER_TOOLS);
   const repairRulesByTool={};for(const rule of rules)for(const tool of rule.tools)(repairRulesByTool[tool]??=[]).push(rule.id);
   const manifest=deriveCapabilityManifest({schemas:[...schemas.filter(s=>!utilityTools.some(u=>u.name===s.name)),...utilityTools],declaredTools,registeredTools,adaptedTools,runtimeConfig,repairRulesByTool,allowedRepairRules:rules.map(x=>x.id)});
+  publishCapabilityManifest(manifest);
   const record=logger(path.join(process.env.VINCEAI_STATE_DIR ?? path.join(ROOT,'state'),'failures.jsonl'),[...validators.keys()],rules.map(r=>r.id));
   // Artifact pins prevent use of stale repair schemas after an owner/runtime upgrade.
   const pins=JSON.parse(fs.readFileSync(path.join(ROOT,'runtime-pins.json'),'utf8'));
@@ -75,6 +76,10 @@ export default {
   api.on('reply_payload_sending',event=>verification.delivery(event),{priority:2000});
   api.on('agent_end',(event,ctx)=>verification.end(event.runId??ctx?.runId));
   api.on('before_tool_call',async(event,ctx)=>{
+   if(['web_search','web_fetch'].includes(event.toolName)&&String(ctx?.sessionKey??'').startsWith('agent:main:mac-gate-local-')){
+    record({tool:event.toolName,runId:ctx?.runId??event.runId,code:'SOURCE_COORDINATOR_REQUIRED',outcome:'BLOCKED'});
+    return {block:true,blockReason:JSON.stringify(failure('SOURCE_COORDINATOR_REQUIRED','Gate-local web retrieval must use the Mac Source-First coordinator.'))};
+   }
    if(verification.proposed(ctx?.runId??event.runId,event.toolName))return {block:true,blockReason:JSON.stringify(failure('VERIFICATION_FAILED','Exact-answer verification failed. No further tools may execute in this run.'))};
    if(!intact){record({tool:event.toolName,runId:ctx?.runId??event.runId,code:'UNKNOWN_SCHEMA',outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure('SCHEMA_SNAPSHOT_STALE','Operator must recapture schemas after a runtime upgrade.'))};}
    const proposal=validateToolProposal({schema:'sanctum-capability/v1',proposalId:String(event.toolCallId??ctx?.toolCallId??'unknown'),requestId:String(ctx?.runId??event.runId??'local'),revision:0,reasoner:'LOCAL_4B',capability:event.toolName,capabilityDigest:manifest.byName[event.toolName]?.digest??'0'.repeat(64),arguments:event.params},manifest);
@@ -130,6 +135,5 @@ export default {
   },{runtimes:['openclaw']});
   // Read-only metadata for trusted diagnostics/tests; it contains schemas and
   // policy labels, never private runtime state or approval material.
-  api.capabilityManifest=manifest;
  }
 };

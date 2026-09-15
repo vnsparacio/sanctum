@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {deriveCapabilityManifest} from '../../gate/foundation/manifest.mjs';
 import {CONTRACT_VERSION,createReasonerAdapter,createToolResultEnvelope,digest,egressMatches,validateAuthorityDecision,validateEgressDecision,validateReasonerResult,validateToolProposal} from '../../gate/foundation/contracts.mjs';
-import {auditEvent,validateAuditEvent} from '../../gate/foundation/audit.mjs';
+import {auditEvent,sourceEvent,validateAuditEvent} from '../../gate/foundation/audit.mjs';
 import {verifyExactAnswer} from '../verification.mjs';
 import {capabilityResultEnvelope} from '../output.mjs';
 
@@ -63,6 +63,10 @@ test('result and audit envelopes retain bounded trust semantics without payloads
  assert.equal(failed.executionState,'COMPLETION_UNKNOWN');assert.equal(failed.error.code,'BACKEND_FAILURE');
  const event=auditEvent({phase:'EXECUTION',capability:'messages_search',correlation:'private prompt must not persist',reasonCodes:['INVALID_ARGUMENT'],outcome:'UNKNOWN'});
  assert.equal(validateAuditEvent(event),true);assert.ok(!JSON.stringify(event).includes('private prompt'));
+});
+test('source telemetry retains only minimized categories and hashed correlation',()=>{
+ const event=sourceEvent({correlation:'private query and URL must not persist',sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],queryClass:'DENIED',retrieval:'NOT_ATTEMPTED',grounding:'INSUFFICIENT',outcome:'FAILED'});
+ assert.doesNotMatch(JSON.stringify(event),/private query|URL/);assert.match(event.correlation,/^[a-f0-9]{64}$/);assert.throws(()=>sourceEvent({correlation:'x',sourceNeed:'WEB_REQUIRED',queryClass:'raw query text'}),/shape/);
 });
 
 test('reasoner adapters validate request shape and cannot claim unsupported tool proposals',async()=>{

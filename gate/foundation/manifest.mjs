@@ -1,6 +1,17 @@
 /* Runtime projection of executable registration, captured schema and Mac policy. */
 import {CONTRACT_VERSION,canonical,deepFreeze,digest,isRecord} from './contracts.mjs';
 
+const runtimeManifestKey=Symbol.for('sanctum.capability-manifest.v1');
+export function publishCapabilityManifest(manifest){
+  if(!manifest||manifest.schema!==CONTRACT_VERSION||typeof manifest.digest!=='string'||!manifest.byName)throw Error('capability_manifest_invalid');
+  globalThis[runtimeManifestKey]=manifest;return manifest;
+}
+export function currentCapabilityManifest(){
+  const manifest=globalThis[runtimeManifestKey];
+  if(!manifest||manifest.schema!==CONTRACT_VERSION||typeof manifest.digest!=='string'||!manifest.byName)throw Error('capability_manifest_unavailable');
+  return manifest;
+}
+
 const localUtilities=new Set(['calc','date_math','unit_convert','structured_parse']);
 const mutations=new Map([
   ['save_local_markdown',{mode:'CREATE_ONLY',undo:null}],

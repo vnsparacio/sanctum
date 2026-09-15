@@ -141,6 +141,11 @@ class Transport(Temp):
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
+    def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
+        sent=[];grounded={'kind':'GROUNDED_FINAL','text':'documented','grounding':'GROUNDED','citations':[{'sourceId':'s1','url':'https://example.test'}],'inferences':[],'missingReasons':[],'escalation':'NONE'}
+        def send(url,p,headers,**kw):sent.append(p);return chat(canonical(grounded),self.s['models']['HOSTED_235B'])
+        result=Remote(self.s,send,lambda:'test').infer('HOSTED_235B',{'prompt':'current','evidence':{'profile':'HOSTED_RICH'}},'grounded')
+        self.assertEqual(result['grounded'],grounded);self.assertEqual(sent[0]['response_format']['json_schema']['schema']['properties']['kind']['enum'],['GROUNDED_FINAL'])
 
 class FakeProvider:
     def ensure_guard(self):pass

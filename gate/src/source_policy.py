@@ -12,10 +12,11 @@ SOURCE_REASONS = frozenset({
     'TRANSFORMATION_ONLY', 'DETERMINISTIC_OR_SELF_CONTAINED',
 })
 WEB_REASONS = SOURCE_REASONS - {'SUPPLIED_EVIDENCE_ADEQUATE', 'TRANSFORMATION_ONLY', 'DETERMINISTIC_OR_SELF_CONTAINED'}
-PRIVATE_MARKERS = re.compile(r'(?:\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d[\d .()\-]{7,}\d\b|/Users/|/private/|\b(?:token|secret|password|api[_ -]?key)\b|-----BEGIN|\b(?:he|she|they) said\b|\b[A-Z][a-z]{1,30} said\b|\bmy (?:doctor|wife|husband|friend|boss|child)\b)', re.I)
+PRIVATE_MARKERS = re.compile(r'(?:\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d[\d .()\-]{7,}\d\b|/Users/|/private/|\b(?:token|secret|password|api[_ -]?key)\b|-----BEGIN|\b(?:he|she|they) said\b|\b[A-Z][a-z]{1,30} said\b|\bmy (?:doctor|wife|husband|friend|boss|child|email|gmail|message|calendar|appointment|file|document|attachment)\b|\b(?:gmail|email|message|calendar|attachment|tool output|private context|local file)\s+(?:says?|shows?|contains?|from)\b)', re.I)
 CONTROL = re.compile(r'/(?:gate|approve|attach|detach|result|cancel)\b', re.I)
 WORDS = re.compile(r"[A-Za-z][A-Za-z0-9_.+/#:-]{1,79}")
 UPGRADE = re.compile(r'\b(?:current|currently|latest|today|now|price|pricing|availability|available|regulation|law|schedule|documentation|docs|release notes|model capability|product behavior|recommend)\b', re.I)
+SAFE_PRIVATE_TERMS = frozenset('current latest price pricing availability regulation law schedule documentation docs release notes model capability product behavior recommend cause causes symptom symptoms treatment persistent unilateral calf swelling medical legal technical public general guidance'.split())
 
 def digest(value):
     return sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
@@ -56,8 +57,10 @@ def minimize_query(prompt):
         lower = word.lower()
         if lower in {'please','could','would','should','tell','about','what','when','where','with','from','this','that','have','does','said','yesterday','today'}:
             continue
-        if word not in words:
-            words.append(word)
+        if private and lower not in SAFE_PRIVATE_TERMS:
+            continue
+        if lower not in words:
+            words.append(lower)
     query = ' '.join(words[:16]).strip()
     if len(query) < 4 or (private and len(words) < 3):
         return QueryDraft('', 'PERSONAL' if private else 'RESTRICTED', 'EXACT_APPROVAL_REQUIRED' if private else 'DENY', ('PRIVATE_CONTEXT_REMOVED' if private else 'QUERY_INADEQUATE',), '')

@@ -42,5 +42,6 @@ def validate(value, schema=SCHEMA):
         if 'REQUIRED' in needs.values() and not unknown: raise Refused('missing_context_not_unknown')
         source=value['source_need']; reasons=set(source['reason_codes'])
         if source['classification']=='NONE' and (not reasons or reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_none')
+        if source['classification']=='WEB_HELPFUL' and not (reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_helpful')
         if source['classification']=='WEB_REQUIRED' and not (reasons & set(SOURCE_REASONS[:11])): raise Refused('source_need_required')
     return value
