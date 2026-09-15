@@ -7,13 +7,14 @@ import threading
 import time
 import uuid
 from common import Refused, atomic, canonical, database, private_dir, strict_json
-from backends import Private80BBackend
+from backends import Private80BBackend, PrivateLeadBackend
 from runpod import Runpod
 
 class Private80BLifecycle:
     def __init__(self, settings, provider=None, backend=None, now=time.time, sleep=time.sleep):
         self.settings = settings; self.cfg = settings['gpu']; self.root = private_dir(settings['state_directory'])
         self.provider = provider or Runpod(settings); self.backend = backend or Private80BBackend(settings)
+        self.pod_prefix = 'vinceai-qwen80b-'; self.managed_prefixes = ('vinceai-qwen80b-', 'sanctum-private-lead-')
         self.now, self.sleep = now, sleep
 
     @contextlib.contextmanager
@@ -73,7 +74,7 @@ class Private80BLifecycle:
     def reconcile(self, s):
         pods = self.provider.pods()
         candidates = [p for p in pods if p.get('id') == s.get('pod_id') or (s.get('pod_name') and p.get('name') == s['pod_name'])]
-        managed = [p for p in pods if str(p.get('name', '')).startswith('vinceai-qwen80b-')]
+        managed = [p for p in pods if str(p.get('name', '')).startswith(self.managed_prefixes)]
         if len(candidates) > 1 or any(p not in candidates for p in managed): raise Refused('untracked_or_duplicate_pod')
         if candidates:
             p = candidates[0]
@@ -103,7 +104,7 @@ class Private80BLifecycle:
                 self.check_lease(scope)
                 # Persist intent before mutation. Only an exact, definitive capacity
                 # rejection permits retry; lost/ambiguous responses remain adopt-only.
-                name = 'vinceai-qwen80b-phase10-' + uuid.uuid4().hex
+                name = self.pod_prefix + 'stage-' + uuid.uuid4().hex
                 self.save(s, pod_name=name, allocation_uncertain=True, started_at=self.now(), hourly_usd=info['hourly_usd'])
                 try: pod = self.provider.create(name)
                 except Exception as e:
@@ -229,3 +230,14 @@ class Private80BLifecycle:
         finally:
             stop.set(); t.join(timeout=1); self.release(scope)
             self.sweep()
+
+class PrivateLeadLifecycle(Private80BLifecycle):
+    """Separately staged PRIVATE_LEAD ownership; it never selects itself for normal routing."""
+    def __init__(self, settings, provider=None, backend=None, now=time.time, sleep=time.sleep):
+        cfg = settings.get('private_lead')
+        if type(cfg) is not dict or cfg.get('logical_profile') != 'PRIVATE_LEAD': raise Refused('private_lead_configuration')
+        self.settings = settings; self.cfg = cfg
+        self.root = private_dir(Path(settings['state_directory']) / 'private-lead')
+        self.provider = provider or Runpod(settings, cfg); self.backend = backend or PrivateLeadBackend(settings)
+        self.pod_prefix = cfg['pod_prefix']; self.managed_prefixes = ('vinceai-qwen80b-', self.pod_prefix)
+        self.now, self.sleep = now, sleep

@@ -10,7 +10,7 @@ from common import Refused, canonical, load_settings, strict_json, verify_releas
 from authority import authorize
 from backends import Remote, LocalMultimodalBackend
 from dispatch import assess
-from lifecycle import Private80BLifecycle
+from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from media import load, expand
 
 
@@ -28,6 +28,7 @@ def execute(b, settings, remote=None, lifecycle=None):
         packet=expand(b['packet'],scope,settings)
         if len(canonical({k:v for k,v in packet.items() if k!='images'}).encode())>settings['max_context_bytes']: raise Refused('answer_context_limit')
         if b['tier']=='PRIVATE_80B': return (lifecycle or Private80BLifecycle(settings)).infer(scope,packet)
+        if b['tier']=='PRIVATE_LEAD': return (lifecycle or PrivateLeadLifecycle(settings)).infer(scope,packet)
         if b['tier']=='MULTIMODAL' and settings['multimodal']['transport']=='local': return LocalMultimodalBackend(settings).infer(packet)
         return (remote or Remote(settings)).infer(b['tier'],packet,b['nonce'])
     lc=lifecycle or Private80BLifecycle(settings)

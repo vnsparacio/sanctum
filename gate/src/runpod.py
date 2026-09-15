@@ -15,8 +15,8 @@ def capacity_rejected(args, error):
     return list(args[:2]) == ['pod','create'] and type(error) is dict and error.get('code') == 'graphql_error' and error.get('error') == 'failed to create pod: graphql error: There are no longer any instances available with the requested specifications. Please refresh and try again.'
 
 class Runpod:
-    def __init__(self, settings):
-        self.settings = settings; self.gpu = settings['gpu']
+    def __init__(self, settings, release_cfg=None):
+        self.settings = settings; self.gpu = release_cfg or settings['gpu']
         if type(self.gpu['local_port']) is not int or not 1024 <= self.gpu['local_port'] <= 65535: raise Refused('private_port_invalid')
         self.cli = BASE / 'runtime/runpodctl'
         self.pin = strict_json((BASE / 'runtime/RUNPODCTL.json').read_text())
@@ -24,7 +24,8 @@ class Runpod:
     def ensure_guard(self):
         # Independent Mac supervisor survives the command worker and gateway.
         # It can only sweep known leases/compute; it cannot allocate or infer.
-        subprocess.Popen([self.settings['python'], '-B', str(BASE / 'watch.py')],
+        release = 'PRIVATE_LEAD' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else 'PRIVATE_80B'
+        subprocess.Popen([self.settings['python'], '-B', str(BASE / 'watch.py'), '--release', release],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
         deadline=time.monotonic()+8
@@ -115,10 +116,12 @@ class Runpod:
         return r.stdout
 
     def bootstrap_server(self, pod_id, host, port):
-        self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime/bootstrap-vllm.sh').read_bytes(), timeout=1800)
+        name = 'bootstrap-private-lead-vllm.sh' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else 'bootstrap-vllm.sh'
+        self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime' / name).read_bytes(), timeout=1800)
 
     def server_alive(self, pod_id, host, port):
-        self.ssh(pod_id, host, port, 'test -f /workspace/vinceai/pids/vllm.pid && kill -0 "$(cat /workspace/vinceai/pids/vllm.pid)"', timeout=15)
+        root = self.gpu.get('runtime_root', '/workspace/vinceai')
+        self.ssh(pod_id, host, port, f'test -f {root}/pids/vllm.pid && kill -0 "$(cat {root}/pids/vllm.pid)"', timeout=15)
 
     def tunnel(self, pod_id, host, port):
         socket = self.socket_path(pod_id)

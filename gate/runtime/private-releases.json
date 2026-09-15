@@ -1,0 +1,22 @@
+{
+  "schema": "sanctum-private-release-registry/v1",
+  "releases": {
+    "private-80b-accepted-v1": {
+      "logical_profile": "PRIVATE_80B",
+      "status": "accepted-rollback",
+      "settings_key": "gpu",
+      "pod_prefix": "vinceai-qwen80b-"
+    },
+    "private-lead-qwen35-122b-nvfp4-candidate-v1": {
+      "logical_profile": "PRIVATE_LEAD",
+      "status": "staged-candidate",
+      "settings_key": "private_lead",
+      "model": "nvidia/Qwen3.5-122B-A10B-NVFP4",
+      "revision": "98915d837c4e7c87ac8296d02e89de19b3207e6d",
+      "image": "nvcr.io/nvidia/vllm@sha256:84db0edcc7db8f0fc921b146572fe5036779a6ff4baa40d65904da969c1e7237",
+      "quantization": "modelopt_fp4",
+      "kv_cache_dtype": "fp8",
+      "pod_prefix": "sanctum-private-lead-"
+    }
+  }
+}

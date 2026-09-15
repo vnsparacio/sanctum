@@ -25,7 +25,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
     if type(b['strong']) is not bool or type(b['packet']) is not dict: raise Refused('packet_contract')
     if b['operation'] == 'classify' and (b['tier'] != 'GEMINI_AUDIT' or b['approval'] != 'exact_disclosure'): raise Refused('classification_approval')
     if b['operation'] == 'infer':
-        if b['tier'] not in ['PRIVATE_80B','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER']: raise Refused('tier_contract')
+        if b['tier'] not in ['PRIVATE_80B','PRIVATE_LEAD','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER']: raise Refused('tier_contract')
         if b['approval'] not in ['exact_disclosure','session_private_prompt']: raise Refused('answer_approval')
         if b['approval'] == 'session_private_prompt' and (b['tier'] != 'PRIVATE_80B' or set(b['packet']) != {'prompt'}): raise Refused('session_grant_scope')
         if b['tier'] != 'OPENAI_FRONTIER' and b['state'].get('high_stakes') is not False: raise Refused('high_stakes_route')

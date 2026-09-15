@@ -148,6 +148,30 @@ class Private80BBackend:
              'response_format': {'type': 'json_schema', 'json_schema': {'name': 'worker_answer', 'strict': True, 'schema': GROUNDED_SCHEMA if grounded else ANSWER_SCHEMA}}}
         return answer_result(extract_chat(self.send(self.url + '/chat/completions', p, {'Content-Type': 'application/json'}, timeout=120)),grounded)
 
+class PrivateLeadBackend(Private80BBackend):
+    """Text-only staged backend. Its logical profile does not grant tool authority."""
+    def __init__(self, settings, send=http):
+        self.settings, self.send = settings, send
+        cfg = settings.get('private_lead')
+        if type(cfg) is not dict or cfg.get('logical_profile') != 'PRIVATE_LEAD': raise Refused('private_lead_configuration')
+        port = cfg['local_port']
+        if type(port) is not int or not 1024 <= port <= 65535: raise Refused('private_port_invalid')
+        self.url = f'http://127.0.0.1:{port}/v1'; self.model = cfg['alias']; self.cfg = cfg
+
+    def health_check(self, smoke=False):
+        d = self.send(self.url + '/models', timeout=5)
+        rows = d.get('data', []) if type(d) is dict else []
+        if [x.get('id') for x in rows] != [self.model]: raise Refused('private_model_identity')
+        if smoke:
+            p = {'model':self.model,'messages':[{'role':'user','content':'Reply with only READY.'}], 'max_tokens':16,'temperature':0,'stream':False}
+            if extract_chat(self.send(self.url + '/chat/completions',p,{'Content-Type':'application/json'},timeout=60)).strip() != 'READY': raise Refused('private_smoke_failed')
+        return True
+
+    def infer(self, packet):
+        if packet.get('images'): raise Refused('private_lead_text_only')
+        if len(canonical(packet).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
+        return super().infer(packet)
+
 class LocalMultimodalBackend:
     def __init__(self, settings, send=http): self.settings, self.send = settings, send
     def infer(self, packet):

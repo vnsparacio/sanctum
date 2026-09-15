@@ -16,8 +16,8 @@ from common import Refused, canonical, database, strict_json
 from authority import authorize
 from dispatch import assess
 from schema import validate
-from backends import Remote, Private80BBackend, LocalMultimodalBackend, extract_chat, answer_result
-from lifecycle import Private80BLifecycle
+from backends import Remote, Private80BBackend, PrivateLeadBackend, LocalMultimodalBackend, extract_chat, answer_result
+from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from runpod import capacity_rejected
 from media import prepare, load, expand
 import install
@@ -139,6 +139,11 @@ class Transport(Temp):
         def send(url,p=None,*args,**kw):return {'data':[{'id':'vinceai-qwen80b'}]} if url.endswith('/models') else chat('READY')
         self.assertTrue(Private80BBackend(self.s,send).health_check(smoke=True))
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
+    def test_private_lead_has_its_own_alias_and_loopback_port(self):
+        self.s['private_lead']['enabled']=True
+        def send(url,p=None,*args,**kw): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]} if url.endswith('/models') else chat('READY')
+        self.assertTrue(PrivateLeadBackend(self.s,send).health_check(smoke=True))
+        self.assertEqual(PrivateLeadBackend(self.s).url,'http://127.0.0.1:18001/v1')
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
@@ -261,6 +266,11 @@ class Lifecycle(Temp):
         for t in threads:t.start()
         for t in threads:t.join(5)
         self.assertFalse(errors);self.assertEqual(self.p.created,1)
+    def test_lead_refuses_coexisting_80b_pod(self):
+        self.s['private_lead']['enabled']=True; self.s['private_lead']['auto_start']=True
+        self.p.rows=[{'id':'old','name':'vinceai-qwen80b-stage-existing'}]
+        lead=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        with self.assertRaisesRegex(Refused,'untracked_or_duplicate_pod'): lead.infer('lead',{})
 
 class Media(Temp):
     def test_image_strips_exif_and_no_source_path(self):
