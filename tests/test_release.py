@@ -77,15 +77,19 @@ class Publication(unittest.TestCase):
  def test_baseline_path_exception_is_limited_to_exact_declarations(self):
   spec=importlib.util.spec_from_file_location('publication_audit',ROOT/'scripts/audit.py');audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
   with tempfile.TemporaryDirectory() as td:
-   base=Path(td);(base/'docs').mkdir();p=base/'docs/V1.1-LIVE-BASELINE.md'
-   p.write_text('\n'.join(audit.BASELINE_DECLARATIONS))
+   base=Path(td);(base/'docs').mkdir();p=base/'docs/V1.1-LIVE-BASELINE.md';lines=audit.APPROVED_LOCATION_DECLARATIONS['docs/V1.1-LIVE-BASELINE.md']
+   p.write_text('\n'.join(lines))
    self.assertEqual(audit.scan(base),[])
    p.write_text(p.read_text()+'\n/Users/'+'example-owner/private/account')
    self.assertIn(('docs/V1.1-LIVE-BASELINE.md','owner_home'),audit.scan(base))
-   p.write_text('prefix '+audit.BASELINE_DECLARATIONS[0])
+   p.write_text('prefix '+lines[0])
    self.assertIn(('docs/V1.1-LIVE-BASELINE.md','owner_home'),audit.scan(base))
-   p.write_text('\n'.join(audit.BASELINE_DECLARATIONS));(base/'other.md').write_text(audit.BASELINE_DECLARATIONS[0])
+   p.write_text('\n'.join(lines));(base/'other.md').write_text(lines[0])
    self.assertIn(('other.md','owner_home'),audit.scan(base))
+   agents=base/'AGENTS.md';agents.write_text('\n'.join(audit.APPROVED_LOCATION_DECLARATIONS['AGENTS.md']))
+   self.assertEqual(audit.scan(base),[('other.md','owner_home')])
+   (base/'other.md').unlink();agents.write_text(agents.read_text()+' extra')
+   self.assertIn(('AGENTS.md','owner_home'),audit.scan(base))
 
 class IntegrationAmendments(unittest.TestCase):
  setUp=Setup.setUp
