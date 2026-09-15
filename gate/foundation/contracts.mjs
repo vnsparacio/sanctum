@@ -104,6 +104,7 @@ export function validateReasonerResult(value,{supportsToolProposals=false}={}){
   if(value.kind==='FINAL')return exact(value,['kind','text'])&&text(value.text,32768)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
   if(value.kind==='ESCALATION')return exact(value,['kind','reason'])&&code(value.reason)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
   if(value.kind==='TOOL_PROPOSAL')return supportsToolProposals&&exact(value,['kind','proposal'])&&proposalShape(value.proposal)?{ok:true,value:clone(value)}:{ok:false,code:supportsToolProposals?'REASONER_RESULT_SHAPE':'REASONER_TOOL_PROPOSAL_UNSUPPORTED'};
+  if(value.kind==='GROUNDED_FINAL')return exact(value,['kind','text','grounding','citations','inferences','missingReasons','escalation'])&&text(value.text,32768)&&['GROUNDED','PARTIAL','INSUFFICIENT','NOT_APPLICABLE'].includes(value.grounding)&&Array.isArray(value.citations)&&value.citations.length<=6&&value.citations.every(x=>exact(x,['sourceId','url'])&&identifier(x.sourceId)&&destinationId(x.url))&&Array.isArray(value.inferences)&&value.inferences.every(x=>text(x,512))&&Array.isArray(value.missingReasons)&&value.missingReasons.every(code)&&['NONE','HOSTED_235B','OPENAI_FRONTIER'].includes(value.escalation)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
   return {ok:false,code:'REASONER_RESULT_SHAPE'};
 }
 

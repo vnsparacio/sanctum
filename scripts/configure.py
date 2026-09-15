@@ -16,7 +16,7 @@ def atomic(p,data):
 def configure(prefix,proposal):
  op.verify();r=op.verify_install(prefix)
  if op.owns_process(op.process_record(prefix)):raise ValueError('Stop candidate gateway before configuration changes')
- if type(proposal) is not dict or set(proposal)-{'integrations','contacts','file_roots','accounts','gpu','notes_dir'}:raise ValueError('Unknown configuration field')
+ if type(proposal) is not dict or set(proposal)-{'integrations','contacts','file_roots','accounts','gpu','notes_dir','web_retrieval'}:raise ValueError('Unknown configuration field')
  changes={};cfg=json.loads((prefix/'config/openclaw.json').read_text())
  if 'integrations' in proposal:
   items=proposal['integrations']
@@ -32,7 +32,7 @@ def configure(prefix,proposal):
     if name not in cfg['plugins']['allow']:cfg['plugins']['allow'].append(name)
     cfg['plugins']['entries'][name]={'enabled':True}
    cfg['plugins']['entries']['parallel']['config']={'webSearch':{'apiKey':{'source':'store','provider':'default','id':'PARALLEL_API_KEY'}}}
-   cfg['tools']['web']={'search':{'enabled':True,'provider':'parallel','maxResults':1},'fetch':{'enabled':True,'provider':'firecrawl','maxChars':6000,'maxCharsCap':6000}}
+   cfg['tools']['web']={'search':{'enabled':True,'provider':'parallel','maxResults':6},'fetch':{'enabled':True,'provider':'firecrawl','maxChars':6000,'maxCharsCap':6000}}
   elif 'web' in cfg['tools']:
    cfg['tools']['web']['search']['enabled']=False;cfg['tools']['web']['fetch']['enabled']=False
   if 'mcp' in items:
@@ -42,6 +42,17 @@ def configure(prefix,proposal):
    changes['config/mcp-profile.json']=json.dumps(profile,indent=2)+'\n'
    cfg.setdefault('mcp',{}).setdefault('servers',{})['vinceai']={'enabled':True,'transport':'stdio','command':str(ROOT/'.venv/bin/python'),'args':['-B',str(ROOT/'scripts/mcp_gateway.py'),'run','--prefix',str(prefix)],'requestTimeoutMs':90000,'connectionTimeoutMs':90000,'toolFilter':{'include':['get_current_time','convert_to_markdown','hub_repo_search'],'exclude':['mcp-*','code-mode','resources_*','prompts_*']}}
   elif 'vinceai' in cfg.get('mcp',{}).get('servers',{}):cfg['mcp']['servers']['vinceai']['enabled']=False
+  changes['config/openclaw.json']=json.dumps(cfg,indent=2)+'\n'
+ if 'web_retrieval' in proposal:
+  web=proposal['web_retrieval']
+  if type(web) is not dict or set(web)!={'max_results'} or type(web['max_results']) is not int or not 1<=web['max_results']<=6:raise ValueError('Invalid bounded web retrieval policy')
+  current=cfg.get('tools',{}).get('web',{})
+  if current.get('search',{}).get('enabled') is not True or current.get('fetch',{}).get('enabled') is not True:raise ValueError('Enable the reviewed web integration before changing its retrieval bound')
+  base=prefix/'runtime/web/node_modules/@openclaw'
+  for name in ('parallel','firecrawl'):
+   plugin=base/(name+'-plugin')
+   if plugin.is_symlink() or not plugin.exists():raise ValueError('Bootstrap the pinned optional web runtime first')
+  current['search']['maxResults']=web['max_results']
   changes['config/openclaw.json']=json.dumps(cfg,indent=2)+'\n'
  if 'notes_dir' in proposal:
   value=proposal['notes_dir']

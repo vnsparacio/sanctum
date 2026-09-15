@@ -27,7 +27,7 @@ def settings(root):
     s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;return s
 
 def audit(tier='LOCAL_4B'):
-    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
+    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'source_need':{'classification':'NONE','reason_codes':['DETERMINISTIC_OR_SELF_CONTAINED']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
 
 def packet(): return {'scope':'a'*32,'revision':0,'prompt':'synthetic question','semantic_state':{'high_stakes':False,'privacy_floor':'PERSONAL'},'attachment_summary':{'count':0,'visual_count':0,'document_count':0,'video_count':0},'disclosed':{}}
 def state(): return {'scope':'a'*32,'revision':-1,'high_stakes':False,'privacy_floor':'PERSONAL','request_digest':''}
