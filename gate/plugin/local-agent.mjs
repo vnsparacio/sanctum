@@ -66,6 +66,6 @@ export function createLocalReasonerAdapter(options){
    const latest=request.messages?.at(-1);
    const body={operation:'answer_local',approval:'local_only',request:{scope:request.scope,revision:request.revision,messages:[latest],operation_revision:''},state:request.state};
    const result=await agent(body,signal);
-   return result.status==='OK'?{kind:'FINAL',text:result.text}:{kind:'FINAL',unavailable:true};
+   return result.status==='OK'?{kind:'FINAL',text:result.text}:{kind:'ESCALATION',reason:'REASONER_UNAVAILABLE'};
  }});
 }

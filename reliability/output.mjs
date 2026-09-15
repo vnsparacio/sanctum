@@ -67,7 +67,7 @@ export function modelResult(name,result,options){
 // Compatibility view for the shared foundation. `normalize` remains the
 // model-facing shape so existing tool prompts and source-grounding semantics do
 // not change while later reasoners receive a typed boundary.
-export function capabilityResultEnvelope(name,result,{capabilityDigest='0'.repeat(64),executionState,resultOptions,repairRules=[],verifier='UNKNOWN',rollback='NONE'}={}){
+export function capabilityResultEnvelope(name,result,{capabilityDigest,executionState,resultOptions,repairRules=[],verifier='UNKNOWN',rollback='NONE'}={}){
  const normalized=normalize(name,result,resultOptions);
- return createToolResultEnvelope({capability:name,capabilityDigest,executionState:executionState??(normalized.ok?'COMPLETED':'NOT_STARTED'),result:normalized,provenance:normalized.source??name,dataClass:normalized.untrusted?'PERSONAL':'PUBLIC',untrusted:normalized.untrusted===true,truncated:normalized.truncated===true,repairRules,verifier,rollback});
+ return createToolResultEnvelope({capability:name,capabilityDigest,executionState:executionState??(normalized.ok?'COMPLETED':'COMPLETION_UNKNOWN'),result:normalized,provenance:normalized.source??name,dataClass:normalized.untrusted?'PERSONAL':'PUBLIC',untrusted:normalized.untrusted===true,truncated:normalized.truncated===true,repairRules,verifier,rollback});
 }

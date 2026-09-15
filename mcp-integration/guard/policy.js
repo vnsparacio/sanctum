@@ -21,6 +21,19 @@ function zone(value) {
   if (typeof value !== 'string' || value.length > 80 || !/^[A-Za-z0-9_+./-]+$/.test(value)) return false;
   try { new Intl.DateTimeFormat('en-US', {timeZone: value}); return true; } catch { return false; }
 }
+const HUB_KEYS=new Set(['author','filters','limit','query','repo_types','sort']);
+const HUB_SORT=new Set(['trendingScore','downloads','likes','createdAt','lastModified']);
+const HUB_TYPES=new Set(['model','dataset','space']);
+function validHubArgs(p){
+  if(Object.keys(p).some(k=>!HUB_KEYS.has(k)))return false;
+  if(Object.hasOwn(p,'author')&&(typeof p.author!=='string'||p.author.length>200))return false;
+  if(Object.hasOwn(p,'query')&&(typeof p.query!=='string'||p.query.length>500))return false;
+  if(Object.hasOwn(p,'limit')&&(typeof p.limit!=='number'||!Number.isFinite(p.limit)||p.limit<1||p.limit>100))return false;
+  if(Object.hasOwn(p,'sort')&&!HUB_SORT.has(p.sort))return false;
+  if(Object.hasOwn(p,'repo_types')&&(!Array.isArray(p.repo_types)||p.repo_types.length<1||p.repo_types.length>3||p.repo_types.some(x=>!HUB_TYPES.has(x))))return false;
+  if(Object.hasOwn(p,'filters')&&(!Array.isArray(p.filters)||p.filters.length>20||p.filters.some(x=>typeof x!=='string'||x.length>100)))return false;
+  return true;
+}
 
 export function decide(event) {
   if (!event.toolName.startsWith(PREFIX)) return;
@@ -47,6 +60,7 @@ export function decide(event) {
       return {params: {uri: 'file:///mcp-input/' + relative.split(path.sep).map(encodeURIComponent).join('/')}};
     }
     if (name !== 'hub_repo_search') return deny('no external-data policy exists for this tool.');
+    if (!validHubArgs(p)) return deny('external arguments do not match the reviewed schema.');
     const encoded = JSON.stringify(p);
     if (encoded.length > 2000) return deny('external arguments exceed the bounded request size.');
     const adjusted = {...p, limit: 1};

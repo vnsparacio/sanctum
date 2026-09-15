@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLocalRequest,createLocalAgent } from '../plugin/local-agent.mjs';
+import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter } from '../plugin/local-agent.mjs';
 const model='local4b';
 const config={agents:{defaults:{model:{primary:'mlx-local/'+model}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
 const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Search Gmail for a synthetic query.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
@@ -35,6 +35,11 @@ test('changed gateway authentication or public listener refuses handoff',()=>{
 test('successful local agent answer uses one local request only',async()=>{
  const calls=[];const run=createLocalAgent({getConfig:()=>config,localModel:model,fetchImpl:async(...args)=>{calls.push(args);return response('Synthetic result');}});
  assert.deepEqual(await run(body,new AbortController().signal),{status:'OK',text:'Synthetic result'});assert.equal(calls.length,1);assert.equal(calls[0][1].redirect,'manual');
+});
+test('model-independent adapter preserves the existing local execution boundary',async()=>{
+ let calls=0;const adapter=createLocalReasonerAdapter({getConfig:()=>config,localModel:model,fetchImpl:async()=>{calls++;return response('Adapter result');}});
+ const request={schema:'sanctum-capability/v1',requestId:'request-1',scope:body.request.scope,revision:body.request.revision,messages:[body.request.messages.at(-1)],manifestDigest:'a'.repeat(64),state:body.state};
+ assert.deepEqual(await adapter.invoke(request,new AbortController().signal),{kind:'FINAL',text:'Adapter result'});assert.equal(calls,1);
 });
 test('failures and redirects have no retry or remote fallback',async()=>{
  for(const status of [302,500]){

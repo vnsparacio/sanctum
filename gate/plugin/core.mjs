@@ -7,6 +7,7 @@ const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
 const TIERS=['LOCAL_4B','PRIVATE_80B','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER'];
 const ALIASES={local:'LOCAL_4B','4b':'LOCAL_4B','80b':'PRIVATE_80B','235b':'HOSTED_235B',vision:'MULTIMODAL',multimodal:'MULTIMODAL',frontier:'OPENAI_FRONTIER',openai:'OPENAI_FRONTIER'};
+const destinationFor=(settings,tier)=>({GEMINI_AUDIT:{kind:'REASONER',service:'google-vertex',model:'GEMINI_AUDIT'},PRIVATE_80B:{kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_80B'},HOSTED_235B:{kind:'REASONER',service:'google-vertex',model:'HOSTED_235B'},MULTIMODAL:{kind:'REASONER',service:settings.multimodal.transport==='local'?'loopback':'deepinfra',model:'MULTIMODAL'},OPENAI_FRONTIER:{kind:'REASONER',service:settings.frontier_transport==='openai'?'openai':'azure',model:'OPENAI_FRONTIER'}}[tier]);
 export function eligibleRoute(route,excluded,{highStakes=false,tools=false,visual=false}={}){
   if(!excluded.has(route))return route;
   if(highStakes||tools)throw Error('The required tier is excluded for this session. Re-include it to proceed; authority and risk rules are unchanged.');
@@ -57,7 +58,7 @@ export function createGate({settings,key,execute,now=()=>Date.now()}){
   function cancel(s){s.generation++;s.pending=null;s.abort?.abort();s.abort=null;s.busy=false;s.job=null;}
   function ticket(s,operation,tier,packet,after={}){
     const token=id(),serialized=JSON.stringify(packet);
-    const destination={GEMINI_AUDIT:{kind:'REASONER',service:'google-vertex',model:'GEMINI_AUDIT'},PRIVATE_80B:{kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_80B'},HOSTED_235B:{kind:'REASONER',service:'google-vertex',model:'HOSTED_235B'},MULTIMODAL:{kind:'REASONER',service:settings.multimodal.transport==='local'?'loopback':'deepinfra',model:'MULTIMODAL'},OPENAI_FRONTIER:{kind:'REASONER',service:settings.frontier_transport==='openai'?'openai':'azure',model:'OPENAI_FRONTIER'}}[tier];
+    const destination=destinationFor(settings,tier);
     const egress={schema:CONTRACT_VERSION,outcome:'ASK',capability:'reasoner_inference',capabilityDigest:contractDigest({operation,tier}),requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation}),packetDigest:contractDigest(packet),scope:s.state.scope,revision:s.revision,dataClasses:['PERSONAL'],destination,purpose:operation==='classify'?'RISK_CLASSIFICATION':'ANSWER_GENERATION',expires:now()/1000+settings.approval_expiry_seconds,oneUse:true,approvalState:'PENDING',reasonCodes:['EXACT_OWNER_DISCLOSURE_REQUIRED']};
     if(!validateEgressDecision(egress,now()/1000).ok)throw Error(FAIL);
     s.pending={id:token,operation,tier,packet:structuredClone(packet),after:structuredClone(after),egress,generation:s.generation,expires:now()+settings.approval_expiry_seconds*1000,digest:hash(serialized)};
@@ -201,7 +202,7 @@ export function createGate({settings,key,execute,now=()=>Date.now()}){
       if(!p||p.id!==args.slice(8).trim()||p.generation!==s.generation||now()>=p.expires||hash(JSON.stringify(p.packet))!==p.digest)return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};
       if(active>=4)return {text:'The gate is busy. Approval remains pending; try shortly.'};
       const egress={...p.egress,outcome:'ALLOW_ONCE',approvalState:'CONSUMED'};
-      const claim={requestDigest:egress.requestDigest,packetDigest:contractDigest(p.packet),scope:s.state.scope,revision:s.revision,capability:'reasoner_inference',purpose:egress.purpose,destination:egress.destination};
+      const claim={requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation:p.operation}),packetDigest:contractDigest(p.packet),scope:s.state.scope,revision:s.revision,capability:'reasoner_inference',capabilityDigest:contractDigest({operation:p.operation,tier:p.tier}),dataClasses:['PERSONAL'],purpose:p.operation==='classify'?'RISK_CLASSIFICATION':'ANSWER_GENERATION',destination:destinationFor(settings,p.tier)};
       if(!egressMatches(egress,claim,now()/1000).ok)return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};
       s.pending=null;return launch(s,p.operation,p.tier,p.packet,p.after);
     }
