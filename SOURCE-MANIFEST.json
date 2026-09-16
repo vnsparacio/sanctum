@@ -217,5 +217,6 @@
   "gate/src/workspace.py": "4fc0d2d8dfffe21bb120ba9c7b58fc9fd3272e95caa96fe0fbbf580f51e4cb0d",
   "gate/tests/test_workspace.py": "eb33c55d4f1168437f7f37060181b95bbbe906684b05b45e7125b78326599d91",
   "gate/tests/work-mode.test.mjs": "f8473089f8444ce2f3a133899d20956fa5600b0f55368a34fd71abf4220f454d",
-  "docs/PROJECT-3-PHASE-11-AUDIT.md": "0d5355de75b4c6126085f2bb7937fcbed82573e8a12ee1e42338aaab4c5b57ce"
+  "docs/PROJECT-3-PHASE-11-AUDIT.md": "0d5355de75b4c6126085f2bb7937fcbed82573e8a12ee1e42338aaab4c5b57ce",
+  "docs/PROJECT-3F-REMEDIATION-DESIGN.md": "16db2f59b8422b343b5823579ed24dad2d6a99c2b3c2c2f3c09d678360be2531"
 }
