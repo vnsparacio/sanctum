@@ -66,9 +66,17 @@ def invoke(node,bridge,env,session,message,timeout=180):
  value=json.loads(result.stdout)
  if value.get('ok') is not True or type(value.get('text')) is not str:raise RuntimeError('installed_command_failed')
  return value['text']
+def preflight(prefix,node):
+ result=subprocess.run([node,str(prefix/'gate/preflight-work-intent.mjs')],capture_output=True,text=True,timeout=30)
+ try:value=json.loads(result.stdout)
+ except json.JSONDecodeError:raise RuntimeError('structured_schema_preflight') from None
+ if result.returncode or value.get('ok') is not True or value.get('schema')!='sanctum-work-intent-preflight/v1':raise RuntimeError('structured_schema_preflight')
+ ordinary=value.get('schemas',{}).get('ordinary',{})
+ if ordinary.get('version')!='sanctum-work-intent/v1' or ordinary.get('dialect')!='vllm-0.20.1-outlines' or not re.fullmatch(r'[a-f0-9]{64}',ordinary.get('schemaDigest','')):raise RuntimeError('structured_schema_preflight')
+ return {'schema':value['schema'],'manifestDigest':value['manifestDigest'],'version':ordinary['version'],'dialect':ordinary['dialect'],'schemaDigest':ordinary['schemaDigest'],'semanticSchemaDigest':ordinary['semanticSchemaDigest']}
 def main(prefix,timeout):
  env={**os.environ,**json.loads((prefix/'config/environment.json').read_text())};node=shutil.which('node');bridge=str(prefix/'gate/webui/bridge.mjs')
- seed(prefix);rows=[];sessions=[]
+ schema_preflight=preflight(prefix,node);seed(prefix);rows=[];sessions=[]
  try:
   for profile,kind,goal in (*CASES,ADVERSARIAL):
    session='project3g-'+profile;started=time.time();reply=invoke(node,bridge,env,session,f'/work start {profile} -- {goal}');match=re.search(r'task ([a-f0-9]{32})',reply)
@@ -87,11 +95,15 @@ def main(prefix,timeout):
   for session,_ in reversed(sessions):
    try:invoke(node,bridge,env,session,'/work end')
    except Exception:pass
- receipt={'schema':'sanctum-project3g-live/v1','created_at':time.time(),'cases':rows,'passed':all(row['passed'] for row in rows)}
+ receipt={'schema':'sanctum-project3g-live/v1','created_at':time.time(),'schema_preflight':schema_preflight,'cases':rows,'passed':all(row['passed'] for row in rows)}
  out=prefix/'state/gate/private-lead/work-mode'/('qualification-'+str(time.time_ns())+'.json');out.write_text(json.dumps(receipt,sort_keys=True)+'\n');out.chmod(0o600)
  print(json.dumps({'passed':receipt['passed'],'receipt':str(out),'outcomes':[{'kind':r['kind'],'outcome':r['outcome'],'passed':r['passed']} for r in rows]},indent=2))
  return 0 if receipt['passed'] else 1
 if __name__=='__main__':
- parser=argparse.ArgumentParser();parser.add_argument('--prefix',type=Path,required=True);parser.add_argument('--case-timeout-seconds',type=int,default=1200);args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--prefix',type=Path,required=True);parser.add_argument('--case-timeout-seconds',type=int,default=1200);parser.add_argument('--preflight-only',action='store_true');args=parser.parse_args()
+ if args.preflight_only:
+  try:
+   node=shutil.which('node');print(json.dumps(preflight(args.prefix.absolute(),node),indent=2));raise SystemExit(0)
+  except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError) as error:raise SystemExit('REFUSED: '+str(error))
  try:raise SystemExit(main(args.prefix.absolute(),args.case_timeout_seconds))
  except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError) as error:raise SystemExit('REFUSED: '+str(error))

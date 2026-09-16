@@ -1,7 +1,10 @@
 """Owner-operated local maintenance. Never sends prompts to hosted models."""
 import argparse
+import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 sys.dont_write_bytecode=True
 BASE=Path(__file__).resolve().parent
@@ -11,6 +14,16 @@ from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from media import prepare
 
 RELEASES=('PRIVATE_80B','PRIVATE_LEAD')
+
+def work_intent_preflight():
+    node='@NODE@'
+    if node.startswith('@'):node=shutil.which('node')
+    if not node:raise Refused('structured_schema_preflight')
+    result=subprocess.run([node,str(BASE/'preflight-work-intent.mjs')],capture_output=True,text=True,timeout=30)
+    try:value=json.loads(result.stdout)
+    except json.JSONDecodeError:raise Refused('structured_schema_preflight') from None
+    if result.returncode or value.get('ok') is not True or value.get('schema')!='sanctum-work-intent-preflight/v1':raise Refused('structured_schema_preflight')
+    return value
 
 def lifecycle(settings,release):
     return PrivateLeadLifecycle(settings) if release=='PRIVATE_LEAD' else Private80BLifecycle(settings)
@@ -35,7 +48,9 @@ def main():
     if args.command=='sweep' and args.release is None:return sweep_all(settings)
     lc=lifecycle(settings,args.release or 'PRIVATE_80B')
     if args.command=='stop': lc.sweep(immediate=True,manual=True)
-    elif args.command=='resume': lc.resume()
+    elif args.command=='resume':
+        if args.release=='PRIVATE_LEAD':work_intent_preflight()
+        lc.resume()
     elif args.command=='sweep': lc.sweep()
     return lc.status()
 if __name__=='__main__':

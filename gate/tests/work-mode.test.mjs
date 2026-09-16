@@ -1,11 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
 import {CONTRACT_VERSION,validateToolProposal} from '../foundation/contracts.mjs';
-import {validateWorkIntent,workIntentRequest} from '../foundation/work-intent.mjs';
+import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} from '../foundation/work-intent.mjs';
+import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerationSchema} from '../foundation/vllm-structured-output.mjs';
 import {argumentsMatchSchema,createWorkMode,defaultResultEgress,selectCapabilities} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
 import {normalizeWorkspacePacket,workCapabilityErrorCode} from '../plugin/work-command.mjs';
 import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
+import {workModeTools} from '../plugin/workspace-tools.mjs';
+import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
 
 const schema={name:'calc',description:'Evaluate an exact arithmetic expression.',parameters:{type:'object',properties:{expression:{type:'string'}},required:['expression'],additionalProperties:false}};
 const personal={name:'gmail_search',description:'Search Gmail metadata.',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false}};
@@ -100,6 +103,43 @@ test('semantic schema excludes host fields and translates only captured bindings
  assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'hidden',arguments:{}},{specs:[spec]}).code,'CAPABILITY_NOT_VISIBLE');
  const full={schema:CONTRACT_VERSION,proposalId:'p',requestId:'r'.repeat(32),revision:0,reasoner:'PRIVATE_LEAD',capability:work.name,capabilityDigest:spec.digest,arguments:{task_id:'a'.repeat(32),path:'index.js'}};
  assert.equal(validateToolProposal(full,m,()=>true).ok,true);
+});
+test('pinned generation projection omits only incompatible regex while host path validation stays authoritative',()=>{
+ const names=workModeTools.map(x=>x.name),m=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.name,description:x.description,parameters:x.parameters})),declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ const specs=['worktree_list','worktree_read','worktree_patch','worktree_command'].map(x=>m.byName[x]);
+ const authoritative=workIntentSchema(specs),pathPattern=authoritative.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments.properties.path.pattern;
+ assert.equal(pathPattern,'^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$');
+ const first=workIntentRequest(specs),second=workIntentRequest(specs);assert.deepEqual(first,second);assert.equal(first.dialect,'vllm-0.20.1-outlines');assert.equal(validateVllmGenerationSchema(first.schema).ok,true);
+ const generatedPath=first.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments.properties.path;
+ assert.equal(generatedPath.pattern,undefined);assert.equal(generatedPath.minLength,1);assert.equal(generatedPath.maxLength,512);assert.equal(argumentsMatchSchema({path:'../../secret'},first.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments),true);
+ for(const path of ['/absolute','../secret','a/../../secret','bad\u0000name','x'.repeat(513)])assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path}},{specs}).ok,false,path);
+ assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path:'src/index.js'}},{specs}).ok,true);
+ const generatedEscalation=first.schema.oneOf.find(x=>x.properties?.kind?.const==='ESCALATION');assert.equal(generatedEscalation.properties.reason.pattern,undefined);assert.equal(validateWorkIntent({kind:'ESCALATION',reason:'lowercase reason'},{specs}).ok,false);assert.equal(validateWorkIntent({kind:'ESCALATION',reason:'OWNER_DECISION_REQUIRED'},{specs}).ok,true);
+ assert.equal(incompatibleVllmPattern(pathPattern),'REGEX_LOOKAROUND');assert.equal(incompatibleVllmPattern('^[A-Z]+$'),'REGEX_PREFIX_CONTEXT');assert.equal(validateVllmGenerationSchema({type:'string',pattern:'^(?!/)x'}).ok,false);
+ const projected=projectVllmGenerationSchema(authoritative);assert.ok(projected.omitted.some(x=>x.keyword==='pattern'&&x.reason==='REGEX_LOOKAROUND'));assert.ok(projected.omitted.some(x=>x.keyword==='pattern'&&x.reason==='REGEX_PREFIX_CONTEXT'));
+});
+test('production preflight covers every real surface and schema identity changes with visibility',()=>{
+ const result=preflightCurrentWorkIntentSchemas();assert.equal(result.ok,true);assert.deepEqual(result.schemas.all.capabilities,workModeTools.map(x=>x.name));assert.equal(result.schemas.all.branches,workModeTools.length+2);
+ for(const row of Object.values(result.schemas)){assert.equal(validateVllmGenerationSchema(row.request.schema).ok,true);assert.equal(row.request.schemaDigest,row.schemaDigest);assert.ok(row.request.schema.oneOf.some(x=>x.properties?.kind?.const==='FINAL'));assert.ok(row.request.schema.oneOf.some(x=>x.properties?.kind?.const==='ESCALATION'));}
+ assert.notEqual(result.schemas.ordinary.schemaDigest,result.schemas.research.schemaDigest);assert.notEqual(result.schemas.ordinary.schemaDigest,result.schemas.testOnly.schemaDigest);
+ const actual=workIntentRequest(result.schemas.ordinary.capabilities.map(name=>{const names=workModeTools.map(x=>x.name);return deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.name,description:x.description,parameters:x.parameters})),declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}}).byName[name]}));assert.deepEqual(actual,result.schemas.ordinary.request);
+ assert.throws(()=>projectVllmGenerationSchema({type:'object',$ref:'#/bad'}),/structured_schema_keyword/);
+});
+test('semantic rejection cannot reach canonical authority or execution',async()=>{
+ const names=workModeTools.map(x=>x.name),m=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.name,description:x.description,parameters:x.parameters})),declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ const bad={kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path:'../../secret'}};let authority=0,execution=0;
+ const result=await createWorkMode({reasoner:reasoner([bad,bad]),manifest:m,invoke:async()=>{execution++;return {ok:true}},authorize:()=>{authority++;return {}},egress:defaultResultEgress,evaluate:async()=>({passed:true})}).run({task:'synthetic',scope:'a'.repeat(32),requestId:'r'.repeat(32),capabilities:['worktree_read']});
+ assert.equal(result.reason,'REPEATED_INVALID_PROPOSAL');assert.equal(authority,0);assert.equal(execution,0);
+ const spec=m.byName.worktree_read,intent=validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path:'src/index.js'}},{specs:[spec]});
+ const candidate=bindWorkIntent(intent,{proposalId:'p',requestId:'r'.repeat(32),turn:0,reasoner:'PRIVATE_LEAD',scope:'a'.repeat(32),specDigests:{worktree_read:'0'.repeat(64)}});assert.equal(validateToolProposal(candidate,m,()=>true).ok,false);
+});
+test('structured decoding rejection is distinct and never retries or falls back',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};let calls=0;
+ const adapter=createPrivateLeadReasoner({profile,body:()=>({}),execute:async()=>{calls++;return {status:'UNAVAILABLE',reason:'structured_decoding_http_400'};}});
+ const request={schema:CONTRACT_VERSION,requestId:'r'.repeat(32),scope:'a'.repeat(32),revision:0,messages:[{role:'user',content:'synthetic'}],manifestDigest:'b'.repeat(64),state:{phase:'PLAN'}};
+ await assert.rejects(adapter.invoke(request,new AbortController().signal),error=>error.message==='structured_decoding_unavailable'&&error.httpStatus===400);assert.equal(calls,1);
+ const result=await createWorkMode({reasoner:adapter,manifest,invoke:async()=>{throw Error('must not execute')},egress:defaultResultEgress,evaluate:async()=>({passed:true})}).run({task:'synthetic',scope:'a'.repeat(32),requestId:'r'.repeat(32),capabilities:['calc']});
+ assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'STRUCTURED_DECODING_UNAVAILABLE');assert.equal(calls,2);assert.equal(result.metrics.modelCalls,0);
 });
 test('a changed host workspace fingerprint rejects a delayed mutation before authority',async()=>{
  const patch={name:'worktree_patch',parameters:{type:'object',properties:{task_id:{type:'string'},patch:{type:'string'}},required:['task_id','patch'],additionalProperties:false}};

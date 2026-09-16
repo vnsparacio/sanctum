@@ -5,8 +5,8 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 
 FILES=(
- 'SETTINGS.json','manage.py','worker.py','src/authority.py','src/backends.py','src/command_runner.py','src/lifecycle.py','src/workspace.py',
- 'foundation/contracts.mjs','foundation/manifest.mjs','foundation/evidence.mjs','foundation/work-intent.mjs','plugin/index.mjs','plugin/core.mjs',
+ 'SETTINGS.json','manage.py','worker.py','qualify_work_mode.py','probe_work_intent.py','preflight-work-intent.mjs','src/authority.py','src/backends.py','src/command_runner.py','src/lifecycle.py','src/workspace.py',
+ 'foundation/contracts.mjs','foundation/manifest.mjs','foundation/evidence.mjs','foundation/work-intent.mjs','foundation/vllm-structured-output.mjs','plugin/index.mjs','plugin/core.mjs',
  'plugin/private-lead.mjs','plugin/source-retrieval.mjs','plugin/work-mode.mjs','plugin/work-command.mjs','plugin/command-broker.mjs',
  'plugin/work-ledger.mjs','plugin/workspace-tools.mjs','plugin/openclaw.plugin.json','plugin/package.json',
  'runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/bootstrap-vllm.sh',

@@ -21,7 +21,12 @@ export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>
    // loss of the private runtime.  Preserve that distinction so Work Mode can
    // spend its single accepted correction turn.  All other worker failures
    // remain availability failures and stop closed.
-   if(result?.status!=='OK'||!result.result){if(result?.reason==='private_lead_result_schema')throw Error('reasoner_result_shape');throw Error('private_lead_unavailable');}
+   if(result?.status!=='OK'||!result.result){
+     if(result?.reason==='private_lead_result_schema')throw Error('reasoner_result_shape');
+     const match=String(result?.reason??'').match(/^structured_decoding_http_(400|422)$/);
+     if(match){const error=Error('structured_decoding_unavailable');error.httpStatus=Number(match[1]);error.backendFailure='HTTP_REJECTED';throw error;}
+     throw Error('private_lead_unavailable');
+   }
    if(result.telemetry)onTelemetry(structuredClone(result.telemetry));
    return result.result;
  }});

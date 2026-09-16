@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -16,7 +17,7 @@ from common import Refused, canonical, database, strict_json
 from authority import authorize
 from dispatch import assess
 from schema import validate
-from backends import Remote, Private80BBackend, PrivateLeadBackend, LocalMultimodalBackend, extract_chat, answer_result
+from backends import Remote, Private80BBackend, PrivateLeadBackend, LocalMultimodalBackend, extract_chat, answer_result, structured_http_reason
 from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from runpod import capacity_rejected
 from media import prepare, load, expand
@@ -160,11 +161,20 @@ class Transport(Temp):
         def send(url,p=None,*args,**kw):
             if url.endswith('/models'): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
             calls.append(p);return chat(canonical(response))
-        intent={'version':'sanctum-work-intent/v1','schema':{'type':'object'},'schemaDigest':'a'*64}
+        schema={'type':'object'};intent={'version':'sanctum-work-intent/v1','dialect':'vllm-0.20.1-outlines','schema':schema,'schemaDigest':hashlib.sha256(canonical(schema).encode()).hexdigest(),'semanticSchemaDigest':'a'*64}
         result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
-        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0]);self.assertEqual(calls[0]['response_format']['json_schema']['schema'],intent['schema'])
+        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0]);self.assertEqual(calls[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertTrue(calls[0]['response_format']['json_schema']['strict'])
+        self.assertEqual(structured_http_reason(400),'structured_decoding_http_400');self.assertEqual(structured_http_reason(422),'structured_decoding_http_422');self.assertEqual(structured_http_reason(503),'http_503')
     def test_private_lead_proposal_refuses_invalid_request(self):
         with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
+    def test_private_lead_accepts_exact_production_preflight_schema(self):
+        self.s['private_lead']['enabled']=True;captured=[]
+        document=json.loads(subprocess.check_output(['node',str(BASE/'preflight-work-intent.mjs'),'--json'],text=True));intent=document['schemas']['ordinary']['request']
+        def send(url,p=None,*args,**kwargs):
+            if url.endswith('/models'):return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
+            captured.append(p);return chat(canonical({'kind':'FINAL','text':'READY'}))
+        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
+        self.assertEqual(result['status'],'OK');self.assertEqual(captured[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertEqual(intent['schemaDigest'],'06649c94b07ec2cfc509c93b0473a76dc08128dac89e34a45b4f8267372c92f9')
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
@@ -305,6 +315,10 @@ class Lifecycle(Temp):
         self.assertEqual(lead.propose('lead',{})['status'],'OK');self.assertEqual(self.p.created,1);self.assertIn('propose',self.b.calls)
 
 class Janitor(Temp):
+    def test_private_lead_resume_preflight_uses_production_schema(self):
+        result=manage.work_intent_preflight();ordinary=result['schemas']['ordinary']
+        self.assertTrue(result['ok']);self.assertEqual(ordinary['dialect'],'vllm-0.20.1-outlines');self.assertEqual(ordinary['branches'],6)
+
     def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):
         calls=[]
         class Fake:

@@ -1,5 +1,6 @@
 """Reasoning-only adapters. No tool schemas, ambient history, retries, or GPU creation."""
 import base64
+import hashlib
 import json
 import math
 import os
@@ -56,6 +57,9 @@ def answer_result(text, grounded=False):
         return {'status':'OK','text':x['text'],'escalation':x['escalation'],'grounded':x}
     if type(x) is not dict or set(x) != {'answer', 'escalation'} or type(x['answer']) is not str or not x['answer'].strip() or len(x['answer'].encode()) > 32768 or x['escalation'] not in ['NONE', 'HOSTED_235B', 'OPENAI_FRONTIER']: raise Refused('answer_schema')
     return {'status': 'OK', 'text': x['answer'], 'escalation': x['escalation']}
+
+def structured_http_reason(status):
+    return 'structured_decoding_http_'+str(status) if status in (400,422) else 'http_'+str(status)
 
 class Remote:
     def __init__(self, settings, send=http, router_key=openrouter_key, direct_key=openai_key):
@@ -182,7 +186,8 @@ class PrivateLeadBackend(Private80BBackend):
         if len(canonical(request).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
         self.health_check()
         intent=request['request'].get('state',{}).get('workIntent')
-        if type(intent) is not dict or set(intent) != {'version','schema','schemaDigest'} or intent['version'] != 'sanctum-work-intent/v1' or type(intent['schema']) is not dict or type(intent['schemaDigest']) is not str: raise Refused('private_lead_intent_contract')
+        if type(intent) is not dict or set(intent) != {'version','dialect','schema','schemaDigest','semanticSchemaDigest'} or intent['version'] != 'sanctum-work-intent/v1' or intent['dialect'] != 'vllm-0.20.1-outlines' or type(intent['schema']) is not dict or type(intent['schemaDigest']) is not str or type(intent['semanticSchemaDigest']) is not str: raise Refused('private_lead_intent_contract')
+        if hashlib.sha256(canonical(intent['schema']).encode()).hexdigest()!=intent['schemaDigest'] or any(len(intent[key])!=64 or any(c not in '0123456789abcdef' for c in intent[key]) for key in ('schemaDigest','semanticSchemaDigest')):raise Refused('private_lead_intent_contract')
         system = request['system'] + '\nReturn exactly one semantic Work Intent JSON object. Do not include host bindings, task IDs, authority, approval, egress, or commentary.'
         p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':True,'stream_options':{'include_usage':True},'chat_template_kwargs':{'enable_thinking':False},'response_format':{'type':'json_schema','json_schema':{'name':'sanctum_work_intent_v1','strict':True,'schema':intent['schema']}}}
         started=time.monotonic();first=None;usage={};finish=None;parts=[]
@@ -207,7 +212,7 @@ class PrivateLeadBackend(Private80BBackend):
                                 if sum(map(len,parts))>65536:raise Refused('private_lead_result_limit')
                             finish=choices[0].get('finish_reason') or finish
             except Refused:raise
-            except urllib.error.HTTPError as e:raise Refused('http_'+str(e.code)) from None
+            except urllib.error.HTTPError as e:raise Refused(structured_http_reason(e.code)) from None
             except Exception:raise Refused('transport_unavailable') from None
             if finish!='stop':raise Refused('answer_incomplete')
             text=''.join(parts)

@@ -1,5 +1,6 @@
 /* Model-facing Work Mode intent.  Host bindings never cross this boundary. */
 import {CONTRACT_VERSION,canonical,digest,isRecord} from './contracts.mjs';
+import {projectVllmGenerationSchema} from './vllm-structured-output.mjs';
 
 export const WORK_INTENT_VERSION='sanctum-work-intent/v1';
 const hostFields=new Set(['schema','proposalId','requestId','revision','reasoner','capabilityDigest','task_id','scope','workspace','manifestDigest','authority','egress','approval']);
@@ -20,7 +21,10 @@ export function workIntentSchema(specs,{testOnly=false}={}){
  branches.push({type:'object',properties:{kind:{const:'ESCALATION'},reason:{type:'string',pattern:'^[A-Z][A-Z0-9_:-]{0,79}$'}},required:['kind','reason'],additionalProperties:false});
  return {type:'object',oneOf:branches};
 }
-export function workIntentRequest(specs,options={}){const schema=workIntentSchema(specs,options);return {version:WORK_INTENT_VERSION,schema,schemaDigest:digest(schema)};}
+export function workIntentRequest(specs,options={}){
+ const authoritative=workIntentSchema(specs,options),generation=projectVllmGenerationSchema(authoritative);
+ return {version:WORK_INTENT_VERSION,dialect:generation.dialect,schema:generation.schema,schemaDigest:digest(generation.schema),semanticSchemaDigest:digest(authoritative)};
+}
 export function validateWorkIntent(value,{specs=[],testOnly=false}={}){
  if(!isRecord(value)||typeof value.kind!=='string')return fail('SEMANTIC_SHAPE',{receivedType:typeOf(value)});
  for(const key of Object.keys(value))if(hostFields.has(key))return fail('FORBIDDEN_HOST_FIELD',{field:key});
