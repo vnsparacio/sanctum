@@ -1,8 +1,11 @@
 # Project 3D: PRIVATE_LEAD capability integration and Work Mode handoff
 
+> Phase 11 audit note: this is source scaffolding, not an accepted or deployed
+> Work Mode. See `PROJECT-3-PHASE-11-AUDIT.md`.
+
 ## Scope and result
 
-Project 3D adds the staged, data-only `PRIVATE_LEAD` proposal path and a Mac-owned Work Mode coordinator. The accepted Project 3C profile remains unchanged: compact prompt, host-selected capability view capped at four, direct single-action proposals, host task state, one schema correction, and no model-authored plans.
+Project 3D adds source scaffolding for the staged, data-only `PRIVATE_LEAD` proposal path and a Mac-owned Work Mode coordinator. The accepted Project 3C profile remains unchanged: compact prompt, host-selected capability view capped at four, direct single-action proposals, host task state, one schema correction, and no model-authored plans.
 
 The implementation does not promote `PRIVATE_LEAD` into normal Gate routing, change the accepted 80B release, enable GPU autostart, or make a production/candidate ownership switch.
 

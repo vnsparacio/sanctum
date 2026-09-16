@@ -210,11 +210,12 @@
   "scripts/upgrade_source_first.py": "e5631c8164f144549e800bbf5f4421510be578d01a9168412e91c9fe4f099b75",
   "scripts/upgrade_private_lead.py": "811a9d0a9ed1ea72a37b2430bd47c4252d0d7a1a1c34e9694ee03e8d2d3b77d3",
   "tests/test_release.py": "7d1a2db915505c826829a63577e57af84b20473e2377f751abcd8ab48e9a4d19",
-  "docs/PROJECT-3D-HANDOFF.md": "4326b315512c02555d7e7720650a0b38d2f9bbdeedbdb620d70d4caec99e97aa",
+  "docs/PROJECT-3D-HANDOFF.md": "e42d24e33f5df5d4e56b4c91b0a4cebbb209af2c6b5ad5b59781454666322510",
   "gate/plugin/command-broker.mjs": "6e33ebf645bcb680143d82f0543b4b9a4caa78c710571ebf20122e36d242ede6",
   "gate/plugin/private-lead.mjs": "ec612e428efb07c4dca1566a9badaf7bdf7b666be03d2298fe49240e1624e43f",
-  "gate/plugin/work-mode.mjs": "c18ad781eb1e97dd3cd20ca4ddd93245598cc3bb8337a74c03a327e3d3db8e1b",
+  "gate/plugin/work-mode.mjs": "dc7ce4181edf7ff2acd56fe66c5dffd926e31b08916302399400ac7b292fb6e5",
   "gate/src/workspace.py": "4fc0d2d8dfffe21bb120ba9c7b58fc9fd3272e95caa96fe0fbbf580f51e4cb0d",
   "gate/tests/test_workspace.py": "eb33c55d4f1168437f7f37060181b95bbbe906684b05b45e7125b78326599d91",
-  "gate/tests/work-mode.test.mjs": "d028f44e344db65f893b36136b3e7163ccd89661f37eeb3cd9f8d441b3afd722"
+  "gate/tests/work-mode.test.mjs": "f8473089f8444ce2f3a133899d20956fa5600b0f55368a34fd71abf4220f454d",
+  "docs/PROJECT-3-PHASE-11-AUDIT.md": "0d5355de75b4c6126085f2bb7937fcbed82573e8a12ee1e42338aaab4c5b57ce"
 }
