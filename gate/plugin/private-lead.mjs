@@ -15,7 +15,7 @@ export function profileSystem(profile){
 export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>{}}){
  if(typeof execute!=='function'||typeof body!=='function')throw Error('private_lead_adapter_config');
  const system=profileSystem(profile);
- return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsToolProposals:true,async invoke(request,signal){
+ return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsWorkIntents:true,async invoke(request,signal){
    const result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:{system,request}},'private_lead_workmode'),signal);
    // A syntactically malformed model result is a proposal-schema failure, not
    // loss of the private runtime.  Preserve that distinction so Work Mode can

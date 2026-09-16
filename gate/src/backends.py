@@ -181,8 +181,10 @@ class PrivateLeadBackend(Private80BBackend):
         if type(request['system']) is not str or type(request['request']) is not dict: raise Refused('private_lead_request')
         if len(canonical(request).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
         self.health_check()
-        system = request['system'] + '\nReturn exactly one JSON object. It must be either {"kind":"FINAL","text":"..."}, {"kind":"ESCALATION","reason":"CODE"}, or {"kind":"TOOL_PROPOSAL","proposal":{...}}. A proposal has only schema, proposalId, requestId, revision, reasoner, capability, capabilityDigest, arguments. Never include authority, approval, egress, paths outside supplied context, or commentary.'
-        p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':True,'stream_options':{'include_usage':True},'chat_template_kwargs':{'enable_thinking':False}}
+        intent=request['request'].get('state',{}).get('workIntent')
+        if type(intent) is not dict or set(intent) != {'version','schema','schemaDigest'} or intent['version'] != 'sanctum-work-intent/v1' or type(intent['schema']) is not dict or type(intent['schemaDigest']) is not str: raise Refused('private_lead_intent_contract')
+        system = request['system'] + '\nReturn exactly one semantic Work Intent JSON object. Do not include host bindings, task IDs, authority, approval, egress, or commentary.'
+        p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':True,'stream_options':{'include_usage':True},'chat_template_kwargs':{'enable_thinking':False},'response_format':{'type':'json_schema','json_schema':{'name':'sanctum_work_intent_v1','strict':True,'schema':intent['schema']}}}
         started=time.monotonic();first=None;usage={};finish=None;parts=[]
         if self.send is http:
             opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))

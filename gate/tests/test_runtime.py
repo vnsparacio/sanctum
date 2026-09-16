@@ -160,8 +160,9 @@ class Transport(Temp):
         def send(url,p=None,*args,**kw):
             if url.endswith('/models'): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
             calls.append(p);return chat(canonical(response))
-        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{}}})
-        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0])
+        intent={'version':'sanctum-work-intent/v1','schema':{'type':'object'},'schemaDigest':'a'*64}
+        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
+        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0]);self.assertEqual(calls[0]['response_format']['json_schema']['schema'],intent['schema'])
     def test_private_lead_proposal_refuses_invalid_request(self):
         with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
     def test_answer_schema_no_authority_fields(self):

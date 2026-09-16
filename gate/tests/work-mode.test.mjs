@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
-import {CONTRACT_VERSION} from '../foundation/contracts.mjs';
+import {CONTRACT_VERSION,validateToolProposal} from '../foundation/contracts.mjs';
+import {validateWorkIntent,workIntentRequest} from '../foundation/work-intent.mjs';
 import {argumentsMatchSchema,createWorkMode,defaultResultEgress,selectCapabilities} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
 import {normalizeWorkspacePacket,workCapabilityErrorCode} from '../plugin/work-command.mjs';
@@ -9,7 +10,7 @@ import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
 const schema={name:'calc',description:'Evaluate an exact arithmetic expression.',parameters:{type:'object',properties:{expression:{type:'string'}},required:['expression'],additionalProperties:false}};
 const personal={name:'gmail_search',description:'Search Gmail metadata.',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false}};
 const manifest=deriveCapabilityManifest({schemas:[schema,personal],declaredTools:['calc','gmail_search'],registeredTools:['calc','gmail_search'],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:['calc','gmail_search']}}});
-const proposal=(name,args={},revision=0)=>({kind:'TOOL_PROPOSAL',proposal:{schema:CONTRACT_VERSION,proposalId:'proposal'+revision,requestId:'r'.repeat(32),revision,reasoner:'PRIVATE_LEAD',capability:name,capabilityDigest:manifest.byName[name].digest,arguments:args}});
+const proposal=(name,args={})=>({kind:'TOOL_PROPOSAL',capability:name,arguments:args});
 const final={kind:'FINAL',text:'done'};
 const reasoner=rows=>({async invoke(){const value=rows.shift();if(value instanceof Error)throw value;return value;}});
 const run=({rows,invoke=async()=>({ok:true,data:{value:4},verifier:'VERIFIED'}),egress=defaultResultEgress,reviewer=null,authorize,evaluate=async()=>({passed:true,tests:1}),maxIterations=8,task='synthetic task'}={})=>createWorkMode({reasoner:reasoner(rows),manifest,invoke,egress,reviewer,authorize,evaluate}).run({task,scope:'a'.repeat(32),requestId:'r'.repeat(32),maxIterations});
@@ -22,14 +23,12 @@ test('personal result egress is withheld and the model cannot receive it',async(
  const result=await run({rows:[proposal('gmail_search',{query:'synthetic'}),final],invoke:async()=>({ok:true,data:{messages:[]}})});
  assert.equal(result.status,'COMPLETE');assert.equal(result.state.observations[0].kind,'RESULT_WITHHELD');
 });
-test('schema drift, repeated invalid proposal, approval and completion uncertainty stop deterministically',async()=>{
- const invalid={kind:'TOOL_PROPOSAL',proposal:{...proposal('calc',{expression:'x'}).proposal,capabilityDigest:'0'.repeat(64)}};
+test('semantic schema, repeated invalid proposal, approval and completion uncertainty stop deterministically',async()=>{
+ const invalid={kind:'TOOL_PROPOSAL',capability:'calc',arguments:{expression:'x',authority:'ALLOW'}};
  assert.equal((await run({rows:[invalid,invalid]})).status,'SAFETY_POLICY_BLOCK');
- const wrongBinding={kind:'TOOL_PROPOSAL',proposal:{...proposal('calc',{expression:'1'}).proposal,requestId:'wrong'}};
- assert.equal((await run({rows:[wrongBinding,proposal('calc',{expression:'1'},1),final]})).status,'COMPLETE');
- const laterWrong={kind:'TOOL_PROPOSAL',proposal:{...proposal('calc',{expression:'1'},2).proposal,requestId:'wrong'}};
- assert.equal((await run({rows:[wrongBinding,proposal('calc',{expression:'1'},1),laterWrong,proposal('calc',{expression:'1'},3),final],maxIterations:8})).status,'COMPLETE');
- assert.equal((await run({rows:[wrongBinding,wrongBinding]})).reason,'REPEATED_INVALID_PROPOSAL');
+ const forbidden={kind:'TOOL_PROPOSAL',capability:'calc',arguments:{expression:'1'},requestId:'wrong'};
+ assert.equal((await run({rows:[forbidden,proposal('calc',{expression:'1'}),final]})).status,'COMPLETE');
+ assert.equal((await run({rows:[forbidden,forbidden]})).reason,'REPEATED_INVALID_PROPOSAL');
  assert.equal((await run({rows:[proposal('gmail_search',{query:'x'})],authorize:(p,s,scope,now)=>({schema:CONTRACT_VERSION,outcome:'ASK',capability:p.capability,proposalDigest:'a'.repeat(64),scope,effect:'READ',source:'NATIVE_APPROVAL',reasonCodes:['EXACT_OWNER_APPROVAL_REQUIRED'],expires:now+60,oneUse:true})})).status,'NEEDS_APPROVAL');
  assert.equal((await run({rows:[proposal('calc',{expression:'1'}),final],egress:()=>defaultResultEgress({claim:{dataClasses:['RESTRICTED']},spec:{policy:{remoteResultEligible:false}}}),invoke:async()=>({ok:false,error:{code:'FAILED'},executionState:'COMPLETION_UNKNOWN'})})).status,'BLOCKED');
 });
@@ -40,7 +39,7 @@ test('one separate reviewer can require revision or reject before completion',as
 test('a model-requested passing test triggers host evaluation and one reviewer without more model edits',async()=>{
  const tool={name:'worktree_command',description:'Run a host test.',parameters:{type:'object',properties:{task_id:{type:'string'},operation:{type:'string',enum:['test']}},required:['task_id','operation'],additionalProperties:false}};
  const tools=deriveCapabilityManifest({schemas:[tool],declaredTools:[tool.name],registeredTools:[tool.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[tool.name]}}});
- const row={kind:'TOOL_PROPOSAL',proposal:{schema:CONTRACT_VERSION,proposalId:'test1',requestId:'r'.repeat(32),revision:0,reasoner:'PRIVATE_LEAD',capability:tool.name,capabilityDigest:tools.byName[tool.name].digest,arguments:{task_id:'a'.repeat(32),operation:'test'}}};let reviews=0,evaluations=0;
+ const row={kind:'TOOL_PROPOSAL',capability:tool.name,arguments:{operation:'test'}};let reviews=0,evaluations=0;
  const authorize=(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:'a'.repeat(64),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
  const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
  const result=await createWorkMode({reasoner:reasoner([row]),manifest:tools,invoke:async()=>({ok:true,code:'OK',executionState:'COMPLETED',verifier:'VERIFIED'}),authorize,egress,evaluate:async()=>{evaluations++;return {passed:true,diffDigest:'d'.repeat(64),diffStable:true,checks:[{operation:'test',ok:true,code:'OK',outputDigest:'e'.repeat(64),elapsedMs:3}]};},reviewer:async({state})=>{reviews++;assert.equal(state.tests.checks[0].operation,'test');assert.equal(state.tests.diffStable,true);return {verdict:'ACCEPT'};}}).run({task:'fix',scope:'a'.repeat(32),requestId:'r'.repeat(32),capabilities:[tool.name]});
@@ -50,18 +49,17 @@ test('a successful patch makes a host test the only permitted next action',async
  const patchTool={name:'worktree_patch',description:'Patch.',parameters:{type:'object',properties:{task_id:{type:'string'},patch:{type:'string'}},required:['task_id','patch'],additionalProperties:false}};
  const testTool={name:'worktree_command',description:'Test.',parameters:{type:'object',properties:{task_id:{type:'string'},operation:{type:'string',enum:['test']}},required:['task_id','operation'],additionalProperties:false}};
  const tools=deriveCapabilityManifest({schemas:[patchTool,testTool],declaredTools:[patchTool.name,testTool.name],registeredTools:[patchTool.name,testTool.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[patchTool.name,testTool.name]}}});
- const row=(tool,args,revision)=>({kind:'TOOL_PROPOSAL',proposal:{schema:CONTRACT_VERSION,proposalId:'p'+revision,requestId:'r'.repeat(32),revision,reasoner:'PRIVATE_LEAD',capability:tool.name,capabilityDigest:tools.byName[tool.name].digest,arguments:args}});
+ const row=(tool,args)=>({kind:'TOOL_PROPOSAL',capability:tool.name,arguments:args});
  const taskId='a'.repeat(32),calls=[];const authorize=(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:'a'.repeat(64),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
  const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
- const result=await createWorkMode({reasoner:reasoner([row(patchTool,{task_id:taskId,patch:'first'},0),row(patchTool,{task_id:taskId,patch:'second'},1),row(testTool,{task_id:taskId,operation:'test'},2)]),manifest:tools,invoke:async({proposal})=>{calls.push(proposal.arguments);return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},authorize,egress,evaluate:async()=>({passed:true}),reviewer:null}).run({task:'fix',scope:taskId,requestId:'r'.repeat(32),capabilities:[patchTool.name,testTool.name],maxIterations:4});
- assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.patch),['first','test']);assert.ok(result.state.observations.some(x=>x.code==='TEST_REQUIRED_AFTER_PATCH'));
+ const result=await createWorkMode({reasoner:reasoner([row(patchTool,{patch:'first'}),row(patchTool,{patch:'second'}),row(testTool,{operation:'test'})]),manifest:tools,invoke:async({proposal})=>{calls.push(proposal.arguments);return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},authorize,egress,evaluate:async()=>({passed:true}),reviewer:null}).run({task:'fix',scope:taskId,requestId:'r'.repeat(32),capabilities:[patchTool.name,testTool.name],maxIterations:4});
+ assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.patch),['first','test']);assert.ok(result.state.observations.some(x=>x.code==='CAPABILITY_NOT_VISIBLE'));
 });
-test('binding repair identifies the exact host field without relaxing the second-invalid stop',async()=>{
- const badRequest={kind:'TOOL_PROPOSAL',proposal:{...proposal('calc',{expression:'1'}).proposal,requestId:'wrong'}};
- const badRevision={kind:'TOOL_PROPOSAL',proposal:{...proposal('calc',{expression:'1'},1).proposal,revision:9}};
- const fixed=proposal('calc',{expression:'1'},1);
- const repaired=await run({rows:[badRequest,fixed,final]});assert.equal(repaired.status,'COMPLETE');assert.equal(repaired.state.observations[0].code,'REQUEST_ID_MISMATCH');assert.equal(repaired.state.observations[0].expected.revision,1);
- const stopped=await run({rows:[badRequest,badRevision]});assert.equal(stopped.status,'SAFETY_POLICY_BLOCK');assert.equal(stopped.reason,'REPEATED_INVALID_PROPOSAL');
+test('host bindings are derived once and forbidden injection consumes the correction turn',async()=>{
+ const badRequest={kind:'TOOL_PROPOSAL',capability:'calc',arguments:{expression:'1'},revision:9};
+ const fixed=proposal('calc',{expression:'1'});
+ const repaired=await run({rows:[badRequest,fixed,final]});assert.equal(repaired.status,'COMPLETE');assert.equal(repaired.state.observations[0].code,'FORBIDDEN_HOST_FIELD');assert.equal(repaired.state.correction,undefined);
+ const stopped=await run({rows:[badRequest,badRequest]});assert.equal(stopped.status,'SAFETY_POLICY_BLOCK');assert.equal(stopped.reason,'REPEATED_INVALID_PROPOSAL');
 });
 test('malformed reasoner results consume the one schema-correction turn instead of claiming runtime loss',async()=>{
  const corrected=await run({rows:[Error('reasoner_result_shape'),proposal('calc',{expression:'1'},1),final]});assert.equal(corrected.status,'COMPLETE');assert.equal(corrected.state.observations[0].code,'REASONER_RESULT_SCHEMA');assert.equal(corrected.metrics.modelCalls,3);
@@ -91,6 +89,23 @@ test('argument schemas and task-state limits are enforced before authority',asyn
  assert.equal((await createWorkMode({reasoner:reasoner([final]),manifest,invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true})}).run({task:'x',scope:'a'.repeat(32),requestId:'r'.repeat(32),maxIterations:1.5})).status,'ENVIRONMENT_FAILURE');
  assert.equal((await run({rows:[final],maxIterations:16})).status,'COMPLETE');
  assert.equal((await run({rows:[final],maxIterations:17})).status,'ENVIRONMENT_FAILURE');
+});
+test('semantic schema excludes host fields and translates only captured bindings',()=>{
+ const work={name:'worktree_read',description:'Read.',parameters:{type:'object',properties:{task_id:{type:'string',pattern:'^[a-f0-9]{32}$'},path:{type:'string',minLength:1,maxLength:512},max_chars:{type:'integer',minimum:1,maximum:24000}},required:['task_id','path'],additionalProperties:false}};
+ const m=deriveCapabilityManifest({schemas:[work],registeredTools:[work.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[work.name]}}}),spec=m.byName[work.name];
+ const intent=workIntentRequest([spec]);assert.equal(intent.version,'sanctum-work-intent/v1');assert.equal(intent.schema.oneOf[0].properties.arguments.properties.task_id,undefined);
+ assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:work.name,arguments:{path:'index.js'}},{specs:[spec]}).ok,true);
+ assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:work.name,arguments:{path:null}},{specs:[spec]}).code,'ARGUMENT_SCHEMA');
+ assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:work.name,arguments:{path:'index.js'},task_id:'x'},{specs:[spec]}).code,'FORBIDDEN_HOST_FIELD');
+ assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'hidden',arguments:{}},{specs:[spec]}).code,'CAPABILITY_NOT_VISIBLE');
+ const full={schema:CONTRACT_VERSION,proposalId:'p',requestId:'r'.repeat(32),revision:0,reasoner:'PRIVATE_LEAD',capability:work.name,capabilityDigest:spec.digest,arguments:{task_id:'a'.repeat(32),path:'index.js'}};
+ assert.equal(validateToolProposal(full,m,()=>true).ok,true);
+});
+test('a changed host workspace fingerprint rejects a delayed mutation before authority',async()=>{
+ const patch={name:'worktree_patch',parameters:{type:'object',properties:{task_id:{type:'string'},patch:{type:'string'}},required:['task_id','patch'],additionalProperties:false}};
+ const m=deriveCapabilityManifest({schemas:[patch],registeredTools:[patch.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[patch.name]}}});let n=0,authorised=0;
+ const result=await createWorkMode({reasoner:reasoner([{kind:'TOOL_PROPOSAL',capability:patch.name,arguments:{patch:'x'}}]),manifest:m,workspaceState:async()=>({tree:++n}),invoke:async()=>({ok:true}),authorize:()=>{authorised++;return {};},egress:defaultResultEgress,evaluate:async()=>({passed:true})}).run({task:'x',scope:'a'.repeat(32),requestId:'r'.repeat(32),capabilities:[patch.name]});
+ assert.equal(result.reason,'WORKSPACE_STATE_CHANGED');assert.equal(authorised,0);
 });
 test('host evaluator, reviewer, authority, result, and egress failures close deterministically',async()=>{
  assert.equal((await run({rows:[final],evaluate:async()=>{throw Error('fail');}})).reason,'EVALUATOR_UNAVAILABLE');
