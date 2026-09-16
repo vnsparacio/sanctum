@@ -22,11 +22,13 @@ function surface(byName,label,selected,options={}){
 export function preflightCurrentWorkIntentSchemas(){
  const current=manifest(),byName=current.byName;
  const schemas={
-   all:surface(byName,'all',names),
-   ordinary:surface(byName,'ordinary',['worktree_list','worktree_read','worktree_patch','worktree_command']),
-   research:surface(byName,'research',['worktree_list','worktree_read','source_first_research','worktree_command']),
-   testOnly:surface(byName,'testOnly',['worktree_command'],{testOnly:true}),
-   reviewer:surface(byName,'reviewer',[]),
+   allEligible:surface(byName,'allEligible',names,{terminalKinds:['FINAL','ESCALATION']}),
+   ordinaryIneligible:surface(byName,'ordinaryIneligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['ESCALATION']}),
+   ordinaryEligible:surface(byName,'ordinaryEligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   researchIneligible:surface(byName,'researchIneligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
+   researchEligible:surface(byName,'researchEligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   testOnlyIneligible:surface(byName,'testOnlyIneligible',['worktree_command'],{testOnly:true,terminalKinds:['ESCALATION']}),
+   reviewer:surface(byName,'reviewer',[],{terminalKinds:['FINAL']}),
  };
  return {ok:true,schema:'sanctum-work-intent-preflight/v1',manifestDigest:current.digest,schemas};
 }

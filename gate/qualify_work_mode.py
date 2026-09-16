@@ -71,9 +71,12 @@ def preflight(prefix,node):
  try:value=json.loads(result.stdout)
  except json.JSONDecodeError:raise RuntimeError('structured_schema_preflight') from None
  if result.returncode or value.get('ok') is not True or value.get('schema')!='sanctum-work-intent-preflight/v1':raise RuntimeError('structured_schema_preflight')
- ordinary=value.get('schemas',{}).get('ordinary',{})
- if ordinary.get('version')!='sanctum-work-intent/v1' or ordinary.get('dialect')!='vllm-0.20.1-outlines' or not re.fullmatch(r'[a-f0-9]{64}',ordinary.get('schemaDigest','')):raise RuntimeError('structured_schema_preflight')
- return {'schema':value['schema'],'manifestDigest':value['manifestDigest'],'version':ordinary['version'],'dialect':ordinary['dialect'],'schemaDigest':ordinary['schemaDigest'],'semanticSchemaDigest':ordinary['semanticSchemaDigest']}
+ required=('ordinaryIneligible','ordinaryEligible','researchIneligible','researchEligible','testOnlyIneligible','reviewer');surfaces={}
+ for name in required:
+  row=value.get('schemas',{}).get(name,{})
+  if row.get('version')!='sanctum-work-intent/v1' or row.get('dialect')!='vllm-0.20.1-outlines' or not re.fullmatch(r'[a-f0-9]{64}',row.get('schemaDigest','')) or not re.fullmatch(r'[a-f0-9]{64}',row.get('semanticSchemaDigest','')):raise RuntimeError('structured_schema_preflight')
+  surfaces[name]={'schemaDigest':row['schemaDigest'],'semanticSchemaDigest':row['semanticSchemaDigest'],'branches':row.get('branches')}
+ return {'schema':value['schema'],'manifestDigest':value['manifestDigest'],'version':'sanctum-work-intent/v1','dialect':'vllm-0.20.1-outlines','surfaces':surfaces}
 def main(prefix,timeout):
  env={**os.environ,**json.loads((prefix/'config/environment.json').read_text())};node=shutil.which('node');bridge=str(prefix/'gate/webui/bridge.mjs')
  schema_preflight=preflight(prefix,node);seed(prefix);rows=[];sessions=[]

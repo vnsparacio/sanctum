@@ -4,8 +4,11 @@ import {createHash,createHmac} from 'node:crypto';
 import {join,resolve} from 'node:path';
 import {canonical,digest} from '../foundation/contracts.mjs';
 
-const allowed=new Set(['TASK_CREATED','WORKSPACE_CREATED','PHASE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
+const allowed=new Set(['TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
 const safeId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
+const safeLabel=value=>typeof value==='string'&&/^[A-Z][A-Z0-9_.:-]{0,79}$/.test(value);
+const safeDigest=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+const oneOf=(value,allowed)=>allowed.includes(value);
 function privateDir(path){
  const parent=resolve(path);mkdirSync(parent,{recursive:true,mode:0o700});
  if(lstatSync(parent).isSymbolicLink()||(lstatSync(parent).mode&0o077))throw Error('unsafe_work_ledger');
@@ -19,6 +22,20 @@ function clean(value){
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key])=>!/(?:^goal$|prompt|content|output|text|body|secret|token|path)/i.test(key)).map(([key,item])=>[key,clean(item)]));
  return null;
 }
+export function sanitizeSemanticSurface(value){
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('work_ledger_surface');
+ const strings=['phase','stage','decisionState','eligibilityReason','completionPolicy','latestTestState','evaluatorState','evaluationTrigger','selectedResultKind','validationCode','reviewDisposition'];
+ if(strings.some(key=>!safeLabel(value[key])))throw Error('work_ledger_surface');
+ if(!oneOf(value.stage,['REQUEST','RESULT'])||!oneOf(value.phase,['PLAN'])||!oneOf(value.decisionState,['WORK_REQUIRED','TEST_REQUIRED','COMPLETION_ELIGIBLE'])||!oneOf(value.completionPolicy,['MUTABLE_WORKTREE_V1']))throw Error('work_ledger_surface');
+ if(!oneOf(value.eligibilityReason,['HOST_STOP_ACTIVE','EXECUTION_UNCERTAIN','WORKSPACE_EVIDENCE_UNAVAILABLE','POST_PATCH_TEST_REQUIRED','NO_COMPLETABLE_DIFF','NO_WORKTREE_CHANGES','ELIGIBLE_FOR_FRESH_EVALUATION']))throw Error('work_ledger_surface');
+ if(!oneOf(value.latestTestState,['NOT_RUN','PASS','FAIL','STALE'])||!oneOf(value.evaluatorState,['NOT_RUN','RUNNING','PASS','FAIL','STALE'])||!oneOf(value.evaluationTrigger,['NONE','FINAL','HOST_TEST_PASSED']))throw Error('work_ledger_surface');
+ if(!oneOf(value.selectedResultKind,['PENDING','REJECTED','UNKNOWN','TOOL_PROPOSAL','FINAL','ESCALATION'])||!oneOf(value.reviewDisposition,['NOT_CONFIGURED','NOT_RUN','ACCEPT','REVISE','REJECT']))throw Error('work_ledger_surface');
+ if(typeof value.completionEligible!=='boolean'||typeof value.postPatchTestOutstanding!=='boolean'||!Number.isSafeInteger(value.iteration)||value.iteration<0||!Number.isSafeInteger(value.modelCalls)||value.modelCalls<0||!Number.isSafeInteger(value.workspaceGeneration)||value.workspaceGeneration<0)throw Error('work_ledger_surface');
+ if(!safeDigest(value.schemaDigest)||!safeDigest(value.semanticSchemaDigest)||!safeDigest(value.snapshotDigest)||typeof value.schemaVersion!=='string'||value.schemaVersion!=='sanctum-work-intent/v1')throw Error('work_ledger_surface');
+ if(!Array.isArray(value.terminalKinds)||value.terminalKinds.some(x=>!oneOf(x,['FINAL','ESCALATION']))||new Set(value.terminalKinds).size!==value.terminalKinds.length)throw Error('work_ledger_surface');
+ if(!Array.isArray(value.visibleCapabilities)||value.visibleCapabilities.some(x=>typeof x!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(x)))throw Error('work_ledger_surface');
+ return Object.fromEntries(['phase','iteration','modelCalls','stage','decisionState','completionEligible','eligibilityReason','completionPolicy','schemaVersion','schemaDigest','semanticSchemaDigest','terminalKinds','visibleCapabilities','workspaceGeneration','snapshotDigest','postPatchTestOutstanding','latestTestState','evaluatorState','evaluationTrigger','selectedResultKind','validationCode','reviewDisposition'].map(key=>[key,structuredClone(value[key])]));
+}
 export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()/1000}){
  if(!safeId(taskId)||!Buffer.isBuffer(key)||key.length<32)throw Error('work_ledger_config');
  const directory=privateDir(join(root,taskId)),events=join(directory,'events.jsonl'),summary=join(directory,'summary.json');
@@ -27,7 +44,8 @@ export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()
  const goalHmac=createHmac('sha256',key).update(String(metadata.goal??'')).digest('hex');
  function event(kind,fields={}){
    if(!allowed.has(kind))throw Error('work_ledger_event');
-   const base={schema:'sanctum-work-ledger/v1',taskId,sequence:sequence++,time:now(),kind,previousDigest,...clean(fields)};
+   const sanitized=kind==='SEMANTIC_SURFACE'?sanitizeSemanticSurface(fields):clean(fields);
+   const base={schema:'sanctum-work-ledger/v1',taskId,sequence:sequence++,time:now(),kind,previousDigest,...sanitized};
    const eventDigest=createHash('sha256').update(canonical(base)).digest('hex'),row={...base,eventDigest};
    appendFileSync(events,canonical(row)+'\n',{encoding:'utf8',mode:0o600});previousDigest=eventDigest;return eventDigest;
  }

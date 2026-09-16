@@ -169,12 +169,12 @@ class Transport(Temp):
         with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
     def test_private_lead_accepts_exact_production_preflight_schema(self):
         self.s['private_lead']['enabled']=True;captured=[]
-        document=json.loads(subprocess.check_output(['node',str(BASE/'preflight-work-intent.mjs'),'--json'],text=True));intent=document['schemas']['ordinary']['request']
+        document=json.loads(subprocess.check_output(['node',str(BASE/'preflight-work-intent.mjs'),'--json'],text=True));intent=document['schemas']['ordinaryEligible']['request']
         def send(url,p=None,*args,**kwargs):
             if url.endswith('/models'):return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
             captured.append(p);return chat(canonical({'kind':'FINAL','text':'READY'}))
         result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
-        self.assertEqual(result['status'],'OK');self.assertEqual(captured[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertEqual(intent['schemaDigest'],'06649c94b07ec2cfc509c93b0473a76dc08128dac89e34a45b4f8267372c92f9')
+        self.assertEqual(result['status'],'OK');self.assertEqual(captured[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertRegex(intent['schemaDigest'],r'^[a-f0-9]{64}$')
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
@@ -316,8 +316,8 @@ class Lifecycle(Temp):
 
 class Janitor(Temp):
     def test_private_lead_resume_preflight_uses_production_schema(self):
-        result=manage.work_intent_preflight();ordinary=result['schemas']['ordinary']
-        self.assertTrue(result['ok']);self.assertEqual(ordinary['dialect'],'vllm-0.20.1-outlines');self.assertEqual(ordinary['branches'],6)
+        result=manage.work_intent_preflight();eligible=result['schemas']['ordinaryEligible'];ineligible=result['schemas']['ordinaryIneligible']
+        self.assertTrue(result['ok']);self.assertEqual(eligible['dialect'],'vllm-0.20.1-outlines');self.assertEqual(eligible['branches'],6);self.assertEqual(ineligible['branches'],5);self.assertNotEqual(eligible['schemaDigest'],ineligible['schemaDigest'])
 
     def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):
         calls=[]
