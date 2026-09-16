@@ -232,5 +232,5 @@
   "gate/runtime/work-runner.json": "6df0613b14db5a7a269fce47c7cb65491c82073e7ee59a0d27567d7e1383958e",
   "gate/src/command_runner.py": "ced4ca53d46c23740e4a407503bde9062c253d664180b077ce7527ee215c7e65",
   "gate/tests/test_command_runner.py": "1622499b850d76c3a93c09b5bb362acc7554d7a21db19fc55e5eb6b0bb1fc2c4",
-  "scripts/upgrade_work_mode.py": "44d4680a965fffc60e38fcfcb959df9917661cb729ffd4bcbd6134555b1e2e26"
+  "scripts/upgrade_work_mode.py": "f92630c7eb7fa3fad96b01d8349685e2e83c050adbcb083d9a541372e7060d7b"
 }
