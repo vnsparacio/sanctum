@@ -221,7 +221,7 @@
   "gate/tests/work-mode.test.mjs": "a4c56fcccd3b47b4a18680399929fe57775d0cc2bb7fe44eb7c294e7de1541b6",
   "docs/PROJECT-3-PHASE-11-AUDIT.md": "0d5355de75b4c6126085f2bb7937fcbed82573e8a12ee1e42338aaab4c5b57ce",
   "docs/PROJECT-3F-REMEDIATION-DESIGN.md": "16db2f59b8422b343b5823579ed24dad2d6a99c2b3c2c2f3c09d678360be2531",
-  "docs/PROJECT-3G-HANDOFF.md": "091fd7b7e37da685eebd7c2c86cc6f1671b38b637c1798c08959ddd9ff37c0da",
+  "docs/PROJECT-3G-HANDOFF.md": "46542bcec771f1f4a3811d43740bc6b93701ff38a88b2ab774c67c464d182376",
   "docs/PROJECT-3G-I-A-ROOT-CAUSE.md": "b4ec2122b5a6a93bbc3745f9d5776b6cb4e4b8310120867b7b3d7e36c9573e04",
   "docs/PROJECT-3G-I-B-HANDOFF.md": "c0531cadb3af0ea03ffa4bc55d91d4be43030ddf0e52e98e22c75dd2b1babc61",
   "docs/PROJECT-3G-I-C-HANDOFF.md": "392aa4ca6c49d9001b595df701d7eb0fa547df675fe09a82c8bfc32c3028cea0",
@@ -237,5 +237,6 @@
   "gate/runtime/work-runner.json": "6df0613b14db5a7a269fce47c7cb65491c82073e7ee59a0d27567d7e1383958e",
   "gate/src/command_runner.py": "ced4ca53d46c23740e4a407503bde9062c253d664180b077ce7527ee215c7e65",
   "gate/tests/test_command_runner.py": "1622499b850d76c3a93c09b5bb362acc7554d7a21db19fc55e5eb6b0bb1fc2c4",
-  "scripts/upgrade_work_mode.py": "a93a5d4d0c363138c9b10d6627af3d25ffe306a95cc296b32994ac316d8ec375"
+  "scripts/upgrade_work_mode.py": "a93a5d4d0c363138c9b10d6627af3d25ffe306a95cc296b32994ac316d8ec375",
+  "docs/PROJECT-3G-I-E-HANDOFF.md": "f2f9de15701d62153d69f183b5c32f7b95c30d22c0043ec430b7c4a6ac783fdd"
 }

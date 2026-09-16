@@ -2,7 +2,7 @@
 
 ## Decision
 
-Project 3G is **not accepted**. The owner-visible integration is implemented and its deterministic containment controls passed, but the final committed candidate completed only 6 of 11 required outcomes in the fresh installed-path graded suite. The legitimate implementation and evidence are committed locally on the existing feature branch; the branch is not pushed because the user required a clean local acceptance before push.
+Project 3G is **not accepted**. The final Project 3G-I exact production-schema probe passed on the pinned vLLM endpoint, but the one authorized unchanged suite passed only 1 of 11 expected outcomes. Ten cases stopped `BLOCKED / FINAL_WITHOUT_PASSING_EVIDENCE`; only the impossible/unsafe case expected that state. The source, installed amendment, content-minimized evidence and cleanup are recorded in `PROJECT-3G-I-E-HANDOFF.md`. The branch remains local and Project 3H has not begun.
 
 This document distinguishes the earlier Project 3D source scaffolding from the Project 3G installed integration and from live acceptance evidence. It does not revise Project 3D history or claim that source-only tests are live proof.
 
@@ -35,7 +35,7 @@ Project 3G additionally fixed defects found during real runs: stale allocation t
 
 The final run allocated for 978.476 seconds at $2.09/hour, an elapsed-rate cost of $0.56806. The first inference began 363.545 seconds after allocation. The recorded GPU-active window was 591.639 seconds. Task summaries recorded 288.857 seconds of direct model-call time and $0.24071 of task-attributed inference cost. The coordinator made 65 task-loop model calls across 54 iterations; the event ledgers contain 69 timed calls when the four reviewer calls are included. Across those 69 calls, warm TTFT mean was 0.320 seconds, p95 0.402 seconds, and maximum 0.690 seconds; end-to-end call latency mean was 4.186 seconds, p95 4.762 seconds, and maximum 5.078 seconds.
 
-## Latest installed-path graded run
+## Earlier installed-path graded run
 
 Private receipt: `state/gate/private-lead/work-mode/qualification-1789565689984870000.json` under the external private prefix. The receipt itself is deliberately outside Git.
 
@@ -71,6 +71,12 @@ The final provider reconciliation reports `PRIVATE_LEAD` `OFFLINE`, zero active 
 
 The accepted 80B rollback descriptor remains present and was not mutated or deleted. It pins `RedHatAI/Qwen3-Next-80B-A3B-Instruct-quantized.w4a16` at revision `ac9dc5b939ba948ab378b8638cfcce4ac4d5642b`, the same digest-pinned container, Python 3.11, CUDA 12.8.1, vLLM 0.13.0, compressed-tensors INT4 W4A16, exact launch arguments, cache/runtime roots, hardware, alias, and health contract. The no-download synthetic artifact-manifest rehydration check passed. Actual rollback may require exact-revision weight retrieval; no weights were redownloaded solely to prove cache presence.
 
+## Final Project 3G-I result
+
+Commit `5419e142290535bec97ff9854a2fbde8af7d20f0` was installed through reversible amendment `work-mode-1789569914846898000`. The installed preflight covered every production surface and retained the authoritative semantic and canonical Project 1 validation layers. The exact ordinary generation schema was accepted live with generation digest `06649c94b07ec2cfc509c93b0473a76dc08128dac89e34a45b4f8267372c92f9` and authoritative digest `7d985ad0889b1954210f88ca3ac2d873144af9c782101bbc59bbfa06adfade3f`.
+
+The single subsequent suite is receipt `qualification-1789570554944575000.json` in the external private prefix. It passed 1 of 11. Ten cases selected a schema-valid `FINAL` before any passing evaluator evidence existed, so the host stopped them fail closed. No structured-decoding, semantic-schema, canonical-translation, authority, egress, Source-First, sandbox, environment or reviewer failure occurred. The strongest classification is `MODEL_SEMANTIC_DECISION`, category D, a model-semantic reliability limitation. Full timing, cost, case, cleanup and rollback evidence is in `PROJECT-3G-I-E-HANDOFF.md`.
+
 ## Remaining acceptance blocker
 
-The integrated design and deterministic boundaries are locally testable, but the final committed candidate passed only 6 of 11 fresh live outcomes. Project 3G must remain unaccepted. Do not promote PRIVATE_LEAD, switch ownership permanently, remove the 80B rollback path, open a PR, or begin Project 3H from this state. The recommended next step is a separately authorized, bounded investigation of why this accepted model repeatedly emits invalid argument bindings and stale revisions after otherwise successful work. Any remediation must preserve strict schemas, the one-correction/second-invalid stop, independent authority and result egress, and the accepted model/profile unless evidence supports a narrowly scoped change.
+The exact projected schema now works live, but the accepted model/profile did not reliably choose semantic actions: the final bounded suite passed only 1 of 11. Project 3G must remain unaccepted. Do not promote PRIVATE_LEAD, switch ownership permanently, remove the 80B rollback path, run another paid suite, open a PR, or begin Project 3H from this state. Any separately authorized investigation must preserve strict host semantic validation, canonical Project 1 validation, the one-correction/second-invalid stop, independent authority and result egress, and the accepted model/profile unless new evidence supports a narrowly scoped change.
