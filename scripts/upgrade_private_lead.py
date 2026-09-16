@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse, hashlib, importlib.util, json, os, shutil, time
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py'); op=importlib.util.module_from_spec(spec); spec.loader.exec_module(op)
-FILES=('SETTINGS.json','benchmark.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','runtime/private-releases.json','runtime/bootstrap-private-lead-vllm.sh')
+FILES=('SETTINGS.json','benchmark.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','runtime/private-releases.json','runtime/prepare-private-lead-runtime.sh','runtime/prepare-private-lead-model.sh','runtime/bootstrap-private-lead-vllm.sh')
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def atomic(path,data):
     tmp=path.with_name(path.name+'.private-lead-tmp'); op.write(tmp,data); os.replace(tmp,path)
@@ -18,7 +18,18 @@ def rendered_settings(prefix):
     data=(ROOT/'gate/SETTINGS.json').read_text()
     values={'@PYTHON@':str(ROOT/'.venv/bin/python'),'@STATE@':str(prefix/'state'),'@CONFIG@':str(prefix/'config')}
     for old,new in values.items(): data=data.replace(old,new)
-    d=json.loads(data); d['private_lead']['enabled']=True; d['private_lead']['auto_start']=False
+    d=json.loads(data); installed=json.loads((prefix/'gate/SETTINGS.json').read_text())
+    keys=('volume_id','datacenter','ssh_private_key','keychain_item','max_hourly_usd')
+    histories=[installed]
+    for old in (prefix/'state/amendments').glob('private-lead-*/gate/SETTINGS.json'):
+        if old.is_file() and not old.is_symlink(): histories.append(json.loads(old.read_text()))
+    bindings={tuple(item['gpu'][key] for key in keys) for item in histories if item.get('gpu',{}).get('volume_id')!='CONFIGURE_VOLUME_ID'}
+    if len(bindings)!=1: raise ValueError('Accepted GPU binding is missing or ambiguous; use the private rollback record')
+    accepted=dict(zip(keys,next(iter(bindings))))
+    d['private_lead']['enabled']=True; d['private_lead']['auto_start']=False
+    for key in keys:
+        d['gpu'][key]=accepted[key]
+        d['private_lead'][key]=accepted[key]
     return json.dumps(d,indent=2)+'\n'
 def apply(prefix):
     op.verify(); receipt=op.verify_install(prefix); safe(prefix)

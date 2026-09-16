@@ -21,6 +21,10 @@ class Runpod:
         self.cli = BASE / 'runtime/runpodctl'
         self.pin = strict_json((BASE / 'runtime/RUNPODCTL.json').read_text())
 
+    def guard_root(self):
+        root = Path(self.settings['state_directory'])
+        return root / 'private-lead' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else root
+
     def ensure_guard(self):
         # Independent Mac supervisor survives the command worker and gateway.
         # It can only sweep known leases/compute; it cannot allocate or infer.
@@ -31,7 +35,7 @@ class Runpod:
         deadline=time.monotonic()+8
         while time.monotonic()<deadline:
             try:
-                p=Path(self.settings['state_directory'])/'watch.ready'
+                p=self.guard_root()/'watch.ready'
                 if p.is_symlink(): raise Refused('unsafe_watch_state')
                 d=strict_json(p.read_text());os.kill(d['pid'],0)
                 command=subprocess.run(['/bin/ps','-p',str(d['pid']),'-o','command='],capture_output=True,timeout=2)
@@ -110,14 +114,21 @@ class Runpod:
             '-o', 'HostKeyAlias=runpod-' + pod_id, '-o', 'ConnectTimeout=8',
             '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
 
-    def ssh(self, pod_id, host, port, command, data=None, timeout=15):
+    def ssh(self, pod_id, host, port, command, data=None, timeout=15, diagnostic=None):
         r = subprocess.run(self.ssh_args(pod_id, host, port) + ['root@' + host, command], input=data, capture_output=True, timeout=timeout)
-        if r.returncode: raise Refused('ssh_failed')
+        if r.returncode:
+            if diagnostic:
+                root=private_dir(Path(self.settings['state_directory'])/'private-lead')
+                atomic(root/'last-setup-error.json',canonical({'stage':diagnostic,'returncode':r.returncode,'stdout_tail':r.stdout.decode(errors='replace')[-8192:],'stderr_tail':r.stderr.decode(errors='replace')[-8192:],'time':time.time()}).encode())
+            raise Refused('ssh_failed')
         return r.stdout
 
     def bootstrap_server(self, pod_id, host, port):
         name = 'bootstrap-private-lead-vllm.sh' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else 'bootstrap-vllm.sh'
-        self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime' / name).read_bytes(), timeout=1800)
+        if self.gpu.get('logical_profile') == 'PRIVATE_LEAD':
+            self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime/prepare-private-lead-runtime.sh').read_bytes(), timeout=1800, diagnostic='runtime_prepare')
+            self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime/prepare-private-lead-model.sh').read_bytes(), timeout=2600, diagnostic='model_prepare')
+        self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime' / name).read_bytes(), timeout=1800, diagnostic='server_launch' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else None)
 
     def server_alive(self, pod_id, host, port):
         root = self.gpu.get('runtime_root', '/workspace/vinceai')

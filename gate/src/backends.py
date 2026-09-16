@@ -163,7 +163,7 @@ class PrivateLeadBackend(Private80BBackend):
         rows = d.get('data', []) if type(d) is dict else []
         if [x.get('id') for x in rows] != [self.model]: raise Refused('private_model_identity')
         if smoke:
-            p = {'model':self.model,'messages':[{'role':'user','content':'Reply with only READY.'}], 'max_tokens':16,'temperature':0,'stream':False}
+            p = {'model':self.model,'messages':[{'role':'user','content':'Reply with only READY.'}], 'max_tokens':16,'temperature':0,'stream':False,'chat_template_kwargs':{'enable_thinking':False}}
             if extract_chat(self.send(self.url + '/chat/completions',p,{'Content-Type':'application/json'},timeout=60)).strip() != 'READY': raise Refused('private_smoke_failed')
         return True
 

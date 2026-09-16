@@ -13,8 +13,11 @@
       "settings_key": "private_lead",
       "model": "nvidia/Qwen3.5-122B-A10B-NVFP4",
       "revision": "98915d837c4e7c87ac8296d02e89de19b3207e6d",
-      "image": "nvcr.io/nvidia/vllm@sha256:84db0edcc7db8f0fc921b146572fe5036779a6ff4baa40d65904da969c1e7237",
+      "image": "runpod/pytorch@sha256:cb154fcca15d1d6ce858cfa672b76505e30861ef981d28ec94bd44168767d853",
+      "vllm_version": "0.20.1",
       "quantization": "modelopt_fp4",
+      "moe_backend": "vllm_cutlass",
+      "attention_backend": "triton_attn",
       "kv_cache_dtype": "fp8",
       "pod_prefix": "sanctum-private-lead-"
     }

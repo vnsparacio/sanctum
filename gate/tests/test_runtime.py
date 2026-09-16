@@ -141,9 +141,13 @@ class Transport(Temp):
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
     def test_private_lead_has_its_own_alias_and_loopback_port(self):
         self.s['private_lead']['enabled']=True
-        def send(url,p=None,*args,**kw): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]} if url.endswith('/models') else chat('READY')
+        calls=[]
+        def send(url,p=None,*args,**kw):
+            if not url.endswith('/models'): calls.append(p)
+            return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]} if url.endswith('/models') else chat('READY')
         self.assertTrue(PrivateLeadBackend(self.s,send).health_check(smoke=True))
-        self.assertEqual(PrivateLeadBackend(self.s).url,'http://127.0.0.1:18001/v1')
+        self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False})
+        self.assertEqual(PrivateLeadBackend(self.s).url,'http://127.0.0.1:18002/v1')
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
@@ -334,6 +338,11 @@ class Installer(Temp):
 if __name__=='__main__':unittest.main()
 
 class IsolatedTunnel(Temp):
+    def test_private_lead_guard_uses_release_specific_state_root(self):
+        from runpod import Runpod
+        self.assertEqual(Runpod(self.s).guard_root(),self.root)
+        self.assertEqual(Runpod(self.s,self.s['private_lead']).guard_root(),self.root/'private-lead')
+
     def test_private_backend_and_ssh_use_the_same_loopback_port(self):
         from runpod import Runpod
         from unittest.mock import patch
