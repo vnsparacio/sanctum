@@ -3,7 +3,8 @@ from pathlib import Path
 import argparse, hashlib, importlib.util, json, os, shutil, time
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py'); op=importlib.util.module_from_spec(spec); spec.loader.exec_module(op)
-FILES=('SETTINGS.json','benchmark.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','runtime/private-releases.json','runtime/prepare-private-lead-runtime.sh','runtime/prepare-private-lead-model.sh','runtime/bootstrap-private-lead-vllm.sh')
+FILES=('SETTINGS.json','benchmark.py','characterize_private_lead.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/prepare-private-lead-runtime.sh','runtime/prepare-private-lead-model.sh','runtime/bootstrap-private-lead-vllm.sh')
+EXTERNAL_FILES=(('runtime/schema-snapshot.json','reliability/schema-snapshot.json'),)
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def atomic(path,data):
     tmp=path.with_name(path.name+'.private-lead-tmp'); op.write(tmp,data); os.replace(tmp,path)
@@ -35,7 +36,7 @@ def apply(prefix):
     op.verify(); receipt=op.verify_install(prefix); safe(prefix)
     record=prefix/'state/amendments'/('private-lead-'+str(time.time_ns())); op.private(record)
     before={}
-    for name in FILES:
+    for name in FILES+tuple(target for target,_ in EXTERNAL_FILES):
         target=prefix/'gate'/name; before[name]='present' if target.exists() else 'absent'
         if target.exists():
             if target.is_symlink(): raise ValueError('Unsafe installed gate file')
@@ -45,12 +46,15 @@ def apply(prefix):
         target=prefix/'gate'/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         data=rendered_settings(prefix) if name=='SETTINGS.json' else (ROOT/'gate'/name).read_text()
         atomic(target,data)
+    for target_name,source_name in EXTERNAL_FILES:
+        target=prefix/'gate'/target_name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        atomic(target,(ROOT/source_name).read_text())
     freeze=json.loads((prefix/'gate/FREEZE.json').read_text())
-    for name in FILES: freeze[name]=sha(prefix/'gate'/name)
+    for name in FILES+tuple(target for target,_ in EXTERNAL_FILES): freeze[name]=sha(prefix/'gate'/name)
     atomic(prefix/'gate/FREEZE.json',json.dumps(freeze,indent=2)+'\n')
-    receipt['files'].update({'gate/'+name:sha(prefix/'gate'/name) for name in FILES}); receipt['files']['gate/FREEZE.json']=sha(prefix/'gate/FREEZE.json')
+    receipt['files'].update({'gate/'+name:sha(prefix/'gate'/name) for name in FILES+tuple(target for target,_ in EXTERNAL_FILES)}); receipt['files']['gate/FREEZE.json']=sha(prefix/'gate/FREEZE.json')
     atomic(prefix/'receipt.json',json.dumps(receipt,indent=2)+'\n')
-    atomic(record/'transaction.json',json.dumps({'schema':'sanctum-private-lead-amendment/v1','before':before,'files':list(FILES)},indent=2)+'\n'); op.write(record/'complete','complete\n')
+    atomic(record/'transaction.json',json.dumps({'schema':'sanctum-private-lead-amendment/v1','before':before,'files':list(FILES)+[target for target,_ in EXTERNAL_FILES]},indent=2)+'\n'); op.write(record/'complete','complete\n')
     print('Applied staged PRIVATE_LEAD amendment. Private rollback record: '+str(record))
 def rollback(prefix,record):
     safe(prefix); record=record.absolute()
@@ -61,7 +65,7 @@ def rollback(prefix,record):
         if state=='present': atomic(target,(record/'gate'/name).read_text())
         else: target.unlink(missing_ok=True)
     atomic(prefix/'gate/FREEZE.json',(record/'gate/FREEZE.json').read_text()); atomic(prefix/'receipt.json',(record/'receipt.json').read_text())
-    print('Restored prior accepted private runtime files; 80B cache and state were preserved.')
+    print('Restored prior accepted private runtime files; 80B release configuration and any remaining cache were preserved.')
 if __name__=='__main__':
     p=argparse.ArgumentParser(); p.add_argument('--prefix',type=Path,required=True); g=p.add_mutually_exclusive_group(required=True); g.add_argument('--apply',action='store_true'); g.add_argument('--rollback',type=Path); a=p.parse_args()
     try: apply(a.prefix.absolute()) if a.apply else rollback(a.prefix.absolute(),a.rollback)
