@@ -223,6 +223,7 @@
   "docs/PROJECT-3G-HANDOFF.md": "091fd7b7e37da685eebd7c2c86cc6f1671b38b637c1798c08959ddd9ff37c0da",
   "docs/PROJECT-3G-I-A-ROOT-CAUSE.md": "b4ec2122b5a6a93bbc3745f9d5776b6cb4e4b8310120867b7b3d7e36c9573e04",
   "docs/PROJECT-3G-I-B-HANDOFF.md": "c0531cadb3af0ea03ffa4bc55d91d4be43030ddf0e52e98e22c75dd2b1babc61",
+  "docs/PROJECT-3G-I-C-HANDOFF.md": "392aa4ca6c49d9001b595df701d7eb0fa547df675fe09a82c8bfc32c3028cea0",
   "gate/plugin/work-command.mjs": "327c96e8f92c3e0758551ccb3f232d6159d51313693742fabb5e4e578ec76ee1",
   "gate/plugin/work-ledger.mjs": "c290eab2f7c512d204259e87ff8f32c93da3e5635775918753538bb40f0ab38b",
   "gate/plugin/workspace-tools.mjs": "6e0500d4ca6a7f04139346a5d1bfb1ad12a307f38a9a2e357f862b2e587f7e95",
