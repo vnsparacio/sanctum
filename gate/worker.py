@@ -31,6 +31,8 @@ def execute(b, settings, remote=None, lifecycle=None):
         if b['tier']=='PRIVATE_LEAD': return (lifecycle or PrivateLeadLifecycle(settings)).infer(scope,packet)
         if b['tier']=='MULTIMODAL' and settings['multimodal']['transport']=='local': return LocalMultimodalBackend(settings).infer(packet)
         return (remote or Remote(settings)).infer(b['tier'],packet,b['nonce'])
+    if op=='private_lead_propose':
+        return (lifecycle or PrivateLeadLifecycle(settings)).propose(scope,b['packet']['request'])
     lc=lifecycle or Private80BLifecycle(settings)
     if op=='close': lc.release(scope,close=True)
     elif op=='sweep': lc.sweep()

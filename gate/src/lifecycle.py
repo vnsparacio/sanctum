@@ -231,6 +231,20 @@ class Private80BLifecycle:
             stop.set(); t.join(timeout=1); self.release(scope)
             self.sweep()
 
+    def propose(self, scope, request):
+        """Run one bounded, data-only structured proposal under the normal lease."""
+        self.acquire(scope); stop = threading.Event()
+        def pulse():
+            while not stop.wait(10):
+                try: self.heartbeat(scope)
+                except Exception: return
+        t = threading.Thread(target=pulse, daemon=True); t.start()
+        try:
+            self.ensure_ready(scope); self.check_lease(scope)
+            return self.backend.propose(request)
+        finally:
+            stop.set(); t.join(timeout=1); self.release(scope); self.sweep()
+
 class PrivateLeadLifecycle(Private80BLifecycle):
     """Separately staged PRIVATE_LEAD ownership; it never selects itself for normal routing."""
     def __init__(self, settings, provider=None, backend=None, now=time.time, sleep=time.sleep):

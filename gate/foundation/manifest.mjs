@@ -41,7 +41,12 @@ export function capabilityPolicy(name,repairRules=[]){
   if(['web_search','web_fetch'].includes(name))egress='CONFIGURATION_BOUND';
   if(name==='browser')egress='BROWSER_POLICY_BOUND';
   if(name==='vinceai__hub_repo_search')egress='DESTINATION_BOUND';
-  return deepFreeze({supported:true,effect,rollback:rollback.mode,undoCapability:rollback.undo,authority:approvals.has(name)?'NATIVE_ALLOW_ONCE_OR_DENY':'MAC_POLICY',egress,inputDataClass:personalInput?'PERSONAL':'PUBLIC',outputDataClass:personalOutput?'PERSONAL':'PUBLIC',untrusted:!localUtilities.has(name),repairRules:[...repairRules],verifiers:localUtilities.has(name)?['exact_utility']:[],remoteResultEligible:false});
+  // A deterministic public utility result may be returned to the staged
+  // private loopback only after the Work Mode coordinator creates a separate,
+  // exact egress decision. Personal, mutation and broker results remain deny
+  // by default even when their action was locally authorized.
+  const remoteResultEligible=localUtilities.has(name);
+  return deepFreeze({supported:true,effect,rollback:rollback.mode,undoCapability:rollback.undo,authority:approvals.has(name)?'NATIVE_ALLOW_ONCE_OR_DENY':'MAC_POLICY',egress,inputDataClass:personalInput?'PERSONAL':'PUBLIC',outputDataClass:personalOutput?'PERSONAL':'PUBLIC',untrusted:!localUtilities.has(name),repairRules:[...repairRules],verifiers:localUtilities.has(name)?['exact_utility']:[],remoteResultEligible});
 }
 
 const normalizeRegistered=value=>typeof value==='string'?{name:value,source:'RUNTIME_DECLARATION'}:value;

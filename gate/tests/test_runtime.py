@@ -99,6 +99,12 @@ class Authority(Temp):
     def test_high_stakes_cannot_use_80(self):
         b=self.body();b['state']['high_stakes']=True
         with self.assertRaises(Refused):self.auth(b)
+    def test_private_lead_proposal_requires_exact_signed_scope(self):
+        b=self.body();b.update(operation='private_lead_propose',tier='PRIVATE_LEAD',approval='private_lead_workmode',packet={'request':{'system':'synthetic','request':{}}})
+        self.auth(b)
+        for key,value in [('approval','exact_disclosure'),('tier','PRIVATE_80B'),('packet',{'request':{'system':'x','request':{}},'extra':True})]:
+            bad=self.body();bad.update(operation='private_lead_propose',tier='PRIVATE_LEAD',approval='private_lead_workmode',packet={'request':{'system':'synthetic','request':{}}});bad[key]=value
+            with self.assertRaises(Refused):self.auth(bad)
 
 class Transport(Temp):
     def test_minimal_classifier_packet_and_provider_policy(self):
@@ -148,6 +154,15 @@ class Transport(Temp):
         self.assertTrue(PrivateLeadBackend(self.s,send).health_check(smoke=True))
         self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False})
         self.assertEqual(PrivateLeadBackend(self.s).url,'http://127.0.0.1:18002/v1')
+    def test_private_lead_proposal_is_data_only_and_thinking_off(self):
+        self.s['private_lead']['enabled']=True;calls=[];response={'kind':'FINAL','text':'synthetic'}
+        def send(url,p=None,*args,**kw):
+            if url.endswith('/models'): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
+            calls.append(p);return chat(canonical(response))
+        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{}}})
+        self.assertEqual(result,{'status':'OK','result':response});self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0])
+    def test_private_lead_proposal_refuses_invalid_request(self):
+        with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):

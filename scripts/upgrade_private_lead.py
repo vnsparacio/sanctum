@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse, hashlib, importlib.util, json, os, shutil, time
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py'); op=importlib.util.module_from_spec(spec); spec.loader.exec_module(op)
-FILES=('SETTINGS.json','benchmark.py','characterize_private_lead.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/prepare-private-lead-runtime.sh','runtime/prepare-private-lead-model.sh','runtime/bootstrap-private-lead-vllm.sh')
+FILES=('SETTINGS.json','benchmark.py','characterize_private_lead.py','manage.py','watch.py','worker.py','src/schema.py','src/authority.py','src/backends.py','src/lifecycle.py','src/runpod.py','src/workspace.py','foundation/contracts.mjs','foundation/manifest.mjs','plugin/private-lead.mjs','plugin/work-mode.mjs','plugin/command-broker.mjs','runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/prepare-private-lead-runtime.sh','runtime/prepare-private-lead-model.sh','runtime/bootstrap-private-lead-vllm.sh')
 EXTERNAL_FILES=(('runtime/schema-snapshot.json','reliability/schema-snapshot.json'),)
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def atomic(path,data):

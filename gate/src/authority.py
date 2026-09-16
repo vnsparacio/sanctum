@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from common import BASE, Refused, canonical, database, strict_json
 
-OPERATIONS = {'classify','infer','media','close','status','sweep','stop','resume'}
+OPERATIONS = {'classify','infer','private_lead_propose','media','close','status','sweep','stop','resume'}
 
 def authorize(envelope, settings, now=time.time, settings_hash=None):
     if type(envelope) is not dict or set(envelope) != {'body','mac'} or type(envelope['body']) is not str or len(envelope['body'].encode()) > 200000:
@@ -30,6 +30,15 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         if b['approval'] == 'session_private_prompt' and (b['tier'] != 'PRIVATE_80B' or set(b['packet']) != {'prompt'}): raise Refused('session_grant_scope')
         if b['tier'] != 'OPENAI_FRONTIER' and b['state'].get('high_stakes') is not False: raise Refused('high_stakes_route')
         if b['state'].get('privacy_floor') != 'PERSONAL': raise Refused('privacy_floor')
+    if b['operation'] == 'private_lead_propose':
+        # This is a data-only, staged role. The signed Mac coordinator supplies
+        # the bounded prompt and capability view; the model never receives an
+        # approval, an executor, or authority to run its proposal.
+        if b['tier'] != 'PRIVATE_LEAD' or b['approval'] != 'private_lead_workmode': raise Refused('private_lead_proposal_scope')
+        if b['state'].get('privacy_floor') != 'PERSONAL' or b['state'].get('high_stakes') is not False: raise Refused('private_lead_proposal_state')
+        if set(b['packet']) != {'request'} or type(b['packet']['request']) is not dict: raise Refused('private_lead_proposal_packet')
+        raw = canonical(b['packet']['request'])
+        if len(raw.encode()) > min(settings['max_context_bytes'], 196608): raise Refused('private_lead_proposal_limit')
     if b['operation'] in ['classify','infer']:
         if b['state'].get('scope') != b['scope'] or type(b['state'].get('high_stakes')) is not bool: raise Refused('state_contract')
         prompt = b['packet'].get('prompt')

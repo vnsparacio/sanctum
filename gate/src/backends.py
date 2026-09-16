@@ -172,6 +172,19 @@ class PrivateLeadBackend(Private80BBackend):
         if len(canonical(packet).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
         return super().infer(packet)
 
+    def propose(self, request):
+        """Return one strict proposal/final object; execution remains on the Mac."""
+        if type(request) is not dict or set(request) != {'system','request'}: raise Refused('private_lead_request')
+        if type(request['system']) is not str or type(request['request']) is not dict: raise Refused('private_lead_request')
+        if len(canonical(request).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
+        self.health_check()
+        system = request['system'] + '\nReturn exactly one JSON object. It must be either {"kind":"FINAL","text":"..."}, {"kind":"ESCALATION","reason":"CODE"}, or {"kind":"TOOL_PROPOSAL","proposal":{...}}. A proposal has only schema, proposalId, requestId, revision, reasoner, capability, capabilityDigest, arguments. Never include authority, approval, egress, paths outside supplied context, or commentary.'
+        p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':False,'chat_template_kwargs':{'enable_thinking':False}}
+        value = strict_json(extract_chat(self.send(self.url + '/chat/completions',p,{'Content-Type':'application/json'},timeout=120)))
+        if type(value) is not dict or value.get('kind') not in {'FINAL','ESCALATION','TOOL_PROPOSAL'}: raise Refused('private_lead_result_schema')
+        if len(canonical(value).encode()) > 65536: raise Refused('private_lead_result_limit')
+        return {'status':'OK','result':value}
+
 class LocalMultimodalBackend:
     def __init__(self, settings, send=http): self.settings, self.send = settings, send
     def infer(self, packet):
