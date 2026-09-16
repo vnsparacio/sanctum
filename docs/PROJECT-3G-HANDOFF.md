@@ -2,7 +2,7 @@
 
 ## Decision
 
-Project 3G is **not accepted**. The final Project 3G-I exact production-schema probe passed on the pinned vLLM endpoint, but the one authorized unchanged suite passed only 1 of 11 expected outcomes. Ten cases stopped `BLOCKED / FINAL_WITHOUT_PASSING_EVIDENCE`; only the impossible/unsafe case expected that state. The source, installed amendment, content-minimized evidence and cleanup are recorded in `PROJECT-3G-I-E-HANDOFF.md`. The branch remains local and Project 3H has not begun.
+Project 3G is **not accepted**. The latest Project 3G-I-F-C attempt installed host-owned completion eligibility and passed all four exact changed-surface probes, but its unchanged 11-case suite did not begin because the candidate gateway was still stopped after amendment. The harness refused its first command before any task or suite model call. The instruction prohibiting a second suite was honored. The source, installed amendment, content-minimized failure evidence and cleanup are recorded in `PROJECT-3G-I-F-C-HANDOFF.md`. The branch remains local and Project 3H has not begun.
 
 This document distinguishes the earlier Project 3D source scaffolding from the Project 3G installed integration and from live acceptance evidence. It does not revise Project 3D history or claim that source-only tests are live proof.
 
@@ -77,6 +77,12 @@ Commit `5419e142290535bec97ff9854a2fbde8af7d20f0` was installed through reversib
 
 The single subsequent suite is receipt `qualification-1789570554944575000.json` in the external private prefix. It passed 1 of 11. Ten cases selected a schema-valid `FINAL` before any passing evaluator evidence existed, so the host stopped them fail closed. No structured-decoding, semantic-schema, canonical-translation, authority, egress, Source-First, sandbox, environment or reviewer failure occurred. The strongest classification is `MODEL_SEMANTIC_DECISION`, category D, a model-semantic reliability limitation. Full timing, cost, case, cleanup and rollback evidence is in `PROJECT-3G-I-E-HANDOFF.md`.
 
+## Latest Project 3G-I-F-C attempt
+
+Commit `976378c35065fa98514461f24706466788b78c0c` was installed through reversible amendment `work-mode-1789588663994299000`. All six installed production surfaces passed offline preflight. The live ordinary-ineligible, test-only-ineligible, ordinary-eligible and research-ineligible exact-schema probes all passed on the pinned endpoint with their reviewed projected and authoritative digests.
+
+The unchanged suite command was invoked once, but the candidate gateway had remained stopped after amendment and its first bridge command returned `installed_command_failed`. No case, Work Mode task, suite model call or official suite receipt was created. This is a `HARNESS`, type B failure. It provides no 11-case, semantic-surface, evaluator/reviewer, Source-First or adversarial acceptance evidence. The suite was not invoked again. The single allocation cost approximately `$0.21826`, provider cleanup is confirmed, and full evidence is in `PROJECT-3G-I-F-C-HANDOFF.md`.
+
 ## Remaining acceptance blocker
 
-The exact projected schema now works live, but the accepted model/profile did not reliably choose semantic actions: the final bounded suite passed only 1 of 11. Project 3G must remain unaccepted. Do not promote PRIVATE_LEAD, switch ownership permanently, remove the 80B rollback path, run another paid suite, open a PR, or begin Project 3H from this state. Any separately authorized investigation must preserve strict host semantic validation, canonical Project 1 validation, the one-correction/second-invalid stop, independent authority and result egress, and the accepted model/profile unless new evidence supports a narrowly scoped change.
+Host-owned completion eligibility is installed, and the ordinary-ineligible, test-only-ineligible, ordinary-eligible and research-ineligible schemas all work on the pinned live endpoint. The F-C suite produced no case evidence because of a harness precondition failure, so Project 3G must remain unaccepted. Do not promote PRIVATE_LEAD, switch ownership permanently, remove the 80B rollback path, run another paid suite, open a PR, or begin Project 3H from this state. Any separately authorized retry must first start and verify the installed candidate gateway while preserving the unchanged suite, strict host semantic validation, canonical Project 1 validation, one-correction/second-invalid stop, independent authority and result egress, and the accepted model/profile.
