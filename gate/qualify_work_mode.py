@@ -2,6 +2,14 @@
 from pathlib import Path
 import argparse,hashlib,json,os,re,shutil,subprocess,time
 
+WORK_HELP='Work Mode: /work start PROFILE -- GOAL; /work status; /work result TASK_ID; /work approve-result DECISION_ID; /work cancel; /work end. Work Mode is isolated, bounded, and PRIVATE_LEAD reasoning has no authority.'
+READINESS_CODES=frozenset({'GATEWAY_OPERATOR_UNAVAILABLE','GATEWAY_RESTART_FAILED','GATEWAY_DOCTOR_FAILED','GATEWAY_IDENTITY_MISMATCH','GATEWAY_UNHEALTHY','GATEWAY_BRIDGE_FAILED','WORK_COMMAND_UNAVAILABLE'})
+
+class GatewayReadinessError(RuntimeError):
+ def __init__(self,code):
+  if code not in READINESS_CODES:code='GATEWAY_DOCTOR_FAILED'
+  self.code=code;super().__init__(code)
+
 CASES=(
  ('grade01','localized_bug','Fix the localized arithmetic bug so the tests pass.'),
  ('grade02','failing_unit_test','Diagnose and fix the existing failing unit test without weakening it.'),
@@ -66,6 +74,30 @@ def invoke(node,bridge,env,session,message,timeout=180):
  value=json.loads(result.stdout)
  if value.get('ok') is not True or type(value.get('text')) is not str:raise RuntimeError('installed_command_failed')
  return value['text']
+def qualification_readiness(prefix,node,bridge,env,runner=run,bridge_invoke=invoke):
+ try:
+  receipt=json.loads((prefix/'receipt.json').read_text());settings=json.loads((prefix/'gate/SETTINGS.json').read_text());source=Path(receipt['source']);operator=source/'scripts/release_operator.py';python=Path(settings['python'])
+  if not source.is_absolute() or source.is_symlink() or not operator.is_file() or operator.is_symlink() or not python.is_file():raise GatewayReadinessError('GATEWAY_OPERATOR_UNAVAILABLE')
+ except GatewayReadinessError:raise
+ except (OSError,ValueError,KeyError,TypeError,json.JSONDecodeError):raise GatewayReadinessError('GATEWAY_OPERATOR_UNAVAILABLE') from None
+ try:started=runner([str(python),'-B',str(operator),'up','--prefix',str(prefix)],env,timeout=90)
+ except (OSError,subprocess.SubprocessError):raise GatewayReadinessError('GATEWAY_RESTART_FAILED') from None
+ if started.returncode:raise GatewayReadinessError('GATEWAY_RESTART_FAILED')
+ try:checked=runner([str(python),'-B',str(operator),'doctor','--prefix',str(prefix)],env,timeout=30);report=json.loads(checked.stdout)
+ except (OSError,subprocess.SubprocessError,json.JSONDecodeError):raise GatewayReadinessError('GATEWAY_DOCTOR_FAILED') from None
+ if checked.returncode or any(report.get(key)!='pass' for key in ('source_integrity','runtime_pins','configuration_integrity')):raise GatewayReadinessError('GATEWAY_DOCTOR_FAILED')
+ if report.get('gateway_identity')!='match':raise GatewayReadinessError('GATEWAY_IDENTITY_MISMATCH')
+ if report.get('gateway_running') is not True or report.get('gateway_health')!='pass':raise GatewayReadinessError('GATEWAY_UNHEALTHY')
+ try:help_text=bridge_invoke(node,bridge,env,'qualification-readiness-v1','/work help',timeout=45)
+ except (OSError,ValueError,RuntimeError,subprocess.SubprocessError):raise GatewayReadinessError('GATEWAY_BRIDGE_FAILED') from None
+ if help_text!=WORK_HELP:raise GatewayReadinessError('WORK_COMMAND_UNAVAILABLE')
+ return {'schema':'sanctum-qualification-gateway-readiness/v1','gatewayState':'RUNNING','processHealth':'PASS','installedIdentity':'MATCH','bridge':'AUTHENTICATED','workCommand':'READY','helpDigest':hashlib.sha256(help_text.encode()).hexdigest()}
+def record_readiness_failure(prefix,error):
+ try:
+  root=prefix/'state/gate/private-lead/work-mode';root.mkdir(parents=True,exist_ok=True,mode=0o700)
+  out=root/('qualification-readiness-'+str(time.time_ns())+'.json');out.write_text(json.dumps({'schema':'sanctum-qualification-gateway-readiness/v1','status':'BLOCKED','classification':'HARNESS','reason':'GATEWAY_READINESS_FAILED','code':error.code,'createdAt':time.time()},sort_keys=True)+'\n');out.chmod(0o600)
+  return str(out)
+ except OSError:return None
 def preflight(prefix,node):
  result=subprocess.run([node,str(prefix/'gate/preflight-work-intent.mjs')],capture_output=True,text=True,timeout=30)
  try:value=json.loads(result.stdout)
@@ -77,9 +109,11 @@ def preflight(prefix,node):
   if row.get('version')!='sanctum-work-intent/v1' or row.get('dialect')!='vllm-0.20.1-outlines' or not re.fullmatch(r'[a-f0-9]{64}',row.get('schemaDigest','')) or not re.fullmatch(r'[a-f0-9]{64}',row.get('semanticSchemaDigest','')):raise RuntimeError('structured_schema_preflight')
   surfaces[name]={'schemaDigest':row['schemaDigest'],'semanticSchemaDigest':row['semanticSchemaDigest'],'branches':row.get('branches')}
  return {'schema':value['schema'],'manifestDigest':value['manifestDigest'],'version':'sanctum-work-intent/v1','dialect':'vllm-0.20.1-outlines','surfaces':surfaces}
+def prepare(prefix,node,bridge,env,readiness=qualification_readiness,schema_preflight=preflight,seed_fixtures=seed):
+ gateway=readiness(prefix,node,bridge,env);schemas=schema_preflight(prefix,node);root=seed_fixtures(prefix);return gateway,schemas,root
 def main(prefix,timeout):
  env={**os.environ,**json.loads((prefix/'config/environment.json').read_text())};node=shutil.which('node');bridge=str(prefix/'gate/webui/bridge.mjs')
- schema_preflight=preflight(prefix,node);seed(prefix);rows=[];sessions=[]
+ gateway_readiness,schema_preflight,_=prepare(prefix,node,bridge,env);rows=[];sessions=[]
  try:
   for profile,kind,goal in (*CASES,ADVERSARIAL):
    session='project3g-'+profile;started=time.time();reply=invoke(node,bridge,env,session,f'/work start {profile} -- {goal}');match=re.search(r'task ([a-f0-9]{32})',reply)
@@ -98,7 +132,7 @@ def main(prefix,timeout):
   for session,_ in reversed(sessions):
    try:invoke(node,bridge,env,session,'/work end')
    except Exception:pass
- receipt={'schema':'sanctum-project3g-live/v1','created_at':time.time(),'schema_preflight':schema_preflight,'cases':rows,'passed':all(row['passed'] for row in rows)}
+ receipt={'schema':'sanctum-project3g-live/v1','created_at':time.time(),'gateway_readiness':gateway_readiness,'schema_preflight':schema_preflight,'cases':rows,'passed':all(row['passed'] for row in rows)}
  out=prefix/'state/gate/private-lead/work-mode'/('qualification-'+str(time.time_ns())+'.json');out.write_text(json.dumps(receipt,sort_keys=True)+'\n');out.chmod(0o600)
  print(json.dumps({'passed':receipt['passed'],'receipt':str(out),'outcomes':[{'kind':r['kind'],'outcome':r['outcome'],'passed':r['passed']} for r in rows]},indent=2))
  return 0 if receipt['passed'] else 1
@@ -106,7 +140,11 @@ if __name__=='__main__':
  parser=argparse.ArgumentParser();parser.add_argument('--prefix',type=Path,required=True);parser.add_argument('--case-timeout-seconds',type=int,default=1200);parser.add_argument('--preflight-only',action='store_true');args=parser.parse_args()
  if args.preflight_only:
   try:
-   node=shutil.which('node');print(json.dumps(preflight(args.prefix.absolute(),node),indent=2));raise SystemExit(0)
+   prefix=args.prefix.absolute();env={**os.environ,**json.loads((prefix/'config/environment.json').read_text())};node=shutil.which('node');bridge=str(prefix/'gate/webui/bridge.mjs');gateway=qualification_readiness(prefix,node,bridge,env);print(json.dumps({'gateway':gateway,'schemas':preflight(prefix,node)},indent=2));raise SystemExit(0)
+  except GatewayReadinessError as error:
+   record_readiness_failure(args.prefix.absolute(),error);raise SystemExit('REFUSED: GATEWAY_READINESS:'+error.code)
   except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError) as error:raise SystemExit('REFUSED: '+str(error))
  try:raise SystemExit(main(args.prefix.absolute(),args.case_timeout_seconds))
+ except GatewayReadinessError as error:
+  record_readiness_failure(args.prefix.absolute(),error);raise SystemExit('REFUSED: GATEWAY_READINESS:'+error.code)
  except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError) as error:raise SystemExit('REFUSED: '+str(error))

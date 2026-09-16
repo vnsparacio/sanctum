@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse,errno,hashlib,plistlib,sqlite3,json,os,platform,secrets,shutil,signal,socket,subprocess,sys,time
 ROOT=Path(__file__).resolve().parents[1]
+GATEWAY_PROCESS_SCHEMA='sanctum-gateway-process/v1'
 
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def private(p):
@@ -88,25 +89,45 @@ def process_record(prefix):
  p=prefix/'state/gateway-process.json'
  return json.loads(p.read_text()) if p.exists() else None
 
+def expected_gateway_identity(prefix,r=None):
+ r=r or receipt(prefix);node=Path(shutil.which('node') or '').resolve();entry=(ROOT/'node_modules/openclaw/dist/index.js').resolve()
+ if not node.is_file() or not entry.is_file():raise ValueError('Pinned gateway runtime unavailable')
+ return {'schema':GATEWAY_PROCESS_SCHEMA,'node_path':str(node),'entrypoint_path':str(entry),'entrypoint_sha256':sha(entry),'gateway_port':r['gateway_port'],'install_receipt_sha256':sha(prefix/'receipt.json'),'gate_freeze_sha256':sha(prefix/'gate/FREEZE.json'),'openclaw_config_sha256':sha(prefix/'config/openclaw.json'),'source_manifest_sha256':sha(ROOT/'SOURCE-MANIFEST.json')}
+
+def gateway_identity_matches(prefix,record,r=None):
+ if type(record) is not dict:return False
+ try:expected=expected_gateway_identity(prefix,r)
+ except (ValueError,OSError,KeyError):return False
+ return all(record.get(key)==value for key,value in expected.items())
+
 def owns_process(record):
  if not record:return False
- p=subprocess.run(['ps','-p',str(record['pid']),'-o','command='],capture_output=True,text=True)
- return p.returncode==0 and all(x in p.stdout for x in record['identity'])
+ try:p=subprocess.run(['ps','-p',str(record['pid']),'-o','command='],capture_output=True,text=True)
+ except (KeyError,TypeError,ValueError):return False
+ return p.returncode==0 and type(record.get('identity')) is list and all(type(x) is str and x in p.stdout for x in record['identity'])
+
+def gateway_socket_ready(port):
+ with socket.socket() as s:
+  s.settimeout(.5);return s.connect_ex(('127.0.0.1',port))==0
 
 def up(prefix):
  verify();r=verify_install(prefix)
  if platform.system()!='Darwin':raise ValueError('Host gateway acceptance is supported on macOS; offline tests work on Linux')
- if owns_process(process_record(prefix)):print('Candidate gateway already running.');return
+ current=process_record(prefix)
+ if owns_process(current):
+  if not gateway_identity_matches(prefix,current,r):raise ValueError('Running gateway identity is stale; refusing adoption or replacement')
+  if not gateway_socket_ready(r['gateway_port']):raise ValueError('Candidate gateway process is not healthy')
+  print('Candidate gateway already running with current installed identity.');return
  with socket.socket() as s:
   try:s.bind(('127.0.0.1',r['gateway_port']))
   except OSError as e:
    if e.errno==errno.EADDRINUSE:raise ValueError('Gateway port occupied; refusing adoption or replacement')
    raise ValueError('Cannot bind loopback gateway socket: '+str(e))
- args=[shutil.which('node'),str(ROOT/'node_modules/openclaw/dist/index.js'),'gateway','run','--port',str(r['gateway_port'])]
+ expected=expected_gateway_identity(prefix,r);args=[expected['node_path'],expected['entrypoint_path'],'gateway','run','--port',str(r['gateway_port'])]
  with open(prefix/'logs/gateway.log','ab') as log:p=subprocess.Popen(args,env=environment(prefix),stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
  marker=prefix/'state/gateway-process.json'
  if marker.exists():marker.unlink() # stale record only, never a running process
- write(marker,json.dumps({'pid':p.pid,'identity':[args[1],str(r['gateway_port'])]}))
+ write(marker,json.dumps({**expected,'pid':p.pid,'identity':[args[0],args[1],str(r['gateway_port'])]}))
  for _ in range(240):
   if p.poll() is not None:raise ValueError('Gateway exited; inspect private log')
   with socket.socket() as s:
@@ -144,7 +165,8 @@ def down(prefix):
 
 def doctor(prefix):
  verify();r=verify_install(prefix)
- report={'source_integrity':'pass','runtime_pins':'pass','configuration_integrity':'pass','platform':platform.system()+'/'+platform.machine(),'gateway_running':owns_process(process_record(prefix)),'optional_integrations':'unconfigured; no credential or provider probe performed','ports':{'gateway':r['gateway_port'],'mlx':r['mlx_port']}}
+ record=process_record(prefix);running=owns_process(record);identity='match' if running and gateway_identity_matches(prefix,record,r) else ('stale' if running else 'stopped');health='pass' if identity=='match' and gateway_socket_ready(r['gateway_port']) else ('stopped' if not running else 'fail')
+ report={'source_integrity':'pass','runtime_pins':'pass','configuration_integrity':'pass','platform':platform.system()+'/'+platform.machine(),'gateway_running':running,'gateway_identity':identity,'gateway_health':health,'optional_integrations':'unconfigured; no credential or provider probe performed','ports':{'gateway':r['gateway_port'],'mlx':r['mlx_port']}}
  print(json.dumps(report,indent=2))
 
 def main():
@@ -154,7 +176,8 @@ def main():
  elif a.command=='doctor':doctor(prefix)
  elif a.command=='up':up(prefix)
  elif a.command=='down':down(prefix)
- elif a.command=='status':print('Candidate gateway: '+('running' if owns_process(process_record(prefix)) else 'stopped'))
+ elif a.command=='status':
+  record=process_record(prefix);running=owns_process(record);state='running-current' if running and gateway_identity_matches(prefix,record) else ('running-stale' if running else 'stopped');print('Candidate gateway: '+state)
  elif a.command=='logs':print('Private gateway log: '+str(prefix/'logs/gateway.log'))
  elif a.command=='uninstall':down(prefix);print('No system services installed. Private configuration, state and receipts retained for rollback.')
 if __name__=='__main__':

@@ -38,6 +38,14 @@ class Setup(unittest.TestCase):
   for n in ['SETTINGS.json','webui/pipe.py','webui/bridge.mjs']:
    text=(self.prefix/'gate'/n).read_text()
    self.assertNotIn('@GATE@',text);self.assertNotIn('@PYTHON@',text)
+ def test_gateway_process_identity_is_exact_and_stale_records_fail(self):
+  expected={'schema':op.GATEWAY_PROCESS_SCHEMA,'install_receipt_sha256':'a'*64};original=op.expected_gateway_identity
+  try:
+   op.expected_gateway_identity=lambda prefix,r=None:expected
+   self.assertTrue(op.gateway_identity_matches(self.prefix,{**expected,'pid':1,'identity':['entry']}))
+   self.assertFalse(op.gateway_identity_matches(self.prefix,{**expected,'install_receipt_sha256':'b'*64,'pid':1,'identity':['entry']}))
+   self.assertFalse(op.gateway_identity_matches(self.prefix,{'pid':1,'identity':['entry']}))
+  finally:op.expected_gateway_identity=original
  def test_component_does_not_adopt_an_executable_from_path(self):
   op.setup(self.prefix)
   bin_dir=self.prefix/'fake-bin';bin_dir.mkdir()
