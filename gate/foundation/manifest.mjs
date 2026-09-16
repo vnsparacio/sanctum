@@ -13,6 +13,7 @@ export function currentCapabilityManifest(){
 }
 
 const localUtilities=new Set(['calc','date_math','unit_convert','structured_parse']);
+const workModeCapabilities=new Set(['worktree_list','worktree_read','worktree_patch','worktree_command','source_first_research']);
 const mutations=new Map([
   ['save_local_markdown',{mode:'CREATE_ONLY',undo:null}],
   ['steward_create_folder',{mode:'UNDO_CAPABILITY',undo:'steward_undo_last'}],
@@ -26,27 +27,29 @@ const owned=new Set([
   'save_local_markdown','steward_list','steward_inspect','steward_create_folder','steward_move','steward_rename','steward_undo_last',
 ]);
 export const PINNED_ADAPTER_TOOLS=Object.freeze(['browser','web_search','web_fetch','vinceai__get_current_time','vinceai__convert_to_markdown','vinceai__hub_repo_search']);
-const supported=new Set([...owned,...PINNED_ADAPTER_TOOLS]);
+const supported=new Set([...owned,...PINNED_ADAPTER_TOOLS,...workModeCapabilities]);
 const personal=/^(messages_|gmail_|calendar_|steward_|save_local_markdown$)/;
 const approvals=new Set(['browser','steward_move','steward_rename','steward_undo_last','vinceai__hub_repo_search']);
 
 export function capabilityPolicy(name,repairRules=[]){
   if(!supported.has(name))return deepFreeze({supported:false,effect:'READ',rollback:'NONE',undoCapability:null,authority:'DENY',egress:'UNSUPPORTED',inputDataClass:'RESTRICTED',outputDataClass:'RESTRICTED',untrusted:true,repairRules:[],verifiers:[],remoteResultEligible:false});
   const rollback=mutations.get(name)??{mode:'NONE',undo:null};
-  const effect=mutations.has(name)?'MUTATION':name==='browser'?'CONTROL':'READ';
-  const personalOutput=personal.test(name)||name==='browser';
+  const effect=mutations.has(name)||name==='worktree_patch'?'MUTATION':['browser','worktree_command'].includes(name)?'CONTROL':'READ';
+  const taskPrivate=workModeCapabilities.has(name)&&name!=='source_first_research';
+  const personalOutput=personal.test(name)||name==='browser'||taskPrivate;
   const personalInput=personalOutput||['web_search','web_fetch','vinceai__hub_repo_search'].includes(name);
   let egress='LOCAL_ONLY';
   if(/^(gmail_|calendar_)/.test(name))egress='BROKER_BOUND';
   if(['web_search','web_fetch'].includes(name))egress='CONFIGURATION_BOUND';
   if(name==='browser')egress='BROWSER_POLICY_BOUND';
   if(name==='vinceai__hub_repo_search')egress='DESTINATION_BOUND';
+  if(workModeCapabilities.has(name))egress='WORK_TASK_BOUND';
   // A deterministic public utility result may be returned to the staged
   // private loopback only after the Work Mode coordinator creates a separate,
   // exact egress decision. Personal, mutation and broker results remain deny
   // by default even when their action was locally authorized.
   const remoteResultEligible=localUtilities.has(name);
-  return deepFreeze({supported:true,effect,rollback:rollback.mode,undoCapability:rollback.undo,authority:approvals.has(name)?'NATIVE_ALLOW_ONCE_OR_DENY':'MAC_POLICY',egress,inputDataClass:personalInput?'PERSONAL':'PUBLIC',outputDataClass:personalOutput?'PERSONAL':'PUBLIC',untrusted:!localUtilities.has(name),repairRules:[...repairRules],verifiers:localUtilities.has(name)?['exact_utility']:[],remoteResultEligible});
+  return deepFreeze({supported:true,effect,rollback:rollback.mode,undoCapability:rollback.undo,authority:workModeCapabilities.has(name)?'MAC_GATE':approvals.has(name)?'NATIVE_ALLOW_ONCE_OR_DENY':'MAC_POLICY',egress,inputDataClass:personalInput?'PERSONAL':'PUBLIC',outputDataClass:personalOutput?'PERSONAL':'PUBLIC',untrusted:!localUtilities.has(name),repairRules:[...repairRules],verifiers:localUtilities.has(name)?['exact_utility']:[],remoteResultEligible});
 }
 
 const normalizeRegistered=value=>typeof value==='string'?{name:value,source:'RUNTIME_DECLARATION'}:value;

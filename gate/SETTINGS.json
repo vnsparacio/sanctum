@@ -66,9 +66,16 @@
     "volume_id": "CONFIGURE_VOLUME_ID",
     "datacenter": "US-NC-2",
     "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
-    "image": "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+    "image": "runpod/pytorch@sha256:cb154fcca15d1d6ce858cfa672b76505e30861ef981d28ec94bd44168767d853",
     "model": "RedHatAI/Qwen3-Next-80B-A3B-Instruct-quantized.w4a16",
+    "revision": "ac9dc5b939ba948ab378b8638cfcce4ac4d5642b",
     "alias": "vinceai-qwen80b",
+    "vllm_version": "0.13.0",
+    "quantization": "compressed-tensors-int4-w4a16",
+    "max_model_len": 32768,
+    "gpu_memory_utilization": 0.9,
+    "runtime_root": "/workspace/vinceai",
+    "cache_root": "/workspace/vinceai/huggingface/private-80b-accepted-v1",
     "max_hourly_usd": 3,
     "max_runtime_seconds": 7200,
     "capacity_wait_seconds": 1800,
@@ -113,6 +120,12 @@
     "pod_prefix": "sanctum-private-lead-",
     "runtime_root": "/workspace/sanctum/releases/private-lead-qwen35-122b-nvfp4-candidate-v1",
     "cache_root": "/workspace/sanctum/huggingface/private-lead-qwen35-122b-nvfp4-candidate-v1"
+  },
+  "work_mode": {
+    "enabled": false,
+    "profile_file": "@CONFIG@/work-mode.json",
+    "ledger_root": "@STATE@/gate/private-lead/work-mode/tasks",
+    "max_concurrent_tasks": 1
   },
   "direct_openai_retention_authorized": false
 }

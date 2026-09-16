@@ -12,10 +12,53 @@ from backends import Remote, LocalMultimodalBackend
 from dispatch import assess
 from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from media import load, expand
+from command_runner import run as run_command
+from source_policy import minimize_query
+from workspace import create_worktree, list_entries, read_text, apply_patch, inspect_worktree, cleanup_worktree
+from common import atomic, canonical, private_dir, strict_json
+
+def work_root(settings): return private_dir(Path(settings['state_directory'])/'private-lead'/'work-mode'/'workspaces')
+def work_record(settings,task_id):
+    path=work_root(settings)/(task_id+'.json')
+    if path.is_symlink() or not path.exists(): raise Refused('worktree_unavailable')
+    value=strict_json(path.read_text())
+    if value.get('workspace_id')!=task_id: raise Refused('worktree_identity')
+    return value
+def work_profile(settings,name):
+    path=Path(settings['work_mode']['profile_file'])
+    if path.is_symlink() or path.stat().st_mode&0o077: raise Refused('work_profile_permissions')
+    value=strict_json(path.read_text());profile=value.get('profiles',{}).get(name)
+    if type(profile) is not dict: raise Refused('work_profile_unknown')
+    return profile
 
 
 def execute(b, settings, remote=None, lifecycle=None):
     op=b['operation']; scope=b['scope']
+    if op=='worktree_create':
+        p=b['packet'];profile=work_profile(settings,p['profile']);root=work_root(settings);record_path=root/(scope+'.json')
+        if record_path.exists() or record_path.is_symlink(): raise Refused('worktree_exists')
+        workspace=create_worktree(profile['repository'],profile['staging_root'],scope,profile['disk_bytes'])
+        workspace['profile']=p['profile'];atomic(record_path,canonical(workspace).encode())
+        return {'status':'OK','workspace':{'workspace_id':scope,'base_commit':workspace['base_commit'],'initial_status':workspace['initial_status'],'disk_bytes':workspace['disk_bytes']}}
+    if op=='worktree_list':
+        p=b['packet'];return {'status':'OK','result':list_entries(work_record(settings,scope)['root'],p['path'],p['max_entries'])}
+    if op=='worktree_read':
+        p=b['packet'];return {'status':'OK','result':read_text(work_record(settings,scope)['root'],p['path'],p['max_chars'])}
+    if op=='worktree_patch':
+        p=b['packet'];return {'status':'OK','result':apply_patch(work_record(settings,scope)['root'],p['patch'])}
+    if op=='worktree_command':
+        p=b['packet'];record=work_record(settings,scope)
+        if record['profile']!=p['profile']:raise Refused('worktree_profile_mismatch')
+        if p['operation'] in {'status','diff'}:return {'status':'OK','result':inspect_worktree(record['root'],p['operation'])}
+        return {'status':'OK','result':run_command(settings,p['profile'],record['root'],p['operation'])}
+    if op=='worktree_cleanup':
+        p=b['packet'];record=work_record(settings,scope);profile=work_profile(settings,p['profile'])
+        if record['profile']!=p['profile']:raise Refused('worktree_profile_mismatch')
+        result=cleanup_worktree(profile['repository'],record);(work_root(settings)/(scope+'.json')).unlink()
+        return {'status':'OK','result':result}
+    if op=='work_source_policy':
+        p=b['packet'];draft=minimize_query(p['prompt'])
+        return {'status':'OK','result':{'query':draft.query,'sensitivity':draft.sensitivity,'queryMode':draft.mode,'reasonCodes':list(draft.reason_codes),'digest':draft.digest,'sourceNeed':p['source_need']}}
     if op=='media':
         p=load(b['packet']['token'],None,scope,settings,bind=True)
         return {'status':'OK','digest':p['digest'],'summary':p['summary']}
@@ -33,7 +76,7 @@ def execute(b, settings, remote=None, lifecycle=None):
         return (remote or Remote(settings)).infer(b['tier'],packet,b['nonce'])
     if op=='private_lead_propose':
         return (lifecycle or PrivateLeadLifecycle(settings)).propose(scope,b['packet']['request'])
-    lc=lifecycle or Private80BLifecycle(settings)
+    lc=lifecycle or (PrivateLeadLifecycle(settings) if b['tier']=='PRIVATE_LEAD' else Private80BLifecycle(settings))
     if op=='close': lc.release(scope,close=True)
     elif op=='sweep': lc.sweep()
     elif op=='stop': lc.sweep(immediate=True,manual=True)

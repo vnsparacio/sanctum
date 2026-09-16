@@ -12,12 +12,17 @@ export function profileSystem(profile){
  return profile.prompt.system;
 }
 
-export function createPrivateLeadReasoner({execute,profile,body}){
+export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>{}}){
  if(typeof execute!=='function'||typeof body!=='function')throw Error('private_lead_adapter_config');
  const system=profileSystem(profile);
  return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsToolProposals:true,async invoke(request,signal){
    const result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:{system,request}},'private_lead_workmode'),signal);
-   if(result?.status!=='OK'||!result.result)throw Error('private_lead_unavailable');
+   // A syntactically malformed model result is a proposal-schema failure, not
+   // loss of the private runtime.  Preserve that distinction so Work Mode can
+   // spend its single accepted correction turn.  All other worker failures
+   // remain availability failures and stop closed.
+   if(result?.status!=='OK'||!result.result){if(result?.reason==='private_lead_result_schema')throw Error('reasoner_result_shape');throw Error('private_lead_unavailable');}
+   if(result.telemetry)onTelemetry(structuredClone(result.telemetry));
    return result.result;
  }});
 }

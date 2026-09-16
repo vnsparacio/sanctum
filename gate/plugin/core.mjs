@@ -23,6 +23,9 @@ const FAIL='The gate could not complete a reliable assessment. Ordinary advice i
 const HELP='Mac gate: /gate new; /gate ask QUESTION; /gate ask-235 QUESTION; /gate ask-strong QUESTION (OpenAI last resort). All tiers are eligible by default. /gate exclude 80b|235b|vision|frontier|local removes a tier for this session; /gate include NAME restores it. Hosted disclosures still require approval. /gate attach TOKEN adds a locally prepared media/document snapshot. /gate detach removes it. /gate mode active enables quality routing for this session; /gate mode shadow records quality but keeps eligible text on the local agent. /gate approve ID approves one exact disclosure; /gate result ID retrieves background work; /gate status; /gate cancel; /gate end. Remote reasoning has no tools or action authority.';
 const SECRET=/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-or-v1-[A-Za-z0-9]{24,}|\bAKIA[0-9A-Z]{16}\b/;
 export const inertAnswer=text=>text.replace(/\bMEDIA\s*:/gi,'Media reference (not opened):').replace(/\[\[/g,'［［').replace(/!\[/g,'!\\[').replace(/\[Mac gate job:/g,'[Model job reference:').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+export const executorDeadlineSeconds=(body,settings)=>body.operation==='private_lead_propose'
+  ?Math.min((settings.private_lead?.readiness_seconds??2700)+(settings.request_deadline_seconds??120),3000)
+  :body.operation==='infer'&&body.tier==='PRIVATE_80B'?settings.request_deadline_seconds:150;
 
 export function createExecutor(base,settings,key){
   return (body,signal)=>new Promise(resolveResult=>{
@@ -36,7 +39,7 @@ export function createExecutor(base,settings,key){
     };
     if(signal?.aborted)return finish({status:'UNAVAILABLE'});
     signal?.addEventListener('abort',abort,{once:true});
-    timer=setTimeout(abort,(body.operation==='infer'&&body.tier==='PRIVATE_80B'?settings.request_deadline_seconds:150)*1000);
+    timer=setTimeout(abort,executorDeadlineSeconds(body,settings)*1000);
     const raw=JSON.stringify(body),envelope=JSON.stringify({body:raw,mac:createHmac('sha256',key).update(raw).digest('hex')});
     try{
       child=spawn(settings.python,['-B',resolve(base,'worker.py')],{stdio:['pipe','pipe','ignore'],detached:true,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});

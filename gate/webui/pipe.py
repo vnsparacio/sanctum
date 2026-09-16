@@ -1,6 +1,6 @@
 """
 title: Mac prompt gate
-description: Explicit, approved hybrid reasoning through the existing Mac OpenClaw gate.
+description: Explicit Mac gate and bounded owner Work Mode commands.
 version: 2.0.0
 """
 import asyncio
@@ -31,8 +31,8 @@ def prepare(body, user, metadata, files=None, tools=None):
     if not isinstance(message, str):
         raise ValueError('The Mac gate currently accepts plain text only.')
     message = message.strip()
-    if message != '/gate' and not message.startswith(('/gate ', '/gate\n', '/gate\t')):
-        raise ValueError('Use /gate new, then /gate ask your question. This model only accepts explicit /gate commands.')
+    if not re.match(r'^/(?:gate|work)(?:\s|$)',message):
+        raise ValueError('Use an explicit /gate or /work owner command. This model does not accept ordinary chat text.')
     if len(message.encode()) > 32768:
         raise ValueError('This command exceeds the Mac gate text limit.')
     identity = hashlib.sha256(json.dumps([user['id'], chat], separators=(',', ':')).encode()).hexdigest()

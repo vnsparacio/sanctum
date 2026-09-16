@@ -6,6 +6,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {deriveCapabilityManifest,PINNED_ADAPTER_TOOLS} from '../gate/foundation/manifest.mjs';
 import {rules} from '../reliability/registry.mjs';
 import {utilityTools} from '../reliability/schemas.mjs';
+import {workModeTools} from '../gate/plugin/workspace-tools.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const schemas=JSON.parse(fs.readFileSync(path.join(root,'reliability/schema-snapshot.json'),'utf8'));
@@ -23,10 +24,11 @@ for(const name of pluginDirs){
   registered.push(...actual.map(x=>({name:x.name,description:x.description,parameters:x.parameters,source:`plugin:${plugin.id}`})));
 }
 const reliability=JSON.parse(fs.readFileSync(path.join(root,'reliability/openclaw.plugin.json'),'utf8'));
-const utilityNames=utilityTools.map(x=>x.name).sort();
+const reliabilityTools=[...utilityTools,...workModeTools];
+const utilityNames=reliabilityTools.map(x=>x.name).sort();
 if(JSON.stringify([...(reliability.contracts?.tools??[])].sort())!==JSON.stringify(utilityNames))throw Error('plugin_tool_declaration_drift:vinceai-reliability');
 declared.push(...utilityNames);
-registered.push(...utilityTools.map(x=>({...x,source:'plugin:vinceai-reliability'})));
+registered.push(...reliabilityTools.map(x=>({...x,source:'plugin:vinceai-reliability'})));
 const repairRulesByTool={};
 for(const rule of rules)for(const tool of rule.tools)(repairRulesByTool[tool]??=[]).push(rule.id);
 const manifest=deriveCapabilityManifest({schemas,declaredTools:declared,registeredTools:registered,adaptedTools:PINNED_ADAPTER_TOOLS,runtimeConfig:{tools:{alsoAllow:[]}},repairRulesByTool,allowedRepairRules:rules.map(x=>x.id)});

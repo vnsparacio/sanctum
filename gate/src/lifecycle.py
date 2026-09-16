@@ -69,7 +69,7 @@ class Private80BLifecycle:
     def status(self):
         s = self.state()
         with database(self.root) as c: leases = c.execute('select count(*),coalesce(sum(active),0) from leases where expires>?', (self.now(),)).fetchone()
-        return {k: s.get(k) for k in ['phase', 'pod_id', 'started_at', 'hourly_usd', 'manual_stop', 'error']} | {'leases': leases[0], 'active_requests': leases[1], 'estimated_compute_usd': max(0, self.now() - s.get('started_at', self.now())) / 3600 * s.get('hourly_usd', 0) if s.get('pod_id') else 0}
+        return {k: s.get(k) for k in ['phase', 'pod_id', 'allocation_id', 'started_at', 'ready_at', 'first_inference_at', 'last_inference_at', 'delete_requested_at', 'absent_confirmed_at', 'hourly_usd', 'manual_stop', 'error']} | {'leases': leases[0], 'active_requests': leases[1], 'estimated_compute_usd': max(0, self.now() - s.get('started_at', self.now())) / 3600 * s.get('hourly_usd', 0) if s.get('pod_id') else 0}
 
     def reconcile(self, s):
         pods = self.provider.pods()
@@ -83,11 +83,11 @@ class Private80BLifecycle:
         elif s.get('pod_id'): self.save(s, pod_id=None, phase='OFFLINE', manual_stop=True)
         return candidates
 
-    def ensure_ready(self, scope):
+    def ensure_ready(self, scope, explicit=False):
         with self.lock():
             self.check_lease(scope); s = self.state()
             self.reconcile(s)
-            if s.get('manual_stop') or not self.cfg['auto_start']: raise Refused('autostart_disabled')
+            if s.get('manual_stop') or (not self.cfg['auto_start'] and not explicit): raise Refused('autostart_disabled')
             self.provider.ensure_guard()
             if s.get('pod_id'):
                 if self.now() - s.get('started_at', 0) >= self.cfg['max_runtime_seconds']: raise Refused('gpu_runtime_limit')
@@ -105,7 +105,10 @@ class Private80BLifecycle:
                 # Persist intent before mutation. Only an exact, definitive capacity
                 # rejection permits retry; lost/ambiguous responses remain adopt-only.
                 name = self.pod_prefix + 'stage-' + uuid.uuid4().hex
-                self.save(s, pod_name=name, allocation_uncertain=True, started_at=self.now(), hourly_usd=info['hourly_usd'])
+                self.save(s, pod_name=name, allocation_uncertain=True, allocation_id=None,
+                          started_at=self.now(), ready_at=None, first_inference_at=None,
+                          last_inference_at=None, delete_requested_at=None,
+                          absent_confirmed_at=None, hourly_usd=info['hourly_usd'])
                 try: pod = self.provider.create(name)
                 except Exception as e:
                     if type(e) is Refused and str(e) == 'gpu_capacity_unavailable':
@@ -121,7 +124,7 @@ class Private80BLifecycle:
                 else:
                     if not pod or not pod.get('id'): raise Refused('allocation_unresolved')
                     self.save(s, pod_id=pod['id'])
-                self.save(s, phase='POD_ALLOCATED', allocation_uncertain=False)
+                self.save(s, phase='POD_ALLOCATED', allocation_id=s.get('pod_id'), allocation_uncertain=False)
                 self.ready_locked(s, scope)
                 return
             raise Refused('capacity_timeout')
@@ -142,7 +145,7 @@ class Private80BLifecycle:
                 self.provider.server_alive(s['pod_id'], host, port)
                 self.provider.tunnel(s['pod_id'], host, port)
                 self.backend.health_check(smoke=True)
-                self.save(s, phase='READY', error=None); return
+                self.save(s, phase='READY', ready_at=self.now(), error=None); return
             except Exception:
                 self.check_lease(scope)
             # This is idempotent and repairs interrupted installs at their final path.
@@ -155,7 +158,7 @@ class Private80BLifecycle:
                 try:
                     self.provider.server_alive(s['pod_id'], host, port)
                     self.backend.health_check(smoke=True)
-                    self.save(s, phase='READY', error=None); return
+                    self.save(s, phase='READY', ready_at=self.now(), error=None); return
                 except Exception: self.sleep(5)
             raise Refused('model_readiness_timeout')
         except Exception:
@@ -170,12 +173,12 @@ class Private80BLifecycle:
         self.reconcile(s)
         if not s.get('pod_id'):
             self.save(s, phase='OFFLINE'); return
-        self.save(s, phase='STOPPING')
+        self.save(s, phase='STOPPING', delete_requested_at=self.now())
         self.provider.delete(s['pod_id'])
         for _ in range(6):
             if all(p.get('id') != s['pod_id'] for p in self.provider.pods()):
                 self.provider.close_tunnel(s)
-                self.save(s, phase='OFFLINE', pod_id=None, pod_name=None, allocation_uncertain=False, idle_since=None)
+                self.save(s, phase='OFFLINE', pod_id=None, pod_name=None, allocation_uncertain=False, idle_since=None, absent_confirmed_at=self.now())
                 return
             self.sleep(2)
         self.save(s, phase='DEGRADED', error='termination_unconfirmed')
@@ -240,8 +243,13 @@ class Private80BLifecycle:
                 except Exception: return
         t = threading.Thread(target=pulse, daemon=True); t.start()
         try:
-            self.ensure_ready(scope); self.check_lease(scope)
-            return self.backend.propose(request)
+            self.ensure_ready(scope,explicit=self.cfg.get('logical_profile')=='PRIVATE_LEAD'); self.check_lease(scope)
+            with self.lock():
+                state=self.state();self.save(state,first_inference_at=state.get('first_inference_at') or self.now(),last_inference_at=self.now())
+            result=self.backend.propose(request)
+            with self.lock():
+                state=self.state();self.save(state,last_inference_at=self.now())
+            return result
         finally:
             stop.set(); t.join(timeout=1); self.release(scope); self.sweep()
 

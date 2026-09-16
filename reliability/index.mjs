@@ -12,6 +12,7 @@ import {rules} from './registry.mjs';
 import {createVerification} from './verification.mjs';
 import {deriveCapabilityManifest,PINNED_ADAPTER_TOOLS,publishCapabilityManifest} from '../gate/foundation/manifest.mjs';
 import {validateToolProposal} from '../gate/foundation/contracts.mjs';
+import {registeredWorkModeTools,workModeTools} from '../gate/plugin/workspace-tools.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function python(script,payload,signal){
  return new Promise(resolve=>{
@@ -45,7 +46,7 @@ export default {
    const names=plugin.contracts?.tools??[];declaredTools.push(...names);
    if(syntheticRuntime||(runtimeConfig.plugins?.entries?.[plugin.id]?.enabled!==false&&(runtimeConfig.plugins?.allow??[]).includes(plugin.id)))registeredTools.push(...names.map(name=>({name,source:`plugin:${plugin.id}`})));
   }
-  declaredTools.push(...utilityTools.map(x=>x.name));registeredTools.push(...utilityTools.map(x=>({...x,source:'plugin:vinceai-reliability'})));
+  declaredTools.push(...utilityTools.map(x=>x.name),...workModeTools.map(x=>x.name));registeredTools.push(...utilityTools.map(x=>({...x,source:'plugin:vinceai-reliability'})),...workModeTools.map(x=>({...x,source:'plugin:vinceai-reliability'})));
   const adaptedTools=[];
   if(runtimeConfig.browser?.enabled===true)adaptedTools.push('browser');
   if(runtimeConfig.tools?.web?.search?.enabled===true)adaptedTools.push('web_search');
@@ -120,6 +121,7 @@ export default {
    verification.proof(_id,utility.name,prepared.params,result.details);
    return result;
   }},{optional:true});
+  for(const tool of registeredWorkModeTools())api.registerTool(tool,{optional:true});
   api.registerAgentToolResultMiddleware(async(event,ctx)=>{
    verification.result(ctx?.runId,event.toolCallId,event.toolName,event.result?.details);
    const result=modelResult(event.toolName,event.result);

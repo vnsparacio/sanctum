@@ -86,7 +86,8 @@ export function egressMatches(decision,claim,now=Date.now()/1000){
 export function createToolResultEnvelope({capability,capabilityDigest,executionState,result,provenance='LOCAL',dataClass='PERSONAL',untrusted=false,truncated=false,repairRules=[],verifier='UNKNOWN',rollback='NONE'}){
   if(!identifier(capability)||!hex(capabilityDigest)||!enumValue(executionState,EXECUTION_STATES)||!identifier(provenance)||!enumValue(dataClass,DATA_CLASSES)||typeof untrusted!=='boolean'||typeof truncated!=='boolean'||!Array.isArray(repairRules)||!repairRules.every(x=>typeof x==='string'&&/^[a-z][a-z0-9_:-]{0,79}$/.test(x))||!enumValue(verifier,VERIFIER_OUTCOMES)||!enumValue(rollback,['NONE','CREATE_ONLY','UNDO_CAPABILITY','LIFECYCLE_RECONCILIATION']))throw Error('result_envelope_shape');
   const ok=result?.ok===true;
-  const payload=ok?{data:Object.hasOwn(result,'data')?result.data:null}:{error:{code:code(result?.error?.code)?result.error.code:'BACKEND_FAILURE'}};
+  const diagnostic=typeof result?.error?.diagnostic==='string'?result.error.diagnostic.slice(0,12000):null;
+  const payload=ok?{data:Object.hasOwn(result,'data')?result.data:null}:{error:{code:code(result?.error?.code)?result.error.code:'BACKEND_FAILURE',...(diagnostic?{diagnostic}:{})}};
   if(canonical(payload).length>65536)throw Error('result_envelope_limit');
   return clone({schema:CONTRACT_VERSION,capability,capabilityDigest,executionState,ok,provenance,dataClass,untrusted,truncated,repairRules:[...repairRules],verifier,rollback,...payload});
 }

@@ -21,6 +21,7 @@ from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from runpod import capacity_rejected
 from media import prepare, load, expand
 import install
+import manage
 
 
 def settings(root):
@@ -160,7 +161,7 @@ class Transport(Temp):
             if url.endswith('/models'): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
             calls.append(p);return chat(canonical(response))
         result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{}}})
-        self.assertEqual(result,{'status':'OK','result':response});self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0])
+        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0])
     def test_private_lead_proposal_refuses_invalid_request(self):
         with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
     def test_answer_schema_no_authority_fields(self):
@@ -198,6 +199,7 @@ class FakeBackend:
         self.calls.append('health')
         if self.fail:raise Refused('not_ready')
     def infer(self,p):self.calls.append('infer');return {'status':'OK','text':'synthetic','escalation':'NONE'}
+    def propose(self,p):self.calls.append('propose');return {'status':'OK','result':{'kind':'FINAL','text':'synthetic'}}
 class Lifecycle(Temp):
     def setUp(self):
         super().setUp();self.time=1000;self.p=FakeProvider();self.b=FakeBackend();self.lc=Private80BLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
@@ -229,6 +231,12 @@ class Lifecycle(Temp):
     def test_create_ready_reuse_close_preserves_volume(self):
         self.lc.infer('a',{'prompt':'one'});self.lc.infer('a',{'prompt':'two'});self.assertEqual(self.p.created,1);self.assertEqual(self.lc.status()['phase'],'READY')
         self.lc.release('a',close=True);self.assertEqual(self.p.deleted,['pod1']);self.assertEqual(self.lc.status()['phase'],'OFFLINE');self.assertNotIn('delete_volume',dir(self.p))
+    def test_new_allocation_clears_prior_allocation_telemetry(self):
+        self.lc.save(self.lc.state(),ready_at=1,first_inference_at=2,last_inference_at=3,delete_requested_at=4,absent_confirmed_at=5,allocation_id='old')
+        self.lc.infer('a',{})
+        state=self.lc.state();self.assertEqual(state['allocation_id'],'pod1')
+        self.assertIsNone(state['delete_requested_at']);self.assertIsNone(state['absent_confirmed_at'])
+        self.assertEqual(state['ready_at'],self.time);self.assertIsNone(state['first_inference_at']);self.assertIsNone(state['last_inference_at'])
     def test_final_lease_only_terminates(self):
         self.lc.infer('a',{});self.lc.infer('b',{});self.lc.release('a',close=True);self.assertEqual(self.p.deleted,[]);self.lc.release('b',close=True);self.assertEqual(self.p.deleted,['pod1'])
     def test_close_during_query_deletes_as_final_request_releases(self):
@@ -290,6 +298,31 @@ class Lifecycle(Temp):
         self.p.rows=[{'id':'old','name':'vinceai-qwen80b-stage-existing'}]
         lead=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
         with self.assertRaisesRegex(Refused,'untracked_or_duplicate_pod'): lead.infer('lead',{})
+    def test_explicit_signed_lead_proposal_can_start_while_background_autostart_stays_off(self):
+        self.s['private_lead']['enabled']=True;self.s['private_lead']['auto_start']=False
+        lead=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        self.assertEqual(lead.propose('lead',{})['status'],'OK');self.assertEqual(self.p.created,1);self.assertIn('propose',self.b.calls)
+
+class Janitor(Temp):
+    def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):
+        calls=[]
+        class Fake:
+            def __init__(self,release):self.release=release
+            def sweep(self):
+                calls.append(self.release)
+                if self.release=='PRIVATE_80B':raise Refused('other_release_active')
+            def status(self):return {'phase':'READY'}
+        original=manage.lifecycle;manage.lifecycle=lambda _settings,release:Fake(release)
+        self.addCleanup(setattr,manage,'lifecycle',original)
+        result=manage.sweep_all(self.s)
+        self.assertEqual(calls,list(manage.RELEASES));self.assertEqual(result['PRIVATE_80B']['phase'],'UNAVAILABLE');self.assertEqual(result['PRIVATE_LEAD']['phase'],'READY')
+
+    def test_default_sweep_fails_if_neither_release_can_be_reconciled(self):
+        class Fake:
+            def sweep(self):raise Refused('provider_unavailable')
+        original=manage.lifecycle;manage.lifecycle=lambda _settings,_release:Fake()
+        self.addCleanup(setattr,manage,'lifecycle',original)
+        with self.assertRaisesRegex(Refused,'janitor_all_releases_failed'):manage.sweep_all(self.s)
 
 class Media(Temp):
     def test_image_strips_exif_and_no_source_path(self):

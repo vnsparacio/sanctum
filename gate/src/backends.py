@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from common import Refused, canonical, database, http, strict_json
 from schema import SCHEMA, obj, enum, validate
 
@@ -179,11 +182,44 @@ class PrivateLeadBackend(Private80BBackend):
         if len(canonical(request).encode()) > self.cfg['max_model_len'] * 8: raise Refused('context_limit')
         self.health_check()
         system = request['system'] + '\nReturn exactly one JSON object. It must be either {"kind":"FINAL","text":"..."}, {"kind":"ESCALATION","reason":"CODE"}, or {"kind":"TOOL_PROPOSAL","proposal":{...}}. A proposal has only schema, proposalId, requestId, revision, reasoner, capability, capabilityDigest, arguments. Never include authority, approval, egress, paths outside supplied context, or commentary.'
-        p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':False,'chat_template_kwargs':{'enable_thinking':False}}
-        value = strict_json(extract_chat(self.send(self.url + '/chat/completions',p,{'Content-Type':'application/json'},timeout=120)))
+        p = {'model':self.model,'messages':[{'role':'system','content':system},{'role':'user','content':canonical(request['request'])}], 'max_tokens':1024,'temperature':0,'stream':True,'stream_options':{'include_usage':True},'chat_template_kwargs':{'enable_thinking':False}}
+        started=time.monotonic();first=None;usage={};finish=None;parts=[]
+        if self.send is http:
+            opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            req=urllib.request.Request(self.url+'/chat/completions',data=canonical(p).encode(),headers={'Content-Type':'application/json'})
+            try:
+                with opener.open(req,timeout=120) as response:
+                    for raw in response:
+                        if len(raw)>131072:raise Refused('response_too_large')
+                        line=raw.decode('utf-8','strict').strip()
+                        if not line.startswith('data:'):continue
+                        data=line[5:].strip()
+                        if data=='[DONE]':break
+                        row=strict_json(data);usage=row.get('usage') or usage
+                        choices=row.get('choices') or []
+                        if choices:
+                            delta=choices[0].get('delta') or {};piece=delta.get('content')
+                            if type(piece) is str and piece:
+                                if first is None:first=time.monotonic()
+                                parts.append(piece)
+                                if sum(map(len,parts))>65536:raise Refused('private_lead_result_limit')
+                            finish=choices[0].get('finish_reason') or finish
+            except Refused:raise
+            except urllib.error.HTTPError as e:raise Refused('http_'+str(e.code)) from None
+            except Exception:raise Refused('transport_unavailable') from None
+            if finish!='stop':raise Refused('answer_incomplete')
+            text=''.join(parts)
+        else:
+            # Deterministic unit-test adapters do not implement SSE.
+            p['stream']=False;p.pop('stream_options',None)
+            response=self.send(self.url+'/chat/completions',p,{'Content-Type':'application/json'},timeout=120)
+            text=extract_chat(response);usage=response.get('usage') or {};first=None
+        ended=time.monotonic();value = strict_json(text)
         if type(value) is not dict or value.get('kind') not in {'FINAL','ESCALATION','TOOL_PROPOSAL'}: raise Refused('private_lead_result_schema')
         if len(canonical(value).encode()) > 65536: raise Refused('private_lead_result_limit')
-        return {'status':'OK','result':value}
+        prompt_tokens=usage.get('prompt_tokens',0);completion_tokens=usage.get('completion_tokens',0)
+        decode=max(ended-(first or started),0);rate=(completion_tokens/decode if type(completion_tokens) is int and completion_tokens>=0 and decode>0 else None)
+        return {'status':'OK','result':value,'telemetry':{'elapsed_seconds':ended-started,'ttft_seconds':None if first is None else first-started,'decode_seconds':decode,'decode_tokens_per_second':rate,'prompt_tokens':prompt_tokens if type(prompt_tokens) is int else 0,'completion_tokens':completion_tokens if type(completion_tokens) is int else 0,'result_kind':value['kind']}}
 
 class LocalMultimodalBackend:
     def __init__(self, settings, send=http): self.settings, self.send = settings, send

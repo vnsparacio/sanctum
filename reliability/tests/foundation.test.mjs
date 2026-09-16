@@ -59,6 +59,8 @@ test('verifier uses only VERIFIED REJECTED UNKNOWN and unknown is not success',(
 test('result and audit envelopes retain bounded trust semantics without payloads',()=>{
  const result=createToolResultEnvelope({capability:'messages_search',capabilityDigest:'a'.repeat(64),executionState:'COMPLETED',result:{ok:true,data:{records:[]}},provenance:'local_messages',dataClass:'PERSONAL',untrusted:true,truncated:false});
  assert.equal(result.untrusted,true);assert.equal(result.executionState,'COMPLETED');
+ const commandFailure=createToolResultEnvelope({capability:'worktree_command',capabilityDigest:'b'.repeat(64),executionState:'COMPLETED',result:{ok:false,error:{code:'COMMAND_FAILED',diagnostic:'untrusted test output'}}});
+ assert.deepEqual(commandFailure.error,{code:'COMMAND_FAILED',diagnostic:'untrusted test output'});
  const failed=capabilityResultEnvelope('gmail_search',{ok:false,error:{code:'SECRET_BODY'}},{capabilityDigest:'b'.repeat(64)});
  assert.equal(failed.executionState,'COMPLETION_UNKNOWN');assert.equal(failed.error.code,'BACKEND_FAILURE');
  const event=auditEvent({phase:'EXECUTION',capability:'messages_search',correlation:'private prompt must not persist',reasonCodes:['INVALID_ARGUMENT'],outcome:'UNKNOWN'});
