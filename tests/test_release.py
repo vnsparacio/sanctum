@@ -75,6 +75,117 @@ class Amendments(unittest.TestCase):
   with self.assertRaises(ValueError):mod.configure(self.prefix,{'integrations':['shell']})
   self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
 
+class WorkProfileAmendments(unittest.TestCase):
+ setUp=Setup.setUp
+ def fixture(self):
+  spec=importlib.util.spec_from_file_location('configure_work',ROOT/'scripts/configure.py');mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+  op.setup(self.prefix)
+  policy={'repository':'unused','staging_root':'unused','max_model_calls':16,'max_cost_usd':1.5,'reviewer':True,'capabilities':['worktree_read'],'operations':{'test':['node','--test']}}
+  op.write(self.prefix/'config/work-mode.json',json.dumps({'schema':'sanctum-work-mode-profiles/v1','profiles':{'reviewed':policy}}))
+  receipt=op.receipt(self.prefix);receipt['files']['config/work-mode.json']=op.sha(self.prefix/'config/work-mode.json');(self.prefix/'receipt.json').write_text(json.dumps(receipt))
+  repo=op.private(self.prefix/'test-repo');(repo/'index.js').write_text('export const value=1;')
+  for args in (['init','-q'],['add','.'],['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','baseline']):subprocess.run(['/usr/bin/git',*args],cwd=repo,check=True,capture_output=True)
+  op.private(self.prefix/'state/gate/private-lead/work-mode/registered/unseen/staging')
+  return mod,repo,policy,{'work_profile':{'name':'unseen','copy_from':'reviewed','repository':str(repo)}}
+ def test_registration_preserves_policy_and_rolls_back(self):
+  mod,repo,policy,proposal=self.fixture();before=(self.prefix/'config/work-mode.json').read_bytes()
+  mod.configure(self.prefix,proposal);op.verify_install(self.prefix)
+  profiles=json.loads((self.prefix/'config/work-mode.json').read_text())['profiles'];self.assertEqual(profiles['reviewed'],policy)
+  self.assertEqual({k:v for k,v in profiles['unseen'].items() if k not in ('repository','staging_root')},{k:v for k,v in policy.items() if k not in ('repository','staging_root')})
+  self.assertEqual(profiles['unseen']['repository'],str(repo));self.assertEqual((self.prefix/'config/work-mode.json').stat().st_mode&0o777,0o600)
+  mod.rollback(self.prefix,next((self.prefix/'state/amendments').iterdir()));op.verify_install(self.prefix);self.assertEqual((self.prefix/'config/work-mode.json').read_bytes(),before)
+ def test_invalid_registration_leaves_receipt_and_profiles_untouched(self):
+  mod,repo,policy,proposal=self.fixture();before={n:(self.prefix/n).read_bytes() for n in ('receipt.json','config/work-mode.json')};item=proposal['work_profile']
+  bad=[{**item,'name':'reviewed'},{**item,'copy_from':'missing'},{**item,'max_model_calls':99},{**item,'repository':str(ROOT)},{**item,'name':'../escape'}]
+  link=self.prefix/'linked';link.symlink_to(repo,target_is_directory=True);bad.append({**item,'repository':str(link)})
+  for value in bad:
+   with self.subTest(value=value),self.assertRaises(ValueError):mod.configure(self.prefix,{'work_profile':value})
+  (repo/'untracked').write_text('dirty')
+  with self.assertRaises(ValueError):mod.configure(self.prefix,proposal)
+  for n,raw in before.items():self.assertEqual((self.prefix/n).read_bytes(),raw)
+  self.assertFalse((self.prefix/'state/amendments').exists())
+
+class WorkBudgetAmendments(unittest.TestCase):
+ setUp=Setup.setUp
+ fixture=WorkProfileAmendments.fixture
+ def budget_fixture(self):
+  import sqlite3
+  mod,repo,policy,proposal=self.fixture();mod.configure(self.prefix,proposal)
+  settings=json.loads((self.prefix/'gate/SETTINGS.json').read_text());lead=Path(settings['state_directory'])/'private-lead';lead.mkdir(parents=True,exist_ok=True,mode=0o700)
+  (lead/'gpu.json').write_text(json.dumps({'phase':'READY','pod_id':'synthetic-pod','allocation_uncertain':False}))
+  with sqlite3.connect(lead/'control.sqlite') as c:
+   c.execute('create table leases(scope text,active integer,closing integer,expires real)');c.execute('insert into leases values(?,?,?,?)',('a'*64,1,0,4102444800))
+  proposal={'work_budget':{'profile':'unseen','max_iterations':32,'max_model_calls':32,'max_tokens':200000,'retained_scope':'a'*64}}
+  return mod,lead,proposal
+ def test_retained_budget_change_preserves_every_other_profile_field(self):
+  from unittest.mock import patch
+  mod,lead,proposal=self.budget_fixture();before=json.loads((self.prefix/'config/work-mode.json').read_text());old=(self.prefix/'receipt.json').read_bytes()
+  with patch.object(mod,'active_janitor',return_value=True),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,proposal)
+  op.verify_install(self.prefix);after=json.loads((self.prefix/'config/work-mode.json').read_text())
+  changed=after['profiles']['unseen'];expected={**before['profiles']['unseen'],'max_iterations':32,'max_model_calls':32,'max_tokens':200000};self.assertEqual(changed,expected);self.assertEqual(after['profiles']['reviewed'],before['profiles']['reviewed'])
+  logs=sorted((self.prefix/'state/amendments').iterdir());mod.rollback(self.prefix,logs[-1]);self.assertEqual((self.prefix/'receipt.json').read_bytes(),old);op.verify_install(self.prefix)
+ def test_budget_refuses_unknown_ownership_worker_and_excess_limits(self):
+  from unittest.mock import patch
+  mod,lead,proposal=self.budget_fixture();before=(self.prefix/'receipt.json').read_bytes();item=proposal['work_budget']
+  with patch.object(mod,'active_janitor',return_value=True),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):
+   for value in ({**item,'max_iterations':33},{**item,'max_model_calls':33},{**item,'max_tokens':200001},{**item,'retained_scope':'b'*64},{**item,'profile':'reviewed'}):
+    with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_budget':value})
+  with patch.object(mod,'active_janitor',return_value=True),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='python -B '+str(self.prefix/'gate/worker.py'))):
+   with self.assertRaises(ValueError):mod.configure(self.prefix,proposal)
+  with patch.object(mod,'active_janitor',return_value=False):
+   with self.assertRaises(ValueError):mod.configure(self.prefix,proposal)
+  self.assertEqual((self.prefix/'receipt.json').read_bytes(),before)
+
+ def test_host_interface_amendment_requires_named_freeze_and_preserves_configuration(self):
+  from unittest.mock import patch
+  mod,lead,budget=self.budget_fixture();item=budget['work_budget'];before=(self.prefix/'config/work-mode.json').read_bytes();receipt=(self.prefix/'receipt.json').read_bytes()
+  proposal={'work_host':{'profile':item['profile'],'retained_scope':item['retained_scope'],'source_manifest_sha256':'0'*64}}
+  with self.assertRaises(ValueError):mod.configure(self.prefix,proposal)
+  self.assertEqual((self.prefix/'receipt.json').read_bytes(),receipt)
+  proposal['work_host']['source_manifest_sha256']=op.sha(ROOT/'SOURCE-MANIFEST.json')
+  with patch.object(mod,'active_janitor',return_value=True),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,proposal)
+  op.verify_install(self.prefix);self.assertEqual((self.prefix/'config/work-mode.json').read_bytes(),before)
+  log=sorted((self.prefix/'state/amendments').iterdir())[-1];tx=json.loads((log/'transaction.json').read_text());self.assertEqual(set(tx['after']),{'gate/src/backends.py','gate/plugin/work-mode.mjs','gate/FREEZE.json'})
+  mod.rollback(self.prefix,log);op.verify_install(self.prefix);self.assertEqual((self.prefix/'receipt.json').read_bytes(),receipt)
+
+class WorkIntegrityAmendments(unittest.TestCase):
+ setUp=Setup.setUp
+ fixture=WorkProfileAmendments.fixture
+ def test_explicit_task_contract_registration_preserves_limits_and_rolls_back(self):
+  mod,repo,policy,proposal=self.fixture();evidence=mod.protection_module();contract=evidence.unrestricted_contract();contract.update(protected=['index.js'],mutable=[],allow_new=True)
+  proposal['work_profile']['task_protection']=contract
+  before=(self.prefix/'config/work-mode.json').read_bytes();mod.configure(self.prefix,proposal);op.verify_install(self.prefix)
+  current=json.loads((self.prefix/'config/work-mode.json').read_text())['profiles']['unseen'];self.assertEqual(current['task_protection'],contract)
+  self.assertEqual(current['max_model_calls'],policy['max_model_calls']);self.assertEqual(current['max_cost_usd'],policy['max_cost_usd'])
+  mod.rollback(self.prefix,next((self.prefix/'state/amendments').iterdir()));self.assertEqual(before,(self.prefix/'config/work-mode.json').read_bytes())
+ def test_integrity_amendment_has_fixed_closure_preserves_profiles_and_rolls_back(self):
+  from unittest.mock import patch
+  import plistlib
+  mod,repo,policy,proposal=self.fixture()
+  profiles=json.loads((self.prefix/'config/work-mode.json').read_text())
+  for name in [*(f'grade{n:02d}' for n in range(1,11)),'adversarial']:
+   profiles['profiles'][name]={**policy,'repository':str(self.prefix/'state/gate/private-lead/work-mode/qualification'/name/'repo')}
+  (self.prefix/'config/work-mode.json').write_text(json.dumps(profiles));receipt=op.receipt(self.prefix);receipt['files']['config/work-mode.json']=op.sha(self.prefix/'config/work-mode.json');(self.prefix/'receipt.json').write_text(json.dumps(receipt))
+  op.write(self.prefix/'state/gate/gpu.json',json.dumps({'phase':'RETIRED','retired_confirmed_at':1}));op.write(self.prefix/'state/gate/private-lead/gpu.json',json.dumps({'phase':'OFFLINE'}))
+  before={n:(self.prefix/n).read_bytes() for n in ('config/work-mode.json','gate/SETTINGS.json','receipt.json','gate/FREEZE.json')}
+  item={'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}
+  with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_integrity':{**item,'extra':True}})
+  with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_integrity':{'source_manifest_sha256':'0'*64}})
+  with patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_integrity':item})
+  op.verify_install(self.prefix);after=json.loads((self.prefix/'config/work-mode.json').read_text())
+  for name,profile in after['profiles'].items():
+   self.assertEqual({k:v for k,v in profile.items() if k!='task_protection'},profiles['profiles'][name])
+   self.assertEqual(profile['task_protection']['protected'],[] if name=='reviewed' else ['index.test.js','package.json'])
+  self.assertEqual(before['gate/SETTINGS.json'],(self.prefix/'gate/SETTINGS.json').read_bytes())
+  log=next((self.prefix/'state/amendments').iterdir());tx=json.loads((log/'transaction.json').read_text());self.assertEqual(set(tx['after']),{'gate/'+n for n in mod.INTEGRITY_FILES}|{'gate/FREEZE.json','config/work-mode.json'})
+  mod.rollback(self.prefix,log);op.verify_install(self.prefix)
+  for n,raw in before.items():self.assertEqual(raw,(self.prefix/n).read_bytes())
+ def test_integrity_amendment_refuses_active_ownership(self):
+  mod,repo,policy,proposal=self.fixture();op.write(self.prefix/'state/gate/gpu.json',json.dumps({'phase':'RETIRED','retired_confirmed_at':1}));op.write(self.prefix/'state/gate/private-lead/gpu.json',json.dumps({'phase':'READY','pod_id':'synthetic'}))
+  before=(self.prefix/'receipt.json').read_bytes()
+  with self.assertRaisesRegex(ValueError,'Unresolved GPU ownership'):mod.configure(self.prefix,{'work_integrity':{'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}})
+  self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
+
 class Publication(unittest.TestCase):
  def test_project_python_names_do_not_shadow_standard_library(self):
   excluded={'.git','.venv','node_modules','build','dist','.local','__pycache__'}

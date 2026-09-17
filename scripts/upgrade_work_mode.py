@@ -5,8 +5,10 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 
 FILES=(
- 'SETTINGS.json','manage.py','worker.py','qualify_work_mode.py','probe_work_intent.py','preflight-work-intent.mjs','src/authority.py','src/backends.py','src/command_runner.py','src/lifecycle.py','src/workspace.py',
- 'foundation/contracts.mjs','foundation/manifest.mjs','foundation/evidence.mjs','foundation/work-intent.mjs','foundation/vllm-structured-output.mjs','plugin/index.mjs','plugin/core.mjs',
+ 'src/task_evidence.py','runtime/protected-test-driver.cjs','runtime/protected-test-preload.cjs',
+ 'verify_serving_runtime.py',
+ 'SETTINGS.json','install.py','watch.py','experiment_control.py','diagnostic-experiment.mjs','runtime-readiness.mjs','verify_exact_runtime.py','manage.py','worker.py','qualify_work_mode.py','probe_work_intent.py','protocol-microprobe.mjs','preflight-work-intent.mjs','src/retirement.py','src/dispatch.py','src/experiment.py','src/experiment_lifecycle.py','src/runpod.py','src/authority.py','src/backends.py','src/protocol_stream.py','src/command_runner.py','src/lifecycle.py','src/workspace.py',
+ 'foundation/contracts.mjs','foundation/decision-surface.mjs','foundation/protocol-diagnostics.mjs','foundation/manifest.mjs','foundation/evidence.mjs','foundation/work-intent.mjs','foundation/vllm-structured-output.mjs','plugin/index.mjs','plugin/core.mjs',
  'plugin/private-lead.mjs','plugin/source-retrieval.mjs','plugin/work-mode.mjs','plugin/work-command.mjs','plugin/command-broker.mjs',
  'plugin/work-ledger.mjs','plugin/workspace-tools.mjs','plugin/openclaw.plugin.json','plugin/package.json',
  'runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/bootstrap-vllm.sh',
@@ -25,11 +27,17 @@ def safe(prefix):
   path=prefix/'state/gate'/name
   if path.exists():
    value=json.loads(path.read_text())
-   if value.get('phase')!='OFFLINE' or any(value.get(k) for k in ('pod_id','pod_name','allocation_uncertain')):raise ValueError('Unresolved GPU ownership; preserve cleanup')
- db=prefix/'state/gate/control.sqlite'
- if db.exists():
-  with sqlite3.connect(db.as_uri()+'?mode=ro',uri=True) as conn:
-   if conn.execute('select count(*) from leases').fetchone()[0]:raise ValueError('Close all private leases first')
+   expected_phase='RETIRED' if name=='gpu.json' else 'OFFLINE'
+   if value.get('phase')!=expected_phase or any(value.get(k) for k in ('pod_id','pod_name','allocation_uncertain')):raise ValueError('Unresolved GPU ownership; preserve cleanup')
+ retirement=prefix/'state/gate/gpu.json'
+ if not retirement.is_file() or not json.loads(retirement.read_text()).get('retired_confirmed_at'):raise ValueError('Verify permanent 80B retirement before amendment')
+ for suffix in ('','private-lead/'):
+  db=prefix/('state/gate/'+suffix+'control.sqlite')
+  if db.exists():
+   with sqlite3.connect(db.as_uri()+'?mode=ro',uri=True) as conn:
+    if conn.execute('select count(*) from leases').fetchone()[0]:raise ValueError('Close all private leases first')
+    if conn.execute("select count(*) from sqlite_master where type='table' and name='experiments'").fetchone()[0]:
+     if any(json.loads(row[0])['state']!='COMPLETE' for row in conn.execute('select record from experiments')):raise ValueError('Unresolved experiment; preserve supervision')
  plist=prefix/'config/gpu-janitor.plist'
  if not plist.is_file() or plist.is_symlink():raise ValueError('Independent janitor configuration unavailable')
  label=json.loads(json.dumps(__import__('plistlib').loads(plist.read_bytes())))['Label']
@@ -70,13 +78,15 @@ def openclaw_config(prefix):
  top=value.setdefault('tools',{});top['alsoAllow']=list(dict.fromkeys(top.get('alsoAllow',[])+WORK_TOOLS))
  return json.dumps(value,indent=2)+'\n'
 def work_profile(prefix,docker,host,tag,image):
+ qualification_spec=importlib.util.spec_from_file_location('qualification_contract',ROOT/'gate/qualify_work_mode.py');qualification=importlib.util.module_from_spec(qualification_spec);qualification_spec.loader.exec_module(qualification)
+ unrestricted={'schema':'sanctum-task-protection/v1','protected':[],'mutable':'*','mutable_tests':[],'allow_new':True,'acceptance':None}
  staging=op.private(prefix/'state/gate/private-lead/work-mode/staging');op.private(prefix/'state/gate/private-lead/work-mode/tasks');op.private(prefix/'state/gate/private-lead/work-mode/workspaces')
- common={'disk_bytes':8*1024**3,'docker_path':docker,'docker_host':host,'runner_image':tag,'runner_image_id':image,'runner_user':f'{os.getuid()}:{os.getgid()}','platform':'linux/arm64','timeout_seconds':120,'operations':{'status':['git','status','--porcelain=v1'],'diff':['git','diff','--binary'],'test':['node','--test'],'lint':['node','--check','index.js'],'build':['node','--check','index.js']},'evaluators':['test'],'capabilities':WORK_TOOLS,'max_iterations':16,'max_model_calls':16,'max_task_seconds':1200,'max_tokens':100000,'max_gpu_seconds':900,'max_cost_usd':1.5,'reviewer':True}
+ common={'task_protection':unrestricted,'disk_bytes':8*1024**3,'docker_path':docker,'docker_host':host,'runner_image':tag,'runner_image_id':image,'runner_user':f'{os.getuid()}:{os.getgid()}','platform':'linux/arm64','timeout_seconds':120,'operations':{'status':['git','status','--porcelain=v1'],'diff':['git','diff','--binary'],'test':['node','--test'],'lint':['node','--check','index.js'],'build':['node','--check','index.js']},'evaluators':['test'],'capabilities':WORK_TOOLS,'max_iterations':16,'max_model_calls':16,'max_task_seconds':1200,'max_tokens':100000,'max_gpu_seconds':900,'max_cost_usd':1.5,'reviewer':True}
  profiles={'sanctum':{**common,'repository':str(ROOT),'staging_root':str(staging),'operations':{**common['operations'],'test':['node','--test','gate/tests'],'lint':['node','--check','gate/plugin/index.mjs'],'build':['node','--check','gate/plugin/index.mjs']}}}
  fixtures=op.private(prefix/'state/gate/private-lead/work-mode/qualification')
  for number in range(1,11):
-  name=f'grade{number:02d}';profiles[name]={**common,'repository':str(fixtures/name/'repo'),'staging_root':str(op.private(fixtures/name/'staging'))}
- profiles['adversarial']={**common,'repository':str(fixtures/'adversarial/repo'),'staging_root':str(op.private(fixtures/'adversarial/staging')),'reviewer':False}
+  name=f'grade{number:02d}';profiles[name]={**common,'task_protection':qualification.protection_contract(name),'repository':str(fixtures/name/'repo'),'staging_root':str(op.private(fixtures/name/'staging'))}
+ profiles['adversarial']={**common,'task_protection':qualification.protection_contract('adversarial'),'repository':str(fixtures/'adversarial/repo'),'staging_root':str(op.private(fixtures/'adversarial/staging')),'reviewer':False}
  return json.dumps({'schema':'sanctum-work-mode-profiles/v1','profiles':profiles},indent=2)+'\n'
 def apply(prefix):
  op.verify();receipt=op.verify_install(prefix);safe(prefix);docker,host,tag,image=docker_details()
@@ -96,8 +106,9 @@ def apply(prefix):
  for name in FILES:freeze[name]=sha(prefix/'gate'/name)
  atomic(prefix/'gate/FREEZE.json',json.dumps(freeze,indent=2)+'\n')
  for name,target in targets:receipt['files'][name]=sha(target)
+ receipt['work_mode_source_manifest_sha256']=sha(ROOT/'SOURCE-MANIFEST.json')
  receipt['files']['gate/FREEZE.json']=sha(prefix/'gate/FREEZE.json');atomic(prefix/'receipt.json',json.dumps(receipt,indent=2)+'\n')
- tx={'schema':'sanctum-work-mode-amendment/v1','before':before,'files':[name for name,_ in targets],'runner_image':tag,'runner_image_id':image,'source_commit':subprocess.run(['/usr/bin/git','rev-parse','HEAD'],cwd=ROOT,check=True,capture_output=True,text=True).stdout.strip()}
+ tx={'schema':'sanctum-work-mode-amendment/v1','before':before,'files':[name for name,_ in targets],'runner_image':tag,'runner_image_id':image,'source_manifest_sha256':sha(ROOT/'SOURCE-MANIFEST.json'),'source_commit':subprocess.run(['/usr/bin/git','rev-parse','HEAD'],cwd=ROOT,check=True,capture_output=True,text=True).stdout.strip()}
  atomic(record/'transaction.json',json.dumps(tx,indent=2)+'\n');op.write(record/'complete','complete\n')
  print('Applied Project 3G Work Mode amendment. Private rollback record: '+str(record))
 def rollback(prefix,record):

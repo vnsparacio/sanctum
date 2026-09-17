@@ -1,4 +1,4 @@
-/* Pinned vLLM 0.20.1 Outlines JSON-schema compatibility boundary. */
+/* Pinned vLLM 0.20.1 generation compatibility boundary; Mac semantics stay authoritative. */
 import {canonical} from './contracts.mjs';
 
 export const VLLM_STRUCTURED_DIALECT='vllm-0.20.1-outlines';
@@ -19,6 +19,12 @@ function visit(schema,path,mode,omitted){
  for(const key of Object.keys(schema)){
    if(!schemaKeywords.has(key))throw Error('structured_schema_keyword');
    const value=schema[key];
+   // Pinned xgrammar string-length grammars reject valid JSON escapes. These
+   // constraints remain in the authoritative schema and are enforced on Mac.
+   if(schema.type==='string'&&(key==='minLength'||key==='maxLength')){
+     if(mode==='validate')throw Error('structured_schema_string_length');
+     omitted.push({path:path.join('.'),keyword:key,reason:'STRING_LENGTH_JSON_ESCAPE_UNSUPPORTED'});continue;
+   }
    if(key==='pattern'){
      const reason=incompatibleVllmPattern(value);
      if(reason){

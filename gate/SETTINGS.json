@@ -62,6 +62,7 @@
     "max_asset_bytes": 4194304
   },
   "gpu": {
+    "enabled": false,
     "auto_start": false,
     "volume_id": "CONFIGURE_VOLUME_ID",
     "datacenter": "US-NC-2",

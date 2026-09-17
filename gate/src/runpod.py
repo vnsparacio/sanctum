@@ -17,6 +17,7 @@ def capacity_rejected(args, error):
 class Runpod:
     def __init__(self, settings, release_cfg=None):
         self.settings = settings; self.gpu = release_cfg or settings['gpu']
+        self.inference_release = release_cfg is settings.get('private_lead') and release_cfg is not None and release_cfg.get('logical_profile') == 'PRIVATE_LEAD'
         if type(self.gpu['local_port']) is not int or not 1024 <= self.gpu['local_port'] <= 65535: raise Refused('private_port_invalid')
         self.cli = BASE / 'runtime/runpodctl'
         self.pin = strict_json((BASE / 'runtime/RUNPODCTL.json').read_text())
@@ -45,12 +46,29 @@ class Runpod:
         raise Refused('mac_guard_not_ready')
 
     def call(self, *args, timeout=45):
+        if tuple(args[:2]) in (('pod','start'),('pod','resume')):
+            raise Refused('private_80b_retired')
+        if tuple(args[:2]) == ('pod','create'):
+            name = args[args.index('--name')+1] if '--name' in args and args.index('--name')+1 < len(args) else ''
+            if not self.inference_release or not name.startswith(self.settings['private_lead']['pod_prefix']):
+                raise Refused('private_80b_retired')
+        # Diagnostic-only bound. Cleanup remains callable after expiry; ordinary
+        # lifecycle/provider timeouts are untouched when this attribute is absent.
+        deadline=getattr(self,'experiment_deadline',None)
+        def remaining(cap):
+            if deadline is None:return cap
+            left=deadline-time.time()
+            if not getattr(self,'experiment_cleanup',False):left-=120
+            if left<=0:
+                if not getattr(self,'experiment_cleanup',False):raise Refused('experiment_deadline')
+                return min(cap,20)
+            return min(cap,20,left)
         if self.cli.is_symlink() or hashlib.sha256(self.cli.read_bytes()).hexdigest() != self.pin['binary_sha256']: raise Refused('runpod_cli_drift')
-        r = subprocess.run(['/usr/bin/security', 'find-generic-password', '-a', os.environ.get('USER', 'vinceai'), '-s', self.gpu.get('keychain_item', 'VinceAI Runpod API'), '-w'], capture_output=True, timeout=10)
+        r = subprocess.run(['/usr/bin/security', 'find-generic-password', '-a', os.environ.get('USER', 'vinceai'), '-s', self.gpu.get('keychain_item', 'VinceAI Runpod API'), '-w'], capture_output=True, timeout=remaining(10))
         key = r.stdout.decode().strip()
         if r.returncode or not key: raise Refused('runpod_auth_missing')
         try:
-            r = subprocess.run([str(self.cli), *args], env={**os.environ, 'RUNPOD_API_KEY': key}, capture_output=True, timeout=timeout)
+            r = subprocess.run([str(self.cli), *args], env={**os.environ, 'RUNPOD_API_KEY': key}, capture_output=True, timeout=remaining(timeout))
         except subprocess.TimeoutExpired: raise Refused('runpod_request_uncertain') from None
         if r.returncode:
             error = None
@@ -58,7 +76,9 @@ class Runpod:
                 error=strict_json(r.stderr)
                 message=str(error.get('error','')).replace(key,'[redacted]')[:700]
                 # Store only the structured error, never request arguments/env.
-                atomic(Path(self.settings['state_directory'])/'last-runpod-error.json',canonical({'operation':list(args[:2]),'code':error.get('code'),'status':error.get('status'),'message':message,'time':time.time()}).encode())
+                record=({'operation':list(args[:2]),'code':error.get('code'),'status':error.get('status'),'message':message,'time':time.time()}
+                        if deadline is None else {'code':'EXPERIMENT_PROVIDER_REQUEST_FAILED','time':time.time()})
+                atomic(Path(self.settings['state_directory'])/'last-runpod-error.json',canonical(record).encode())
             except Exception: pass
             if capacity_rejected(args, error): raise Refused('gpu_capacity_unavailable')
             raise Refused('runpod_request_failed')
@@ -85,6 +105,8 @@ class Runpod:
         return {'available': available, 'hourly_usd': price}
 
     def create(self, name):
+        if not self.inference_release or not name.startswith(self.settings['private_lead']['pod_prefix']):
+            raise Refused('private_80b_retired')
         key = Path(self.gpu['ssh_private_key'] + '.pub')
         public = key.read_text().strip()
         if not public.startswith('ssh-ed25519 '): raise Refused('ssh_public_key_missing')
@@ -115,6 +137,7 @@ class Runpod:
             '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
 
     def ssh(self, pod_id, host, port, command, data=None, timeout=15, diagnostic=None):
+        if not self.inference_release: raise Refused('private_80b_retired')
         r = subprocess.run(self.ssh_args(pod_id, host, port) + ['root@' + host, command], input=data, capture_output=True, timeout=timeout)
         if r.returncode:
             if diagnostic:
@@ -124,6 +147,7 @@ class Runpod:
         return r.stdout
 
     def bootstrap_server(self, pod_id, host, port):
+        if not self.inference_release: raise Refused('private_80b_retired')
         name = 'bootstrap-private-lead-vllm.sh' if self.gpu.get('logical_profile') == 'PRIVATE_LEAD' else 'bootstrap-vllm.sh'
         if self.gpu.get('logical_profile') == 'PRIVATE_LEAD':
             self.ssh(pod_id, host, port, 'bash -s', (BASE / 'runtime/prepare-private-lead-runtime.sh').read_bytes(), timeout=1800, diagnostic='runtime_prepare')

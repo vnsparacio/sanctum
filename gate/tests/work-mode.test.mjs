@@ -1,3 +1,4 @@
+import {syntheticProtection} from './fixtures/task-evidence.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -23,7 +24,7 @@ const reasoner=rows=>({async invoke(){const value=rows.shift();if(value instance
 const scope='a'.repeat(32),requestId='r'.repeat(32);
 const workspaceEvidence=({scope:boundScope=scope,workspace=null,turn=0,diffBytes=1,statusBytes=1,diffDigest='d'.repeat(64),statusDigest='e'.repeat(64)}={})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope:boundScope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',digest:diffDigest,bytes:diffBytes},status:{ok:true,executionState:'COMPLETED',digest:statusDigest,bytes:statusBytes}});
 const stableWorkspace=async({scope:boundScope,workspace,turn})=>workspaceEvidence({scope:boundScope,workspace:workspace??null,turn});
-const workConfig=extra=>({completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:stableWorkspace,...extra});
+const workConfig=extra=>({verifyProtectedEvidence:syntheticProtection,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:stableWorkspace,...extra});
 const allowAuthority=(proposal,spec,boundScope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:proposal.capability,proposalDigest:digest(proposal),scope:boundScope,effect:spec.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
 const allowEgress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
 const run=({rows,invoke=async()=>({ok:true,data:{value:4},executionState:'COMPLETED',verifier:'VERIFIED'}),egress=defaultResultEgress,reviewer=null,authorize,evaluate=async()=>({passed:true,tests:1}),workspaceState=stableWorkspace,onEvent,maxIterations=8,task='synthetic task',signal,budgetStatus,now}={})=>createWorkMode(workConfig({reasoner:reasoner(rows),manifest,invoke,egress,reviewer,authorize,evaluate,workspaceState,onEvent,budgetStatus,now})).run({task,scope,requestId,maxIterations,signal});
@@ -100,8 +101,8 @@ test('argument schemas and task-state limits are enforced before authority',asyn
  assert.equal((await run({rows:[final],task:'x'.repeat(4001)})).status,'ENVIRONMENT_FAILURE');
  assert.equal((await run({rows:[final],evaluate:async()=>({passed:false})})).status,'BLOCKED');
  assert.equal((await createWorkMode(workConfig({reasoner:reasoner([final]),manifest,invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true})})).run({task:'x',scope,requestId,maxIterations:1.5})).status,'ENVIRONMENT_FAILURE');
- assert.equal((await run({rows:[final],maxIterations:16})).status,'COMPLETE');
- assert.equal((await run({rows:[final],maxIterations:17})).status,'ENVIRONMENT_FAILURE');
+ assert.equal((await run({rows:[final],maxIterations:32})).status,'COMPLETE');
+ assert.equal((await run({rows:[final],maxIterations:33})).status,'ENVIRONMENT_FAILURE');
 });
 test('semantic schema excludes host fields and translates only captured bindings',()=>{
  const work={name:'worktree_read',description:'Read.',parameters:{type:'object',properties:{task_id:{type:'string',pattern:'^[a-f0-9]{32}$'},path:{type:'string',minLength:1,maxLength:512},max_chars:{type:'integer',minimum:1,maximum:24000}},required:['task_id','path'],additionalProperties:false}};
@@ -114,22 +115,24 @@ test('semantic schema excludes host fields and translates only captured bindings
  const full={schema:CONTRACT_VERSION,proposalId:'p',requestId:'r'.repeat(32),revision:0,reasoner:'PRIVATE_LEAD',capability:work.name,capabilityDigest:spec.digest,arguments:{task_id:'a'.repeat(32),path:'index.js'}};
  assert.equal(validateToolProposal(full,m,()=>true).ok,true);
 });
-test('pinned generation projection omits only incompatible regex while host path validation stays authoritative',()=>{
+test('pinned generation projection omits incompatible regex and string lengths while host path validation stays authoritative',()=>{
  const names=workModeTools.map(x=>x.name),m=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.name,description:x.description,parameters:x.parameters})),declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
  const specs=['worktree_list','worktree_read','worktree_patch','worktree_command'].map(x=>m.byName[x]);
  const options={terminalKinds:['FINAL','ESCALATION']};const authoritative=workIntentSchema(specs,options),pathPattern=authoritative.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments.properties.path.pattern;
  assert.equal(pathPattern,'^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$');
  const first=workIntentRequest(specs,options),second=workIntentRequest(specs,options);assert.deepEqual(first,second);assert.equal(first.dialect,'vllm-0.20.1-outlines');assert.equal(validateVllmGenerationSchema(first.schema).ok,true);
  const generatedPath=first.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments.properties.path;
- assert.equal(generatedPath.pattern,undefined);assert.equal(generatedPath.minLength,1);assert.equal(generatedPath.maxLength,512);assert.equal(argumentsMatchSchema({path:'../../secret'},first.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments),true);
- for(const path of ['/absolute','../secret','a/../../secret','bad\u0000name','x'.repeat(513)])assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path}},{specs,...options}).ok,false,path);
+ assert.equal(generatedPath.pattern,undefined);assert.equal(generatedPath.minLength,undefined);assert.equal(generatedPath.maxLength,undefined);assert.equal(argumentsMatchSchema({path:'../../secret'},first.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments),true);
+ const authoritativePath=authoritative.oneOf.find(x=>x.properties?.capability?.const==='worktree_read').properties.arguments.properties.path;
+ assert.equal(authoritativePath.minLength,1);assert.equal(authoritativePath.maxLength,512);
+ for(const path of ['','/absolute','../secret','a/../../secret','bad\u0000name','x'.repeat(513)])assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path}},{specs,...options}).ok,false,path);
  assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:{path:'src/index.js'}},{specs,...options}).ok,true);
  const generatedEscalation=first.schema.oneOf.find(x=>x.properties?.kind?.const==='ESCALATION');assert.equal(generatedEscalation.properties.reason.pattern,undefined);assert.equal(validateWorkIntent({kind:'ESCALATION',reason:'lowercase reason'},{specs,...options}).ok,false);assert.equal(validateWorkIntent({kind:'ESCALATION',reason:'OWNER_DECISION_REQUIRED'},{specs,...options}).ok,true);
  assert.equal(incompatibleVllmPattern(pathPattern),'REGEX_LOOKAROUND');assert.equal(incompatibleVllmPattern('^[A-Z]+$'),'REGEX_PREFIX_CONTEXT');assert.equal(validateVllmGenerationSchema({type:'string',pattern:'^(?!/)x'}).ok,false);
  const projected=projectVllmGenerationSchema(authoritative);assert.ok(projected.omitted.some(x=>x.keyword==='pattern'&&x.reason==='REGEX_LOOKAROUND'));assert.ok(projected.omitted.some(x=>x.keyword==='pattern'&&x.reason==='REGEX_PREFIX_CONTEXT'));
 });
 test('production preflight covers every real surface and schema identity changes with visibility',()=>{
- const result=preflightCurrentWorkIntentSchemas();assert.equal(result.ok,true);assert.deepEqual(result.schemas.allEligible.capabilities,workModeTools.map(x=>x.name));assert.equal(result.schemas.allEligible.branches,workModeTools.length+2);
+ const result=preflightCurrentWorkIntentSchemas();assert.equal(result.ok,true);assert.deepEqual(result.schemas.allEligible.capabilities,workModeTools.map(x=>x.name).sort());assert.equal(result.schemas.allEligible.branches,workModeTools.length+2);
  for(const row of Object.values(result.schemas)){assert.equal(validateVllmGenerationSchema(row.request.schema).ok,true);assert.equal(row.request.schemaDigest,row.schemaDigest);assert.equal(row.request.semanticSchemaDigest,row.semanticSchemaDigest);}
  for(const name of ['ordinaryIneligible','researchIneligible','testOnlyIneligible']){const kinds=result.schemas[name].request.schema.oneOf.map(x=>x.properties?.kind?.const);assert.ok(!kinds.includes('FINAL'));assert.ok(kinds.includes('ESCALATION'));}
  for(const name of ['ordinaryEligible','researchEligible']){const kinds=result.schemas[name].request.schema.oneOf.map(x=>x.properties?.kind?.const);assert.ok(kinds.includes('FINAL'));assert.ok(kinds.includes('ESCALATION'));}
@@ -296,4 +299,13 @@ test('SEMANTIC_SURFACE telemetry is allowlisted, redacts escalation text, and pr
    for(const row of surfaces)assert.deepEqual(Object.keys(row).filter(key=>!allowed.has(key)),[]);
    let previous='0'.repeat(64);for(const row of rows){const {eventDigest,...base}=row;assert.equal(base.previousDigest,previous);assert.equal(digest(base),eventDigest);previous=eventDigest;}
  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('escalation diagnostics are payload-free observations, never a routing classifier',async()=>{
+ const events=[];let effects=0;
+ const result=await run({rows:[{kind:'ESCALATION',reason:'PERMISSION_UNAVAILABLE'}],onEvent:(kind,value)=>events.push({kind,...value}),invoke:async()=>{effects++;return {ok:true};},evaluate:async()=>{effects++;return {passed:true};}});
+ const row=events.find(x=>x.kind==='PROPOSAL'&&x.outcome==='ESCALATION');
+ assert.equal(result.reason,'MODEL_ESCALATION');assert.equal(effects,0);
+ assert.equal(row.reasonConcepts.permission,true);assert.equal(row.reasonConcepts.toolUnavailable,true);
+ assert.match(row.reasonDigest,/^[a-f0-9]{64}$/);assert.ok(!JSON.stringify(events).includes('PERMISSION_UNAVAILABLE'));
 });

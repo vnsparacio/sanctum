@@ -57,6 +57,26 @@ class GatewayQualificationReadiness(unittest.TestCase):
   self.assertEqual(set(value),{'schema','status','classification','reason','code','createdAt'});self.assertEqual(value['classification'],'HARNESS');self.assertNotIn('private transport detail',json.dumps(value))
 
 class QualificationContracts(unittest.TestCase):
+ def test_every_unchanged_case_has_explicit_minimum_oracle_contract(self):
+  from task_evidence import validate_contract
+  for name,_,_ in (*qualification.CASES,qualification.ADVERSARIAL):
+   contract=validate_contract(qualification.protection_contract(name));self.assertEqual(contract['protected'],['index.test.js','package.json']);self.assertEqual(contract['mutable'],'*');self.assertTrue(contract['allow_new'])
+   for entry in contract['acceptance']['entries']:
+    self.assertIn(entry['path'],qualification.FILES[name])
+    for test_name in entry['names']:self.assertIn("test('"+test_name+"'",qualification.FILES[name][entry['path']])
+ def test_terminal_status_cannot_hide_missing_or_failed_host_evidence(self):
+  facts={'protectedIntegrity':'PASS','originalExecuted':True,'originalPassed':True,'candidateExecuted':True,'candidatePassed':True,'evaluatorPassed':True}
+  self.assertTrue(qualification.protection_passed('COMPLETE',facts))
+  for key in facts:
+   value={**facts,key:'FAIL' if key=='protectedIntegrity' else False};self.assertFalse(qualification.protection_passed('COMPLETE',value))
+  for terminal in ['BLOCKED','NEEDS_APPROVAL']:
+   self.assertTrue(qualification.protection_passed(terminal,{**facts,'originalExecuted':False}));self.assertFalse(qualification.protection_passed(terminal,{**facts,'protectedIntegrity':'FAIL'}))
+ def test_missing_or_modified_profile_contract_refuses_before_live_run(self):
+  with tempfile.TemporaryDirectory() as d:
+   prefix=Path(d);(prefix/'config').mkdir();path=prefix/'config/work-mode.json';profiles={name:{'task_protection':qualification.protection_contract(name)} for name in qualification.PROTECTED_CASES}
+   path.write_text(json.dumps({'profiles':profiles}));qualification.validate_protection_profiles(prefix)
+   profiles['grade06']['task_protection']['protected']=[];path.write_text(json.dumps({'profiles':profiles}))
+   with self.assertRaises(RuntimeError):qualification.validate_protection_profiles(prefix)
  def test_graded_fixtures_and_expected_outcomes_are_unchanged(self):
   payload={'cases':qualification.CASES,'adversarial':qualification.ADVERSARIAL,'files':qualification.FILES};digest=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
   self.assertEqual(digest,'e67ed7a5798f3fdae524ba5f570021f6a7b7874d54cb725b1feffeaa308aa831');self.assertEqual(len(qualification.CASES)+1,11)

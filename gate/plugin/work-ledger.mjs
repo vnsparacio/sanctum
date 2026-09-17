@@ -2,9 +2,10 @@
 import {appendFileSync,chmodSync,existsSync,lstatSync,mkdirSync,openSync,closeSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
 import {createHash,createHmac} from 'node:crypto';
 import {join,resolve} from 'node:path';
+import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
 import {canonical,digest} from '../foundation/contracts.mjs';
 
-const allowed=new Set(['TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
+const allowed=new Set(['PROTECTED_EVIDENCE','PROTOCOL_DIAGNOSTIC','TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
 const safeId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
 const safeLabel=value=>typeof value==='string'&&/^[A-Z][A-Z0-9_.:-]{0,79}$/.test(value);
 const safeDigest=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -36,6 +37,19 @@ export function sanitizeSemanticSurface(value){
  if(!Array.isArray(value.visibleCapabilities)||value.visibleCapabilities.some(x=>typeof x!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(x)))throw Error('work_ledger_surface');
  return Object.fromEntries(['phase','iteration','modelCalls','stage','decisionState','completionEligible','eligibilityReason','completionPolicy','schemaVersion','schemaDigest','semanticSchemaDigest','terminalKinds','visibleCapabilities','workspaceGeneration','snapshotDigest','postPatchTestOutstanding','latestTestState','evaluatorState','evaluationTrigger','selectedResultKind','validationCode','reviewDisposition'].map(key=>[key,structuredClone(value[key])]));
 }
+export function sanitizeProtectedEvidence(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||!oneOf(value.stage,['TASK_CREATED','BEFORE_EVALUATION','AFTER_EVALUATION','BEFORE_COMPLETE','EVALUATION'])||!oneOf(value.integrity,['PASS','FAIL']))throw Error('work_ledger_protection');
+ const out={stage:value.stage,integrity:value.integrity};
+ for(const key of ['snapshotDigest','contractDigest','candidateDigest']){
+  if(key==='contractDigest'&&value.stage==='EVALUATION'&&value[key]===undefined)continue;
+  if(key==='candidateDigest'&&value.integrity==='FAIL'&&value[key]===null){out[key]=null;continue;}
+  if(!safeDigest(value[key]))throw Error('work_ledger_protection');out[key]=value[key];
+ }
+ for(const key of ['acceptanceRequired',...(value.stage==='EVALUATION'?['originalExecuted','originalPassed','candidateExecuted','candidatePassed']:[])]){
+  if(typeof value[key]!=='boolean')throw Error('work_ledger_protection');out[key]=value[key];
+ }
+ return out;
+}
 export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()/1000}){
  if(!safeId(taskId)||!Buffer.isBuffer(key)||key.length<32)throw Error('work_ledger_config');
  const directory=privateDir(join(root,taskId)),events=join(directory,'events.jsonl'),summary=join(directory,'summary.json');
@@ -44,7 +58,7 @@ export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()
  const goalHmac=createHmac('sha256',key).update(String(metadata.goal??'')).digest('hex');
  function event(kind,fields={}){
    if(!allowed.has(kind))throw Error('work_ledger_event');
-   const sanitized=kind==='SEMANTIC_SURFACE'?sanitizeSemanticSurface(fields):clean(fields);
+   const sanitized=kind==='PROTECTED_EVIDENCE'?sanitizeProtectedEvidence(fields):kind==='PROTOCOL_DIAGNOSTIC'?{diagnostic:sanitizeProtocolDiagnostic(fields.diagnostic),schemaDigest:safeDigest(fields.schemaDigest)?fields.schemaDigest:null,semanticSchemaDigest:safeDigest(fields.semanticSchemaDigest)?fields.semanticSchemaDigest:null}:kind==='SEMANTIC_SURFACE'?sanitizeSemanticSurface(fields):clean(fields);
    const base={schema:'sanctum-work-ledger/v1',taskId,sequence:sequence++,time:now(),kind,previousDigest,...sanitized};
    const eventDigest=createHash('sha256').update(canonical(base)).digest('hex'),row={...base,eventDigest};
    appendFileSync(events,canonical(row)+'\n',{encoding:'utf8',mode:0o600});previousDigest=eventDigest;return eventDigest;

@@ -26,7 +26,7 @@ import manage
 
 
 def settings(root):
-    s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;return s
+    s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;s['gpu']['enabled']=True;return s
 
 def audit(tier='LOCAL_4B'):
     return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'source_need':{'classification':'NONE','reason_codes':['DETERMINISTIC_OR_SELF_CONTAINED']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
@@ -47,9 +47,9 @@ class Temp(unittest.TestCase):
 class Policy(Temp):
     def test_tiers_independent_of_stakes(self):
         for tier in ['LOCAL_4B','PRIVATE_80B','HOSTED_235B','OPENAI_FRONTIER']:
-            self.assertEqual(assess(packet(),state(),audit(tier))['route'],tier)
-    def test_complex_code_promotes_80(self):
-        a=audit();a['quality']['reason_codes']=['TECHNICAL_DEBUGGING'];self.assertEqual(assess(packet(),state(),a)['route'],'PRIVATE_80B')
+            self.assertEqual(assess(packet(),state(),audit(tier))['route'],'HOSTED_235B' if tier=='PRIVATE_80B' else tier)
+    def test_complex_code_uses_eligible_hosted_policy(self):
+        a=audit();a['quality']['reason_codes']=['TECHNICAL_DEBUGGING'];self.assertEqual(assess(packet(),state(),a)['route'],'HOSTED_235B')
     def test_high_stakes_forces_openai(self):
         a=audit();a['stakes']='HIGH_STAKES';self.assertEqual(assess(packet(),state(),a)['route'],'OPENAI_FRONTIER')
     def test_high_stakes_persists(self):
@@ -62,8 +62,8 @@ class Policy(Temp):
         a=audit('HOSTED_235B');a['needs_local_tools']=True;self.assertEqual(assess(packet(),state(),a)['route'],'LOCAL_4B')
     def test_visual_capability_route(self):
         p=packet();p['attachment_summary'].update(count=1,visual_count=1);self.assertEqual(assess(p,state(),audit('MULTIMODAL'))['route'],'MULTIMODAL')
-    def test_documents_use_private_reasoning(self):
-        p=packet();p['attachment_summary'].update(count=1,document_count=1);a=audit();a['context_need']['answer']['attachments']='REQUIRED';self.assertEqual(assess(p,state(),a)['route'],'PRIVATE_80B')
+    def test_documents_require_eligible_reasoning(self):
+        p=packet();p['attachment_summary'].update(count=1,document_count=1);a=audit();a['context_need']['answer']['attachments']='REQUIRED';self.assertEqual(assess(p,state(),a)['route'],'HOSTED_235B')
 
     def test_irrelevant_attachment_does_not_escalate(self):
         p=packet();p['attachment_summary'].update(count=1,visual_count=1);self.assertEqual(assess(p,state(),audit())['route'],'LOCAL_4B')
@@ -83,8 +83,15 @@ class Authority(Temp):
         raw=canonical(b);return {'body':raw,'mac':hmac.new(self.key,raw.encode(),hashlib.sha256).hexdigest()}
     def auth(self,b):return authorize(self.signed(b),self.s,now=lambda:1000,settings_hash='spec')
     def test_once_only_durable_across_calls(self):
-        b=self.body();self.auth(b)
+        b=self.body();b.update(tier='HOSTED_235B',approval='exact_disclosure');self.auth(b)
         with self.assertRaises(sqlite3.IntegrityError):self.auth(b)
+    def test_disabled_80b_refuses_both_inference_approval_classes(self):
+        self.s['gpu']['enabled']=False
+        for approval in ('session_private_prompt','exact_disclosure'):
+            b=self.body();b['approval']=approval
+            with self.assertRaisesRegex(Refused,'private_80b_retired'):self.auth(b)
+        b=self.body();b.update(operation='status',tier='CONTROL',approval='local_control',packet={})
+        self.auth(b)
     def test_wrong_signature(self):
         e=self.signed(self.body());e['body']+=' '
         with self.assertRaises(Refused):authorize(e,self.s,now=lambda:1000,settings_hash='spec')
@@ -145,7 +152,7 @@ class Transport(Temp):
         with self.assertRaises(Refused):Private80BBackend(self.s).infer({'prompt':'x','images':[{}]})
     def test_80_readiness_requires_alias_and_smoke(self):
         def send(url,p=None,*args,**kw):return {'data':[{'id':'vinceai-qwen80b'}]} if url.endswith('/models') else chat('READY')
-        self.assertTrue(Private80BBackend(self.s,send).health_check(smoke=True))
+        with self.assertRaisesRegex(Refused,'private_80b_retired'):Private80BBackend(self.s,send).health_check(smoke=True)
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
     def test_private_lead_has_its_own_alias_and_loopback_port(self):
         self.s['private_lead']['enabled']=True
@@ -213,7 +220,7 @@ class FakeBackend:
     def propose(self,p):self.calls.append('propose');return {'status':'OK','result':{'kind':'FINAL','text':'synthetic'}}
 class Lifecycle(Temp):
     def setUp(self):
-        super().setUp();self.time=1000;self.p=FakeProvider();self.b=FakeBackend();self.lc=Private80BLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        super().setUp();self.s['private_lead']['auto_start']=True;self.time=1000;self.p=FakeProvider();self.b=FakeBackend();self.lc=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
     def advance(self,n):self.time+=n
     def test_capacity_rejection_recovers_without_duplicate_compute(self):
         original=self.p.create;attempts=[]
@@ -225,7 +232,7 @@ class Lifecycle(Temp):
         self.lc.infer('a',{})
         self.assertEqual(len(attempts),2);self.assertEqual(self.p.created,1);self.assertEqual(self.lc.status()['phase'],'READY')
     def test_capacity_rejection_is_bounded_and_cancellable(self):
-        self.s['gpu']['capacity_wait_seconds']=20
+        self.s['private_lead']['capacity_wait_seconds']=20
         def create(name):raise Refused('gpu_capacity_unavailable')
         self.p.create=create
         with self.assertRaisesRegex(Refused,'capacity_timeout'):self.lc.infer('a',{})
@@ -262,7 +269,7 @@ class Lifecycle(Temp):
             with self.assertRaises(Refused):self.lc.infer('a',{})
         self.assertEqual(self.p.created,1)
     def test_crash_after_create_recovered(self):
-        self.p.rows=[{'id':'pod1','name':'vinceai-qwen80b-phase10-intent'}]
+        self.p.rows=[{'id':'pod1','name':'sanctum-private-lead-phase10-intent'}]
         self.lc.save(self.lc.state(),pod_name=self.p.rows[0]['name'],allocation_uncertain=True,started_at=self.time,hourly_usd=2)
         self.lc.infer('a',{});self.assertEqual(self.p.created,0);self.assertTrue(self.p.booted)
     def test_stale_process_lease_and_idle_grace(self):
@@ -275,10 +282,10 @@ class Lifecycle(Temp):
         self.assertEqual(self.p.created,1)
     def test_manual_stop_persists_while_lock_busy(self):
         with self.lc.lock():self.lc.sweep(manual=True)
-        self.assertTrue((self.root/'manual-stop').exists())
+        self.assertTrue((self.lc.root/'manual-stop').exists())
         with self.assertRaises(Refused):self.lc.infer('a',{})
     def test_readiness_failure_never_queries_and_cleans(self):
-        self.b.fail=True;self.s['gpu']['readiness_seconds']=10
+        self.b.fail=True;self.s['private_lead']['readiness_seconds']=10
         with self.assertRaises(Refused):self.lc.infer('a',{})
         self.assertNotIn('infer',self.b.calls);self.assertEqual(self.p.deleted,['pod1'])
     def test_delete_unconfirmed_not_offline(self):

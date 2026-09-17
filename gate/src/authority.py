@@ -5,10 +5,11 @@ import math
 import re
 import time
 from pathlib import Path
+from experiment import validate_binding
 from common import BASE, Refused, canonical, database, strict_json
 
 OPERATIONS = {'classify','infer','private_lead_propose','media','close','status','sweep','stop','resume',
-              'worktree_create','worktree_list','worktree_read','worktree_patch','worktree_command','worktree_cleanup','work_source_policy'}
+              'worktree_integrity','worktree_acceptance','worktree_create','worktree_list','worktree_read','worktree_patch','worktree_command','worktree_cleanup','work_source_policy'}
 
 def authorize(envelope, settings, now=time.time, settings_hash=None):
     if type(envelope) is not dict or set(envelope) != {'body','mac'} or type(envelope['body']) is not str or len(envelope['body'].encode()) > 200000:
@@ -25,8 +26,11 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
     if not re.fullmatch('[a-f0-9]{64}', str(b['nonce'])) or not re.fullmatch('[a-f0-9]{32}', str(b['scope'])): raise Refused('invalid_identity')
     if type(b['strong']) is not bool or type(b['packet']) is not dict: raise Refused('packet_contract')
     if b['operation'] == 'classify' and (b['tier'] != 'GEMINI_AUDIT' or b['approval'] != 'exact_disclosure'): raise Refused('classification_approval')
+    if b['tier'] == 'PRIVATE_80B' and b['operation'] not in ('status','close','stop','sweep'):
+        raise Refused('private_80b_retired')
     if b['operation'] == 'infer':
         if b['tier'] not in ['PRIVATE_80B','PRIVATE_LEAD','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER']: raise Refused('tier_contract')
+        if b['tier'] == 'PRIVATE_80B': raise Refused('private_80b_retired')
         if b['approval'] not in ['exact_disclosure','session_private_prompt']: raise Refused('answer_approval')
         if b['approval'] == 'session_private_prompt' and (b['tier'] != 'PRIVATE_80B' or set(b['packet']) != {'prompt'}): raise Refused('session_grant_scope')
         if b['tier'] != 'OPENAI_FRONTIER' and b['state'].get('high_stakes') is not False: raise Refused('high_stakes_route')
@@ -37,7 +41,8 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         # approval, an executor, or authority to run its proposal.
         if b['tier'] != 'PRIVATE_LEAD' or b['approval'] != 'private_lead_workmode': raise Refused('private_lead_proposal_scope')
         if b['state'].get('privacy_floor') != 'PERSONAL' or b['state'].get('high_stakes') is not False: raise Refused('private_lead_proposal_state')
-        if set(b['packet']) != {'request'} or type(b['packet']['request']) is not dict: raise Refused('private_lead_proposal_packet')
+        if set(b['packet']) not in ({'request'},{'request','experiment'}) or type(b['packet']['request']) is not dict: raise Refused('private_lead_proposal_packet')
+        if 'experiment' in b['packet']: validate_binding(b['packet']['experiment'])
         raw = canonical(b['packet']['request'])
         if len(raw.encode()) > min(settings['max_context_bytes'], 196608): raise Refused('private_lead_proposal_limit')
     if b['operation'].startswith('work'):
@@ -47,6 +52,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         packet=b['packet']
         if packet.get('task_id') != b['scope'] or not re.fullmatch('[a-f0-9]{32}',str(packet.get('task_id',''))): raise Refused('workmode_task_scope')
         contracts={
+            'worktree_integrity':{'task_id','profile'},'worktree_acceptance':{'task_id','profile'},
             'worktree_create':{'task_id','profile'},'worktree_list':{'task_id','path','max_entries'},
             'worktree_read':{'task_id','path','max_chars'},'worktree_patch':{'task_id','patch'},
             'worktree_command':{'task_id','operation','profile'},'worktree_cleanup':{'task_id','profile'},

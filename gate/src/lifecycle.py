@@ -34,12 +34,31 @@ class Private80BLifecycle:
         state.update(changes); state['updated_at'] = self.now()
         atomic(self.root / 'gpu.json', canonical(state).encode())
 
+    def check_enabled(self):
+        if not isinstance(self, PrivateLeadLifecycle):
+            raise Refused('private_80b_retired')
+
     def acquire(self, scope):
-        with database(self.root) as c:
-            c.execute('begin immediate')
-            row = c.execute('select closing from leases where scope=?', (scope,)).fetchone()
-            if row and row[0]: raise Refused('session_closing')
-            c.execute('insert into leases(scope,expires,active,closing) values(?,?,1,0) on conflict(scope) do update set expires=excluded.expires,active=active+1', (scope, self.now() + 90))
+        self.check_enabled()
+        from experiment import ExperimentLedger
+        ledger = ExperimentLedger(Path(self.settings['state_directory'])/'private-lead')
+        # Serialize admission with experiment creation and terminal reconciliation.
+        # Always lock PRIVATE_LEAD first, then PRIVATE_80B; never hold this lock
+        # across readiness, provider calls or inference.
+        with ledger.transaction() as admission:
+            if ledger._current(admission): raise Refused('experiment_ownership_required')
+            self.check_enabled()
+            with self.lease_store(ledger, admission) as c:
+                row = c.execute('select closing from leases where scope=?', (scope,)).fetchone()
+                if row and row[0]: raise Refused('session_closing')
+                c.execute('insert into leases(scope,expires,active,closing) values(?,?,1,0) on conflict(scope) do update set expires=excluded.expires,active=active+1', (scope, self.now() + 90))
+
+    @contextlib.contextmanager
+    def lease_store(self, ledger, admission):
+        """Use only under lead admission: lead first, then the ordinary store."""
+        with contextlib.nullcontext(admission) if self.root == ledger.root else database(self.root) as c:
+            if c is not admission: c.execute('begin immediate')
+            yield c
 
     def heartbeat(self, scope):
         with database(self.root) as c:
@@ -62,18 +81,26 @@ class Private80BLifecycle:
         if final_close: self.sweep(immediate=True)
 
     def resume(self):
+        self.check_enabled()
         with self.lock():
             (self.root / 'manual-stop').unlink(missing_ok=True)
             s = self.state(); self.save(s, manual_stop=False)
 
     def status(self):
         s = self.state()
+        if not isinstance(self, PrivateLeadLifecycle):
+            from retirement import historical_ownership
+            facts = historical_ownership(self.root)
+            return {'phase':'RETIRED' if facts['confirmed'] else 'RECONCILIATION_REQUIRED',
+                    'release':'PRIVATE_80B', 'inference':'RETIRED', 'available':False, **facts}
         with database(self.root) as c: leases = c.execute('select count(*),coalesce(sum(active),0) from leases where expires>?', (self.now(),)).fetchone()
         return {k: s.get(k) for k in ['phase', 'pod_id', 'allocation_id', 'started_at', 'ready_at', 'first_inference_at', 'last_inference_at', 'delete_requested_at', 'absent_confirmed_at', 'hourly_usd', 'manual_stop', 'error']} | {'leases': leases[0], 'active_requests': leases[1], 'estimated_compute_usd': max(0, self.now() - s.get('started_at', self.now())) / 3600 * s.get('hourly_usd', 0) if s.get('pod_id') else 0}
 
     def reconcile(self, s):
         pods = self.provider.pods()
         candidates = [p for p in pods if p.get('id') == s.get('pod_id') or (s.get('pod_name') and p.get('name') == s['pod_name'])]
+        if not isinstance(self, PrivateLeadLifecycle) and any(not str(p.get('name','')).startswith('vinceai-qwen80b-') for p in candidates):
+            raise Refused('retired_resource_identity')
         managed = [p for p in pods if str(p.get('name', '')).startswith(self.managed_prefixes)]
         if len(candidates) > 1 or any(p not in candidates for p in managed): raise Refused('untracked_or_duplicate_pod')
         if candidates:
@@ -84,6 +111,11 @@ class Private80BLifecycle:
         return candidates
 
     def ensure_ready(self, scope, explicit=False):
+        self.check_enabled()
+        from experiment import ExperimentLedger
+        diagnostic_root=Path(self.settings['state_directory'])/'private-lead'
+        if (diagnostic_root/'control.sqlite').exists() and ExperimentLedger(diagnostic_root).current():
+            raise Refused('experiment_ownership_required')
         with self.lock():
             self.check_lease(scope); s = self.state()
             self.reconcile(s)
@@ -130,6 +162,7 @@ class Private80BLifecycle:
             raise Refused('capacity_timeout')
 
     def ready_locked(self, s, scope):
+        self.check_enabled()
         try:
             deadline = self.now() + self.cfg['readiness_seconds']
             while self.now() < deadline:
@@ -185,40 +218,92 @@ class Private80BLifecycle:
         raise Refused('termination_unconfirmed')
 
     def sweep(self, immediate=False, manual=False):
+        if not isinstance(self, PrivateLeadLifecycle):
+            return self.retire(manual=manual)
+        from experiment import ExperimentLedger
+        ledger = ExperimentLedger(Path(self.settings['state_directory'])/'private-lead', self.now)
         if manual:
             # A stop request must survive a concurrent bootstrap holding the lock.
             atomic(self.root / 'manual-stop', b'stop\n')
-            with database(self.root) as c: c.execute('update leases set closing=1')
+        with ledger.transaction() as admission:
+            record = ledger._current(admission)
+            if manual and not record:
+                with self.lease_store(ledger, admission) as c: c.execute('update leases set closing=1')
+        if record:
+            self.sweep_experiment(ledger, record, manual)
+            return
         try:
             with self.lock(blocking=False):
                 s = self.state()
-                with database(self.root) as c:
-                    c.execute('delete from leases where expires<=? or (closing=1 and active=0)', (self.now(),))
-                    count = c.execute('select count(*) from leases').fetchone()[0]
-                if manual or (self.root / 'manual-stop').exists():
-                    self.save(s, manual_stop=True)
-                    immediate=True
-                if s.get('pod_id') and self.now()-s.get('started_at',self.now()) >= self.cfg['max_runtime_seconds']:
-                    self.save(s, manual_stop=True, error='gpu_runtime_limit')
-                    atomic(self.root / 'manual-stop', b'runtime_limit\n')
-                    with database(self.root) as c:
-                        c.execute('update leases set closing=1')
-                        c.execute('delete from leases where active=0')
-                    immediate=True
-                    # In-flight requests unwind or expire; no new ones are admitted.
-                    with database(self.root) as c: count=c.execute('select count(*) from leases').fetchone()[0]
-                if count: return
-                if s.get('allocation_uncertain'):
-                    self.reconcile(s)
-                    if s.get('pod_id'): self.save(s, allocation_uncertain=False)
-                if not s.get('pod_id'):
-                    self.save(s, phase='OFFLINE', pod_name=None, idle_since=None)
-                    return
-                if not s.get('idle_since'): self.save(s, phase='IDLE_GRACE', idle_since=self.now())
-                if immediate or manual or self.now() - s['idle_since'] >= self.cfg['idle_grace_seconds']: self.terminate_locked(s)
+                # Recheck after taking the lifecycle lock. Experiment creation and
+                # all ordinary pruning share admission, including manual/runtime
+                # cleanup. Never infer an unknown worker's exit from lease expiry.
+                with ledger.transaction() as admission:
+                    record = ledger._current(admission)
+                    if not record:
+                        with self.lease_store(ledger, admission) as c:
+                            c.execute('delete from leases where expires<=? or (closing=1 and active=0)', (self.now(),))
+                            if manual or (self.root / 'manual-stop').exists():
+                                self.save(s, manual_stop=True)
+                                immediate=True
+                            if s.get('pod_id') and self.now()-s.get('started_at',self.now()) >= self.cfg['max_runtime_seconds']:
+                                self.save(s, manual_stop=True, error='gpu_runtime_limit')
+                                atomic(self.root / 'manual-stop', b'runtime_limit\n')
+                                c.execute('update leases set closing=1')
+                                c.execute('delete from leases where active=0')
+                                immediate=True
+                            count = c.execute('select count(*) from leases').fetchone()[0]
+                # Provider work is outside admission. If ownership appeared while
+                # acquiring the lock, delegate only after releasing both locks.
+                if not record:
+                    if count: return
+                    if s.get('allocation_uncertain'):
+                        self.reconcile(s)
+                        if s.get('pod_id'): self.save(s, allocation_uncertain=False)
+                    if not s.get('pod_id'):
+                        self.save(s, phase='OFFLINE', pod_name=None, idle_since=None)
+                        return
+                    if not s.get('idle_since'): self.save(s, phase='IDLE_GRACE', idle_since=self.now())
+                    if immediate or manual or self.now() - s['idle_since'] >= self.cfg['idle_grace_seconds']: self.terminate_locked(s)
         except BlockingIOError:
             # Startup owns the transition; closing lease is visible to that owner.
             return
+        if record: self.sweep_experiment(ledger, record, manual)
+
+    def retire(self, manual=False):
+        """Reconcile only recorded historical compute; never prune unknown leases."""
+        from retirement import historical_ownership
+        if manual: atomic(self.root / 'manual-stop', b'retired\n')
+        try:
+            with self.lock(blocking=False):
+                s = self.state()
+                try:
+                    # The retired namespace is cleanup-only and ignores lead pods.
+                    self.managed_prefixes = ('vinceai-qwen80b-',)
+                    if s.get('allocation_id') and not s.get('pod_id') and not s.get('absent_confirmed_at'):
+                        self.save(s, pod_id=s['allocation_id'])
+                    self.terminate_locked(s)
+                    facts = historical_ownership(self.root)
+                    if facts['leases'] or facts['active_requests']:
+                        self.save(s, phase='RECONCILIATION_REQUIRED', manual_stop=True,
+                                  error='retired_local_ownership_pending', retired_confirmed_at=None)
+                        return
+                    self.save(s, phase='RETIRED', pod_id=None, pod_name=None,
+                              allocation_uncertain=False, manual_stop=True, error=None,
+                              absent_confirmed_at=self.now(), retired_confirmed_at=self.now())
+                except Exception:
+                    self.save(s, phase='RECONCILIATION_REQUIRED', manual_stop=True,
+                              error='retired_ownership_unknown', retired_confirmed_at=None)
+                    raise
+        except BlockingIOError: return
+
+    def sweep_experiment(self, ledger, record, manual):
+        # The other release preserves its rows; only the lead cleanup owner may
+        # reconcile the diagnostic allocation, with its own provider/configuration.
+        if self.root != ledger.root: return
+        from experiment_lifecycle import ExperimentSupervisor, binding_of
+        if manual: ledger.stop(binding_of(record), 'CANCELLED')
+        ExperimentSupervisor(ledger, self, publish_heartbeat=getattr(self, 'experiment_supervisor', False)).tick()
 
     def infer(self, scope, packet):
         self.acquire(scope); stop = threading.Event()
@@ -263,3 +348,8 @@ class PrivateLeadLifecycle(Private80BLifecycle):
         self.provider = provider or Runpod(settings, cfg); self.backend = backend or PrivateLeadBackend(settings)
         self.pod_prefix = cfg['pod_prefix']; self.managed_prefixes = ('vinceai-qwen80b-', self.pod_prefix)
         self.now, self.sleep = now, sleep
+
+    def ensure_ready(self, scope, explicit=False):
+        from experiment import ExperimentLedger
+        if ExperimentLedger(self.root).current(): raise Refused('experiment_ownership_required')
+        return super().ensure_ready(scope,explicit)

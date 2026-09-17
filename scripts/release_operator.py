@@ -144,11 +144,11 @@ def down(prefix):
   result=subprocess.run([cfg['python'],'-B',str(prefix/'gate/manage.py'),'stop'],env=environment(prefix),capture_output=True,text=True)
   if result.returncode:raise ValueError('GPU stop unconfirmed; cleanup remains running')
   status=json.loads(result.stdout)
-  if status.get('phase')!='OFFLINE' or status.get('leases') or status.get('pod_id'):raise ValueError('GPU cleanup still pending')
+  if status.get('phase') not in ('OFFLINE','RETIRED') or status.get('leases') or status.get('pod_id'):raise ValueError('GPU cleanup still pending')
  if state.exists():
   if state.is_symlink():raise ValueError('Unsafe GPU state')
   gpu=json.loads(state.read_text())
-  if gpu.get('phase')!='OFFLINE' or any(gpu.get(k) for k in ['pod_id','pod_name','allocation_uncertain']):raise ValueError('Unresolved GPU ownership; preserve cleanup')
+  if gpu.get('phase') not in ('OFFLINE','RETIRED') or any(gpu.get(k) for k in ['pod_id','pod_name','allocation_uncertain']):raise ValueError('Unresolved GPU ownership; preserve cleanup')
  db=prefix/'state/gate/control.sqlite'
  if db.exists():
   if db.is_symlink():raise ValueError('Unsafe GPU database')

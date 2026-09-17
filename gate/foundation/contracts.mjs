@@ -4,6 +4,7 @@
  * supplies it to an existing enforcement point.
  */
 import {createHash} from 'node:crypto';
+import {genericResultDiagnostic} from './protocol-diagnostics.mjs';
 
 export const CONTRACT_VERSION='sanctum-capability/v1';
 export const AUTHORITY_OUTCOMES=Object.freeze(['ALLOW','ALLOW_ONCE','ASK','DENY']);
@@ -116,8 +117,8 @@ export function createReasonerAdapter({id,kind,invoke,supportsToolProposals=fals
   if(!text(id)||!text(kind)||typeof invoke!=='function'||typeof supportsToolProposals!=='boolean'||typeof supportsWorkIntents!=='boolean')throw Error('reasoner_adapter_shape');
   return Object.freeze({id,kind,supportsToolProposals,supportsWorkIntents,async invoke(request,signal){
     const checked=validateReasonerRequest(request);if(!checked.ok)throw Error(checked.code.toLowerCase());
-    const result=validateReasonerResult(await invoke(checked.value,signal),{supportsToolProposals,supportsWorkIntents});
-    if(!result.ok)throw Error(result.code.toLowerCase());
+    const value=await invoke(checked.value,signal),result=validateReasonerResult(value,{supportsToolProposals,supportsWorkIntents});
+    if(!result.ok){const error=Error(result.code.toLowerCase());if(supportsWorkIntents)error.diagnostic=genericResultDiagnostic(value);throw error;}
     return result.value;
   }});
 }

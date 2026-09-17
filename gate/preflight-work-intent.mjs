@@ -3,7 +3,7 @@
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import {deriveCapabilityManifest} from './foundation/manifest.mjs';
-import {workIntentRequest,workIntentSchema} from './foundation/work-intent.mjs';
+import {decisionSurface} from './foundation/decision-surface.mjs';
 import {projectVllmGenerationSchema,validateVllmGenerationSchema} from './foundation/vllm-structured-output.mjs';
 import {workModeTools} from './plugin/workspace-tools.mjs';
 
@@ -14,21 +14,21 @@ function manifest(){
    declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}},
  });
 }
-function surface(byName,label,selected,options={}){
- const specs=selected.map(name=>byName[name]),request=workIntentRequest(specs,options),projection=projectVllmGenerationSchema(workIntentSchema(specs,options)),checked=validateVllmGenerationSchema(request.schema);
+function surface(current,label,selected,options={}){
+ const built=decisionSurface({manifest:current,names:selected,limit:label==='allEligible'?5:4,reviewer:label==='reviewer',...options}),request=built.request,projection=projectVllmGenerationSchema(built.authoritativeSchema),checked=validateVllmGenerationSchema(request.schema);
  if(!checked.ok)throw Error('structured_schema_preflight');
- return {label,capabilities:selected,version:request.version,dialect:request.dialect,schemaDigest:request.schemaDigest,semanticSchemaDigest:request.semanticSchemaDigest,branches:request.schema.oneOf.length,projectionOmissions:projection.omitted,request};
+ return {label,capabilities:built.capabilities,version:request.version,dialect:request.dialect,schemaDigest:request.schemaDigest,semanticSchemaDigest:request.semanticSchemaDigest,branches:request.schema.oneOf.length,projectionOmissions:projection.omitted,request};
 }
 export function preflightCurrentWorkIntentSchemas(){
- const current=manifest(),byName=current.byName;
+ const current=manifest();
  const schemas={
-   allEligible:surface(byName,'allEligible',names,{terminalKinds:['FINAL','ESCALATION']}),
-   ordinaryIneligible:surface(byName,'ordinaryIneligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['ESCALATION']}),
-   ordinaryEligible:surface(byName,'ordinaryEligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
-   researchIneligible:surface(byName,'researchIneligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
-   researchEligible:surface(byName,'researchEligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
-   testOnlyIneligible:surface(byName,'testOnlyIneligible',['worktree_command'],{testOnly:true,terminalKinds:['ESCALATION']}),
-   reviewer:surface(byName,'reviewer',[],{terminalKinds:['FINAL']}),
+   allEligible:surface(current,'allEligible',names,{terminalKinds:['FINAL','ESCALATION']}),
+   ordinaryIneligible:surface(current,'ordinaryIneligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['ESCALATION']}),
+   ordinaryEligible:surface(current,'ordinaryEligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   researchIneligible:surface(current,'researchIneligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
+   researchEligible:surface(current,'researchEligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   testOnlyIneligible:surface(current,'testOnlyIneligible',['worktree_command'],{testOnly:true,terminalKinds:['ESCALATION']}),
+   reviewer:surface(current,'reviewer',[],{terminalKinds:['FINAL']}),
  };
  return {ok:true,schema:'sanctum-work-intent-preflight/v1',manifestDigest:current.digest,schemas};
 }
