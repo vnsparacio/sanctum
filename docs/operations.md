@@ -6,6 +6,10 @@ Foreground components use `scripts/component.py`. Start only one owner for each 
 
 The GPU controller's rendered `manage.py status|stop|resume|sweep` remains an explicit owner interface. Stop can delete owned compute; do not invoke it against an unrelated production deployment. If deletion is uncertain, keep cleanup supervision intact. Never clear allocation intent just because one provider query found no Pod.
 
+`manage.py status|stop|resume --release PRIVATE_LEAD` addresses the staged lead release explicitly. The no-argument janitor form `manage.py sweep` reconciles both `PRIVATE_80B` and `PRIVATE_LEAD`; it attempts both even when the inactive lifecycle reports the other managed Pod. It fails only when neither release can be reconciled. The two releases remain mutually exclusive and use separate state and lease stores.
+
+Work Mode is invoked only from an authenticated owner session with `/work start PROFILE -- GOAL`. `/work status` and `/work result TASK_ID` expose bounded task state; `/work cancel` requests a deterministic stop; `/work end` removes the isolated worktree, closes the private lease and retains the minimized private receipt. A terminal result deliberately keeps the workspace and lease available for owner inspection until `/work end`; the independent GPU janitor still enforces lease expiry, idle grace and maximum runtime after gateway loss.
+
 Doctor refuses config/source drift. Preserve the receipt and investigate the exact change. Setup refuses a partial/nonempty prefix rather than erasing it. Keep the old deployment until new acceptance closes. No uninstall removes credentials, databases, snapshots, model caches or provider volumes.
 
 Use the validated configuration amendment command with the gateway stopped; it records a private rollback transaction and refuses unknown authority fields. Persistent service installation remains an explicit owner deployment step; a prefix-specific GPU janitor template is generated. Do not describe the foreground component launcher as a replacement for the reference installation's proven janitor supervision.

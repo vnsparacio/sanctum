@@ -4,6 +4,7 @@
  * supplies it to an existing enforcement point.
  */
 import {createHash} from 'node:crypto';
+import {genericResultDiagnostic} from './protocol-diagnostics.mjs';
 
 export const CONTRACT_VERSION='sanctum-capability/v1';
 export const AUTHORITY_OUTCOMES=Object.freeze(['ALLOW','ALLOW_ONCE','ASK','DENY']);
@@ -86,7 +87,8 @@ export function egressMatches(decision,claim,now=Date.now()/1000){
 export function createToolResultEnvelope({capability,capabilityDigest,executionState,result,provenance='LOCAL',dataClass='PERSONAL',untrusted=false,truncated=false,repairRules=[],verifier='UNKNOWN',rollback='NONE'}){
   if(!identifier(capability)||!hex(capabilityDigest)||!enumValue(executionState,EXECUTION_STATES)||!identifier(provenance)||!enumValue(dataClass,DATA_CLASSES)||typeof untrusted!=='boolean'||typeof truncated!=='boolean'||!Array.isArray(repairRules)||!repairRules.every(x=>typeof x==='string'&&/^[a-z][a-z0-9_:-]{0,79}$/.test(x))||!enumValue(verifier,VERIFIER_OUTCOMES)||!enumValue(rollback,['NONE','CREATE_ONLY','UNDO_CAPABILITY','LIFECYCLE_RECONCILIATION']))throw Error('result_envelope_shape');
   const ok=result?.ok===true;
-  const payload=ok?{data:Object.hasOwn(result,'data')?result.data:null}:{error:{code:code(result?.error?.code)?result.error.code:'BACKEND_FAILURE'}};
+  const diagnostic=typeof result?.error?.diagnostic==='string'?result.error.diagnostic.slice(0,12000):null;
+  const payload=ok?{data:Object.hasOwn(result,'data')?result.data:null}:{error:{code:code(result?.error?.code)?result.error.code:'BACKEND_FAILURE',...(diagnostic?{diagnostic}:{})}};
   if(canonical(payload).length>65536)throw Error('result_envelope_limit');
   return clone({schema:CONTRACT_VERSION,capability,capabilityDigest,executionState,ok,provenance,dataClass,untrusted,truncated,repairRules:[...repairRules],verifier,rollback,...payload});
 }
@@ -99,21 +101,24 @@ export function validateReasonerRequest(value){
   return {ok:true,value:clone(value)};
 }
 
-export function validateReasonerResult(value,{supportsToolProposals=false}={}){
+export function validateReasonerResult(value,{supportsToolProposals=false,supportsWorkIntents=false}={}){
   if(!isRecord(value))return {ok:false,code:'REASONER_RESULT_SHAPE'};
   if(value.kind==='FINAL')return exact(value,['kind','text'])&&text(value.text,32768)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
   if(value.kind==='ESCALATION')return exact(value,['kind','reason'])&&code(value.reason)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
-  if(value.kind==='TOOL_PROPOSAL')return supportsToolProposals&&exact(value,['kind','proposal'])&&proposalShape(value.proposal)?{ok:true,value:clone(value)}:{ok:false,code:supportsToolProposals?'REASONER_RESULT_SHAPE':'REASONER_TOOL_PROPOSAL_UNSUPPORTED'};
+  if(value.kind==='TOOL_PROPOSAL'){
+    if(supportsWorkIntents)return exact(value,['kind','capability','arguments'])&&identifier(value.capability)&&isRecord(value.arguments)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
+    return supportsToolProposals&&exact(value,['kind','proposal'])&&proposalShape(value.proposal)?{ok:true,value:clone(value)}:{ok:false,code:supportsToolProposals?'REASONER_RESULT_SHAPE':'REASONER_TOOL_PROPOSAL_UNSUPPORTED'};
+  }
   if(value.kind==='GROUNDED_FINAL')return exact(value,['kind','text','grounding','citations','inferences','missingReasons','escalation'])&&text(value.text,32768)&&['GROUNDED','PARTIAL','INSUFFICIENT','NOT_APPLICABLE'].includes(value.grounding)&&Array.isArray(value.citations)&&value.citations.length<=6&&value.citations.every(x=>exact(x,['sourceId','url'])&&identifier(x.sourceId)&&destinationId(x.url))&&Array.isArray(value.inferences)&&value.inferences.every(x=>text(x,512))&&Array.isArray(value.missingReasons)&&value.missingReasons.every(code)&&['NONE','HOSTED_235B','OPENAI_FRONTIER'].includes(value.escalation)?{ok:true,value:clone(value)}:{ok:false,code:'REASONER_RESULT_SHAPE'};
   return {ok:false,code:'REASONER_RESULT_SHAPE'};
 }
 
-export function createReasonerAdapter({id,kind,invoke,supportsToolProposals=false}){
-  if(!text(id)||!text(kind)||typeof invoke!=='function'||typeof supportsToolProposals!=='boolean')throw Error('reasoner_adapter_shape');
-  return Object.freeze({id,kind,supportsToolProposals,async invoke(request,signal){
+export function createReasonerAdapter({id,kind,invoke,supportsToolProposals=false,supportsWorkIntents=false}){
+  if(!text(id)||!text(kind)||typeof invoke!=='function'||typeof supportsToolProposals!=='boolean'||typeof supportsWorkIntents!=='boolean')throw Error('reasoner_adapter_shape');
+  return Object.freeze({id,kind,supportsToolProposals,supportsWorkIntents,async invoke(request,signal){
     const checked=validateReasonerRequest(request);if(!checked.ok)throw Error(checked.code.toLowerCase());
-    const result=validateReasonerResult(await invoke(checked.value,signal),{supportsToolProposals});
-    if(!result.ok)throw Error(result.code.toLowerCase());
+    const value=await invoke(checked.value,signal),result=validateReasonerResult(value,{supportsToolProposals,supportsWorkIntents});
+    if(!result.ok){const error=Error(result.code.toLowerCase());if(supportsWorkIntents)error.diagnostic=genericResultDiagnostic(value);throw error;}
     return result.value;
   }});
 }

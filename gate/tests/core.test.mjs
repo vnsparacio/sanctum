@@ -1,6 +1,7 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute} from '../plugin/core.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute,executorDeadlineSeconds} from '../plugin/core.mjs';
 import {createEvidencePack} from '../foundation/evidence.mjs';
-const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url)));const key=Buffer.alloc(32,1);
+const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url)));settings.gpu.enabled=true; // Explicit legacy opt-in must not revive retirement.
+const key=Buffer.alloc(32,1);
 const audit=()=>({context_need:{classification:{attachments:'NONE',prior_context:'NONE'},answer:{attachments:'NONE',prior_context:'NONE'}}});
 function fixture(route='LOCAL_4B',custom,retrieve=null){
   const calls=[];let now=1000000;
@@ -46,8 +47,18 @@ test('audit receives latest prompt only across turns',async()=>{const f=fixture(
 test('235 option requires fresh separate disclosure approval',async()=>{const f=fixture();await f.send('new');const p=await f.send('ask-235 test');const r=await f.result(await f.approve(p.text));assert.match(r.text,/Qwen 235B/);assert.equal(f.calls.length,1);await f.result(await f.approve(r.text));assert.equal(f.calls.at(-1).tier,'HOSTED_235B');});
 test('frontier is OpenAI and never Gemini answering',async()=>{const f=fixture('OPENAI_FRONTIER');const r=await f.result(await f.approve((await ask(f)).text));assert.match(r.text,/OpenAI frontier/);await f.result(await f.approve(r.text));assert.equal(f.calls.at(-1).tier,'OPENAI_FRONTIER');});
 test('ask-strong uses OpenAI even if NORMAL',async()=>{const f=fixture();await f.send('new');const r=await f.result(await f.approve((await f.send('ask-strong test')).text));assert.match(r.text,/OpenAI frontier/);});
-test('private auto grant scopes prompt only',async()=>{const f=fixture('PRIVATE_80B');await f.send('new');await f.send('private80 allow');const r=await f.result(await f.approve((await f.send('ask complex test')).text));assert.match(r.text,/PRIVATE_80B/);const b=f.calls.at(-1);assert.equal(b.approval,'session_private_prompt');assert.deepEqual(b.packet,{prompt:'complex test'});});
-test('private80 is automatically eligible by default',async()=>{const f=fixture('PRIVATE_80B');const r=await f.result(await f.approve((await ask(f)).text));assert.match(r.text,/PRIVATE_80B/);assert.equal(f.calls.length,2);assert.equal(f.calls.at(-1).approval,'session_private_prompt');});
+test('old private allow command cannot grant inference',async()=>{const f=fixture('PRIVATE_80B');await f.send('new');assert.match((await f.send('private80 allow')).text,/permanently retired/);assert.equal(f.calls.length,0);});
+test('legacy missing enabled field cannot revive 80b',async()=>{const f=fixture('PRIVATE_80B');delete f.settings.gpu.enabled;assert.match((await f.send('new')).text,/permanently retired/);assert.match((await f.send('include 80b')).text,/permanently retired/);assert.notEqual(eligibleRoute('PRIVATE_80B',new Set()),'PRIVATE_80B');});
+test('disabled 80b cannot be included or granted; hosted route still requires approval',async()=>{
+ const f=fixture('PRIVATE_80B');f.settings.gpu.enabled=false;
+ assert.match((await f.send('new')).text,/80B is permanently retired/);
+ for(const command of ['include 80b','private80 allow'])assert.match((await f.send(command)).text,/80B is permanently retired/);
+ const result=await f.result(await f.approve((await f.send('ask complex synthetic question')).text));
+ assert.match(result.text,/Qwen 235B/);assert.equal(f.calls.filter(x=>x.operation==='infer').length,0);
+ await f.result(await f.approve(result.text));
+ assert.equal(f.calls.at(-1).tier,'HOSTED_235B');assert.equal(f.calls.at(-1).approval,'exact_disclosure');
+ assert.equal(f.calls.filter(x=>x.operation==='infer'&&x.tier==='PRIVATE_80B').length,0);
+});
 test('replay expiry cross-session approval rejected',async()=>{const f=fixture();const p=await ask(f);const token=p.text.match(/\/gate approve ([a-f0-9]{32})/)[1];assert.match((await f.send('approve '+token,{sessionKey:'other'})).text,/Start with/);f.advance(300001);assert.match((await f.send('approve '+token)).text,/invalid/);assert.equal(f.calls.length,0);});
 test('approval used once',async()=>{const f=fixture();const p=await ask(f);await f.result(await f.approve(p.text));assert.match((await f.approve(p.text)).text,/invalid/);});
 test('destination policy change invalidates an already issued approval',async()=>{const f=fixture('OPENAI_FRONTIER');let p=await ask(f);let r=await f.result(await f.approve(p.text));assert.match(r.text,/OpenAI frontier/);f.settings.frontier_transport=f.settings.frontier_transport==='openai'?'openrouter':'openai';assert.match((await f.approve(r.text)).text,/invalid/);assert.equal(f.calls.length,1);});
@@ -62,4 +73,5 @@ test('end closes lease and clears all approvals',async()=>{const f=fixture();awa
 test('model delivery markers and job markers rendered inert',()=>{const t=inertAnswer('MEDIA:x [[execute]] <script> ![image](url) [Mac gate job:abc]');assert.doesNotMatch(t,/MEDIA:|\[\[|<script>|\[Mac gate job:/);});
 
 test('explicit exclusions choose eligible stronger tiers without lowering risk',()=>{assert.equal(eligibleRoute('PRIVATE_80B',new Set(['PRIVATE_80B'])),'HOSTED_235B');assert.equal(eligibleRoute('MULTIMODAL',new Set(['MULTIMODAL']),{visual:true}),'OPENAI_FRONTIER');assert.throws(()=>eligibleRoute('OPENAI_FRONTIER',new Set(['OPENAI_FRONTIER']),{highStakes:true}));assert.throws(()=>eligibleRoute('LOCAL_4B',new Set(['LOCAL_4B']),{tools:true}));});
-test('exclude 80b invalidates pending approval; include restores eligibility',async()=>{const f=fixture('PRIVATE_80B');const p=await ask(f);await f.send('exclude 80b');assert.match((await f.approve(p.text)).text,/invalid/);let r=await f.result(await f.approve((await f.send('ask test')).text));assert.match(r.text,/Qwen 235B/);await f.send('include 80b');r=await f.result(await f.approve((await f.send('ask test')).text));assert.match(r.text,/PRIVATE_80B/);});
+test('PRIVATE_LEAD worker deadline covers bounded cold readiness without becoming unbounded',()=>{assert.equal(executorDeadlineSeconds({operation:'private_lead_propose'},settings),3000);const changed=structuredClone(settings);changed.private_lead.readiness_seconds=10;changed.request_deadline_seconds=20;assert.equal(executorDeadlineSeconds({operation:'private_lead_propose'},changed),30);assert.equal(executorDeadlineSeconds({operation:'status'},settings),150);});
+test('exclude 80b invalidates pending approval; include remains retired',async()=>{const f=fixture('PRIVATE_80B');const p=await ask(f);await f.send('exclude 80b');assert.match((await f.approve(p.text)).text,/invalid/);let r=await f.result(await f.approve((await f.send('ask test')).text));assert.match(r.text,/Qwen 235B/);await f.send('include 80b');r=await f.result(await f.approve((await f.send('ask test')).text));assert.match(r.text,/Qwen 235B/);});

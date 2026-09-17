@@ -16,7 +16,7 @@ try {
   for await(const part of process.stdin){input+=part;if(Buffer.byteLength(input)>40000)throw Error();}
   const data=JSON.parse(input);
   if(Object.keys(data).sort().join(',')!=='command,session' || !/^[a-f0-9]{64}$/.test(data.session)
-      || typeof data.command!=='string' || !/^\/gate(?:\s|$)/.test(data.command)
+      || typeof data.command!=='string' || !/^\/(?:gate|work)(?:\s|$)/.test(data.command)
       || Buffer.byteLength(data.command)>32768)throw Error();
   const cfg=JSON.parse(readFileSync('@CONFIG@/openclaw.json','utf8'));
   if(cfg.gateway?.bind!=='loopback' || cfg.gateway?.auth?.mode!=='token' || !cfg.gateway.auth.token)throw Error();
