@@ -62,6 +62,11 @@ def protected_case_facts(prefix,task):
  reviewers=[r['verdict'] for r in rows if r['kind']=='REVIEWER']
  return {'protectedIntegrity':commit.get('integrity',integrity[-1].get('integrity','NOT_CHECKED') if integrity else 'NOT_CHECKED'),'originalExecuted':evaluated.get('originalExecuted',False),'originalPassed':evaluated.get('originalPassed',False),'candidateExecuted':evaluated.get('candidateExecuted',False),'candidatePassed':evaluated.get('candidatePassed',False),'evaluatorPassed':any(r['kind']=='EVALUATOR' and r.get('passed') is True for r in rows),'reviewerDisposition':reviewers[-1] if reviewers else 'NOT_RUN'}
 
+def editing_case_facts(prefix,task):
+ rows=[json.loads(line) for line in (prefix/'state/gate/private-lead/work-mode/tasks'/task/'events.jsonl').read_text().splitlines()]
+ edits=[r for r in rows if r['kind']=='EDIT'];failures=[r.get('errorCode') for r in edits if not r.get('success')]
+ return {'firstEdit':('PASS' if edits[0].get('success') else 'FAIL') if edits else 'NOT_PROPOSED','proposals':len(edits),'successfulMutations':sum(r.get('success') is True for r in edits),'failureCodes':failures,'readMediatedRecoveries':sum(r['kind']=='EDIT_RECOVERY' for r in rows),'blindRetryProposals':sum(r['kind']=='EDIT_RETRY_BLOCKED' for r in rows),'blindRetryExecutions':sum(r.get('blindRetry') is True for r in edits),'staleSourceFailures':failures.count('EDIT_SOURCE_STALE'),'zeroMatchFailures':failures.count('EDIT_TARGET_NOT_FOUND'),'duplicateMatchFailures':failures.count('EDIT_TARGET_NOT_UNIQUE'),'hostInventionCount':sum(r.get('host_invention_count',0) for r in edits),'fuzzyMatchCount':sum(r.get('fuzzy_match_count',0) for r in edits),'generatedDiffCorrect':all(r.get('diff_correspondence') is True for r in edits if r.get('success'))}
+
 def run(args,env,timeout=120):return subprocess.run(args,env=env,capture_output=True,text=True,timeout=timeout)
 def git(args,cwd):subprocess.run(['/usr/bin/git',*args],cwd=cwd,check=True,capture_output=True,env={'PATH':'/usr/bin:/bin','HOME':'/nonexistent','GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null'})
 def seed(prefix):
@@ -156,7 +161,7 @@ def main(prefix,timeout):
    passed=terminal[0] in expected if isinstance(expected,tuple) else terminal[0]==expected
    protection=protected_case_facts(prefix,task)
    evidence_passed=protection_passed(terminal[0],protection)
-   rows.append({'protection':protection,'evidence_passed':evidence_passed,'profile':profile,'kind':kind,'task_id':task,'outcome':terminal[0],'reason':terminal[1],'passed':passed,'elapsed_seconds':time.time()-started,'receipt_digest':summary['finalDigest']})
+   rows.append({'editing':editing_case_facts(prefix,task),'protection':protection,'evidence_passed':evidence_passed,'profile':profile,'kind':kind,'task_id':task,'outcome':terminal[0],'reason':terminal[1],'passed':passed,'elapsed_seconds':time.time()-started,'receipt_digest':summary['finalDigest']})
  finally:
   for session,_ in reversed(sessions):
    try:invoke(node,bridge,env,session,'/work end')

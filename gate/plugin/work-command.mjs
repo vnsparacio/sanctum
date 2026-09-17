@@ -18,11 +18,11 @@ const SECRET=/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-or-v1-[A-Za
 const id=()=>randomBytes(16).toString('hex');
 const safeProfile=value=>/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(value);
 const safeFile=path=>{const stat=lstatSync(path);if(stat.isSymbolicLink()||(stat.mode&0o077))throw Error('unsafe_work_profile');return JSON.parse(readFileSync(path,'utf8'));};
-export const workCapabilityErrorCode=value=>value==='protected_input_modified'?'PROTECTED_INPUT_MODIFIED':typeof value==='string'&&/^workspace_[a-z0-9_]{1,64}$/.test(value)?value.toUpperCase():'WORK_CAPABILITY_FAILED';
+export const workCapabilityErrorCode=value=>value==='protected_input_modified'?'PROTECTED_INPUT_MODIFIED':typeof value==='string'&&/^(?:workspace_[a-z0-9_]{1,64}|EDIT_[A-Z_]{1,64})$/.test(value)?value.toUpperCase():'WORK_CAPABILITY_FAILED';
 export function normalizeWorkspacePacket(name,args){
  if(name==='worktree_list')return {task_id:args.task_id,path:args.path??'',max_entries:args.max_entries??100};
  if(name==='worktree_read')return {task_id:args.task_id,path:args.path,max_chars:args.max_chars??12000};
- if(name==='worktree_patch')return {task_id:args.task_id,patch:args.patch};
+ if(name==='worktree_edit')return {...args};
  return {...args};
 }
 
@@ -48,12 +48,12 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    if(gateway?.bind!=='loopback'||gateway?.auth?.mode!=='token'||!gateway.auth.token)throw Error('work_tool_runtime_unavailable');
    const response=await fetch(`http://127.0.0.1:${gateway.port}/tools/invoke`,{method:'POST',signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+gateway.auth.token},body:JSON.stringify({name,args,agentId:'workmode-broker',sessionKey:`agent:workmode-broker:mac-work-${task.id}`,idempotencyKey:digest({taskId:task.id,revision:task.revision,proposalDigest:digest(proposal)})})});
    const body=await response.json();
-   if(!response.ok||body?.ok!==true)return {ok:false,error:{code:response.status===403?'ACTION_NOT_AUTHORIZED':'CAPABILITY_FAILED'},executionState:'NOT_STARTED'};
+   if(!response.ok||body?.ok!==true)return {ok:false,error:{code:response.status===403?'ACTION_NOT_AUTHORIZED':'CAPABILITY_FAILED'},executionState:name==='worktree_edit'&&response.status!==403?'COMPLETION_UNKNOWN':'NOT_STARTED'};
    const details=body.result?.details??body.result;
    return details&&typeof details==='object'?details:{ok:false,error:{code:'RESULT_NORMALIZATION_FAILED'},executionState:'COMPLETION_UNKNOWN'};
  }
  function authority(proposal,tool,scope){
-   const bound=proposal.arguments?.task_id===scope&&['worktree_list','worktree_read','worktree_patch','worktree_command','source_first_research'].includes(tool.name);
+   const bound=proposal.arguments?.task_id===scope&&['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research'].includes(tool.name);
    return {schema:CONTRACT_VERSION,outcome:bound?'ALLOW':'DENY',capability:proposal.capability,proposalDigest:digest(proposal),scope,effect:tool.policy.effect,source:'MAC_GATE',reasonCodes:[bound?'WORK_TASK_BINDING':'WORK_TASK_SCOPE_MISMATCH'],expires:null,oneUse:false};
  }
  function resultEgress({claim,spec:tool}){
@@ -91,7 +91,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
        const request={requestDigest:digest({taskId:task.id,goal:task.goal,revision:task.revision}),scope:task.id,revision:task.revision,sourceNeed:args.source_need,reasonCodes:policy.result.reasonCodes,queryMode:policy.result.queryMode,query:policy.result.query};
        const pack=await sourceRetrieval.retrieve(request);return {ok:true,data:pack,executionState:'COMPLETED',verifier:'VERIFIED'};
      }
-     const operation={worktree_list:'worktree_list',worktree_read:'worktree_read',worktree_patch:'worktree_patch',worktree_command:'worktree_command'}[name];
+     const operation={worktree_list:'worktree_list',worktree_read:'worktree_read',worktree_edit:'worktree_edit',worktree_command:'worktree_command'}[name];
      if(!operation)return {ok:false,error:{code:'UNADVERTISED_CAPABILITY'},executionState:'NOT_STARTED'};
      if(operation==='worktree_command'){
        const response=await commandBroker.execute({workspace:task.id,operation:args.operation,signal});
@@ -100,8 +100,9 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      }
      const packet=normalizeWorkspacePacket(name,args);
      const response=await call(task,operation,packet,signal);
-     if(response?.status!=='OK')return {ok:false,error:{code:workCapabilityErrorCode(response?.reason)},executionState:'NOT_STARTED'};
+     if(response?.status!=='OK')return {ok:false,error:{code:workCapabilityErrorCode(response?.reason)},executionState:name==='worktree_edit'?'COMPLETION_UNKNOWN':'NOT_STARTED'};
      if(response.result?.ok===false)return {ok:false,error:{code:response.result.code??'COMMAND_FAILED',...(typeof response.result?.diagnostic==='string'?{diagnostic:response.result.diagnostic.slice(0,12000)}:{})},executionState:response.result?.executionState??'COMPLETED',verifier:'REJECTED',truncated:response.result?.code==='OUTPUT_LIMIT'};
+     if(name==='worktree_read'&&response.result?._observation){task.pendingRead={path:args.path,token:response.result._observation,text:response.result.text};delete response.result._observation;}
      return {ok:true,data:response.result,executionState:response.result?.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};
    });
    task.telemetry={promptTokens:0,completionTokens:0,inferenceSeconds:0,estimatedCostUsd:0,modelCalls:0};
@@ -160,10 +161,16 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    const initialProtection=await verifyProtectedEvidence();
    if(initialProtection?.schema!=='sanctum-task-evidence/v1'||initialProtection.taskId!==task.id||initialProtection.integrity!=='PASS')throw Error('protected_evidence_unavailable');
    task.ledger.event('PROTECTED_EVIDENCE',{stage:'TASK_CREATED',integrity:initialProtection.integrity,snapshotDigest:initialProtection.snapshotDigest,contractDigest:initialProtection.contractDigest,candidateDigest:initialProtection.candidateDigest,acceptanceRequired:initialProtection.acceptanceRequired});
-   const work=createWorkMode({reasoner,manifest,invoke:({proposal,signal})=>gatewayInvoke(task,proposal.capability,proposal.arguments,proposal,signal),authorize:authority,egress:resultEgress,evaluate:evaluator,reviewer,workspaceState,verifyProtectedEvidence,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,onEvent:(kind,value)=>task.ledger.event(kind,value),budgetStatus:()=>task.telemetry.promptTokens+task.telemetry.completionTokens>(profile.max_tokens??100000)?'TOKEN_BUDGET':task.telemetry.inferenceSeconds>(profile.max_gpu_seconds??900)?'GPU_ACTIVE_BUDGET':task.telemetry.estimatedCostUsd>(profile.max_cost_usd??settings.private_lead.max_hourly_usd/2)?'COST_BUDGET':null});
+   const observeRead=async({proposal,envelope})=>{
+     const pending=task.pendingRead;task.pendingRead=null;
+     if(!pending||pending.path!==proposal.arguments.path||envelope.data?.text!==pending.text)return false;
+     const response=await call(task,'worktree_observe',{task_id:task.id,path:pending.path,observation:pending.token});
+     return response?.status==='OK'&&response.result?.ok===true;
+   };
+   const work=createWorkMode({reasoner,manifest,observeRead,invoke:async({proposal,signal})=>{try{return await gatewayInvoke(task,proposal.capability,proposal.arguments,proposal,signal);}catch(error){if(proposal.capability==='worktree_edit')return {ok:false,error:{code:'EDIT_RESPONSE_UNAVAILABLE'},executionState:'COMPLETION_UNKNOWN'};throw error;}},authorize:authority,egress:resultEgress,evaluate:evaluator,reviewer,workspaceState,verifyProtectedEvidence,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,onEvent:(kind,value)=>task.ledger.event(kind,value),budgetStatus:()=>task.telemetry.promptTokens+task.telemetry.completionTokens>(profile.max_tokens??100000)?'TOKEN_BUDGET':task.telemetry.inferenceSeconds>(profile.max_gpu_seconds??900)?'GPU_ACTIVE_BUDGET':task.telemetry.estimatedCostUsd>(profile.max_cost_usd??settings.private_lead.max_hourly_usd/2)?'COST_BUDGET':null});
    active++;task.phase='RUNNING';
-   const configured=profile.capabilities??['worktree_list','worktree_read','worktree_patch','worktree_command','source_first_research'];
-   const preferred=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal)?['worktree_list','worktree_read','source_first_research','worktree_command']:['worktree_list','worktree_read','worktree_patch','worktree_command'];
+   const configured=profile.capabilities??['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research'];
+   const preferred=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal)?['worktree_list','worktree_read','source_first_research','worktree_command']:['worktree_list','worktree_read','worktree_edit','worktree_command'];
    const names=preferred.filter(x=>configured.includes(x)&&manifest.byName[x]);
    task.promise=(async()=>{try{task.result=await work.run({task:goal,scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal});task.status=task.result.status;task.phase='TERMINAL';task.ledger.finish({status:task.status,reason:task.result.reason,metrics:task.result.metrics,telemetry:task.telemetry});}catch{task.status='ENVIRONMENT_FAILURE';task.phase='TERMINAL';task.result={status:task.status,reason:'WORK_MODE_FAILURE'};try{task.ledger.finish({...task.result,telemetry:task.telemetry});}catch{}}finally{active--;}})();
    return {text:`Work Mode task ${task.id} started in an isolated workspace. Use /work result ${task.id} or /work status. PRIVATE_LEAD has no authority; the host controls execution and completion.`};

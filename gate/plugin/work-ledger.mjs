@@ -5,7 +5,7 @@ import {join,resolve} from 'node:path';
 import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
 import {canonical,digest} from '../foundation/contracts.mjs';
 
-const allowed=new Set(['PROTECTED_EVIDENCE','PROTOCOL_DIAGNOSTIC','TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
+const allowed=new Set(['EDIT','EDIT_RECOVERY','EDIT_RETRY_BLOCKED','PROTECTED_EVIDENCE','PROTOCOL_DIAGNOSTIC','TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
 const safeId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
 const safeLabel=value=>typeof value==='string'&&/^[A-Z][A-Z0-9_.:-]{0,79}$/.test(value);
 const safeDigest=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);

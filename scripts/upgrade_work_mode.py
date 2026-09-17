@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 
 FILES=(
- 'src/task_evidence.py','runtime/protected-test-driver.cjs','runtime/protected-test-preload.cjs',
+ 'src/worktree_edit.py','src/task_evidence.py','runtime/protected-test-driver.cjs','runtime/protected-test-preload.cjs',
  'verify_serving_runtime.py',
  'SETTINGS.json','install.py','watch.py','experiment_control.py','diagnostic-experiment.mjs','runtime-readiness.mjs','verify_exact_runtime.py','manage.py','worker.py','qualify_work_mode.py','probe_work_intent.py','protocol-microprobe.mjs','preflight-work-intent.mjs','src/retirement.py','src/dispatch.py','src/experiment.py','src/experiment_lifecycle.py','src/runpod.py','src/authority.py','src/backends.py','src/protocol_stream.py','src/command_runner.py','src/lifecycle.py','src/workspace.py',
  'foundation/contracts.mjs','foundation/decision-surface.mjs','foundation/protocol-diagnostics.mjs','foundation/manifest.mjs','foundation/evidence.mjs','foundation/work-intent.mjs','foundation/vllm-structured-output.mjs','plugin/index.mjs','plugin/core.mjs',
@@ -13,7 +13,7 @@ FILES=(
  'plugin/work-ledger.mjs','plugin/workspace-tools.mjs','plugin/openclaw.plugin.json','plugin/package.json',
  'runtime/private-lead-interface-profile.json','runtime/private-releases.json','runtime/bootstrap-vllm.sh',
  'runtime/work-runner.json','runtime/work-runner.Dockerfile','webui/bridge.mjs','webui/pipe.py')
-WORK_TOOLS=['worktree_list','worktree_read','worktree_patch','worktree_command','source_first_research']
+WORK_TOOLS=['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research']
 BROKER_ALLOW=WORK_TOOLS+['web_search','web_fetch']
 BROKER_DENY=['exec','process','shell','write','edit','apply_patch','sessions_*','gateway','nodes','cron','terminal','browser','gmail_*','messages_*','calendar_*','steward_*','save_local_markdown','vinceai__*']
 

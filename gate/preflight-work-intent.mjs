@@ -23,8 +23,8 @@ export function preflightCurrentWorkIntentSchemas(){
  const current=manifest();
  const schemas={
    allEligible:surface(current,'allEligible',names,{terminalKinds:['FINAL','ESCALATION']}),
-   ordinaryIneligible:surface(current,'ordinaryIneligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['ESCALATION']}),
-   ordinaryEligible:surface(current,'ordinaryEligible',['worktree_list','worktree_read','worktree_patch','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   ordinaryIneligible:surface(current,'ordinaryIneligible',['worktree_list','worktree_read','worktree_edit','worktree_command'],{terminalKinds:['ESCALATION']}),
+   ordinaryEligible:surface(current,'ordinaryEligible',['worktree_list','worktree_read','worktree_edit','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
    researchIneligible:surface(current,'researchIneligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
    researchEligible:surface(current,'researchEligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
    testOnlyIneligible:surface(current,'testOnlyIneligible',['worktree_command'],{testOnly:true,terminalKinds:['ESCALATION']}),

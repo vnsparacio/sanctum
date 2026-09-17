@@ -28,7 +28,7 @@ test('R1 guidance matches host acceptance on all applicable runtime surfaces',as
   const run=await leadRun([plan(valid)],{capabilities,bytes});ruleCheck(context(run.captures[0]).state.resultRequirements);
   assert.deepEqual(request(run.captures[0]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas[prefix+(bytes?'Eligible':'Ineligible')].request);
  }
- const post=await leadRun([plan(tool('worktree_patch',{patch:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);
+ const post=await leadRun([plan(tool('worktree_edit',{path:'index.js',old_text:'old',new_text:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);
  for(const reason of ['A','A'.repeat(80),'A09_:-'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,true);
  for(const reason of ['','a','A'.repeat(81),'A ','A\n','A\r','A\u2028','A\u2029','雪'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,false);
 });

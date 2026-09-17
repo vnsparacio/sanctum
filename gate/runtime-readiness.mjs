@@ -14,7 +14,7 @@ import {digest} from './foundation/contracts.mjs';
 export const SURFACES=Object.freeze(['ordinaryIneligible','ordinaryEligible','researchIneligible','researchEligible','testOnlyIneligible','reviewer']);
 const examples={
  worktree_list:{path:'.',max_entries:10},worktree_read:{path:'index.js',max_chars:100},
- worktree_patch:{patch:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},
+ worktree_edit:{path:'index.js',old_text:'old\n',new_text:'new\n'},
  worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'},
 };
 function representative(branch){
@@ -71,7 +71,7 @@ export function readinessArtifact(){
  const profile=JSON.parse(readFileSync(new URL('./runtime/private-lead-interface-profile.json',import.meta.url)));
  const messages={};
  function request(label,{observations=[],correction=null,testOnly=false}={}){
-  const selected=testOnly?['worktree_command']:['worktree_list','worktree_read','worktree_patch','worktree_command'];
+  const selected=testOnly?['worktree_command']:['worktree_list','worktree_read','worktree_edit','worktree_command'];
   const artifact=decisionSurface({manifest,names:selected,testOnly,terminalKinds:['ESCALATION']});
   if(correction)correction={...correction,resultRequirements:artifact.resultRequirements,diagnostic:null,schemaVersion:artifact.request.version,schemaDigest:artifact.request.schemaDigest,allowedCapabilities:artifact.capabilities,allowedTerminalKinds:['ESCALATION']};
   const state={task:'Synthetic offline inspection task.',phase:'PLAN',iteration:testOnly||correction?1:observations.length,tests:{passed:null,required:testOnly},observations,correction,workspaceGeneration:testOnly?1:0};

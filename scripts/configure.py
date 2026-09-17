@@ -14,6 +14,30 @@ def atomic(p,data):
  tmp=p.with_name(p.name+'.amend-tmp');op.write(tmp,data);os.replace(tmp,p)
 
 INTEGRITY_FILES=('worker.py','src/authority.py','src/command_runner.py','src/task_evidence.py','runtime/protected-test-driver.cjs','runtime/protected-test-preload.cjs','plugin/work-command.mjs','plugin/work-mode.mjs','plugin/work-ledger.mjs','qualify_work_mode.py')
+# Named, narrow editor amendment. The existing proof/evaluator/runtime stays pinned.
+EDIT_FILES=('src/worktree_edit.py','worker.py','src/authority.py','plugin/workspace-tools.mjs','plugin/work-mode.mjs','plugin/work-command.mjs','plugin/work-ledger.mjs','foundation/manifest.mjs','preflight-work-intent.mjs','runtime-readiness.mjs','protocol-microprobe.mjs','qualify_work_mode.py')
+def editing_changes(prefix,item):
+ if type(item) is not dict or set(item)!={'source_manifest_sha256'} or item['source_manifest_sha256']!=op.sha(ROOT/'SOURCE-MANIFEST.json'):raise ValueError('Editing amendment must name the exact reviewed source freeze')
+ spec=importlib.util.spec_from_file_location('editing_upgrade',ROOT/'scripts/upgrade_work_mode.py');upgrade=importlib.util.module_from_spec(spec);spec.loader.exec_module(upgrade);upgrade.safe(prefix)
+ settings=json.loads((prefix/'gate/SETTINGS.json').read_text())
+ if settings['private_lead']['auto_start'] or settings['gpu']['auto_start']:raise ValueError('GPU autostart must remain disabled')
+ profiles=json.loads((prefix/'config/work-mode.json').read_text())
+ for profile in profiles['profiles'].values():
+  profile['capabilities']=['worktree_edit' if name=='worktree_patch' else name for name in profile['capabilities']]
+ cfg=json.loads((prefix/'config/openclaw.json').read_text())
+ def replace_tools(value):
+  if isinstance(value,dict):return {k:replace_tools(v) for k,v in value.items()}
+  if isinstance(value,list):return [replace_tools(v) for v in value]
+  return 'worktree_edit' if value=='worktree_patch' else value
+ cfg=replace_tools(cfg)
+ changes={'gate/'+name:(ROOT/'gate'/name).read_text() for name in EDIT_FILES}
+ changes['config/work-mode.json']=json.dumps(profiles,indent=2)+'\n'
+ changes['config/openclaw.json']=json.dumps(cfg,indent=2)+'\n'
+ freeze=json.loads((prefix/'gate/FREEZE.json').read_text())
+ for name in EDIT_FILES:freeze[name]=hashlib.sha256(changes['gate/'+name].encode()).hexdigest()
+ changes['gate/FREEZE.json']=json.dumps(freeze,indent=2)+'\n'
+ return changes
+
 def protection_module():
  sys.path.insert(0,str(ROOT/'gate/src'))
  try:
@@ -45,8 +69,11 @@ def integrity_changes(prefix,item):
 def configure(prefix,proposal):
  op.verify();r=op.verify_install(prefix)
  if op.owns_process(op.process_record(prefix)):raise ValueError('Stop candidate gateway before configuration changes')
- if type(proposal) is not dict or set(proposal)-{'integrations','contacts','file_roots','accounts','gpu','notes_dir','web_retrieval','work_profile','work_budget','work_host','work_integrity'}:raise ValueError('Unknown configuration field')
+ if type(proposal) is not dict or set(proposal)-{'integrations','contacts','file_roots','accounts','gpu','notes_dir','web_retrieval','work_profile','work_budget','work_host','work_integrity','work_editing'}:raise ValueError('Unknown configuration field')
  changes={};cfg=json.loads((prefix/'config/openclaw.json').read_text())
+ if 'work_editing' in proposal:
+  if set(proposal)!={'work_editing'}:raise ValueError('Editing amendment cannot combine configuration changes')
+  changes=editing_changes(prefix,proposal['work_editing']);r['work_mode_source_manifest_sha256']=op.sha(ROOT/'SOURCE-MANIFEST.json')
  if 'work_integrity' in proposal:
   if set(proposal)!={'work_integrity'}:raise ValueError('Integrity amendment cannot combine configuration changes')
   changes=integrity_changes(prefix,proposal['work_integrity']);r['work_mode_source_manifest_sha256']=op.sha(ROOT/'SOURCE-MANIFEST.json')

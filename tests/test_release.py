@@ -180,6 +180,25 @@ class WorkIntegrityAmendments(unittest.TestCase):
   log=next((self.prefix/'state/amendments').iterdir());tx=json.loads((log/'transaction.json').read_text());self.assertEqual(set(tx['after']),{'gate/'+n for n in mod.INTEGRITY_FILES}|{'gate/FREEZE.json','config/work-mode.json'})
   mod.rollback(self.prefix,log);op.verify_install(self.prefix)
   for n,raw in before.items():self.assertEqual(raw,(self.prefix/n).read_bytes())
+ def test_editing_amendment_preserves_contracts_limits_and_rollback(self):
+  from unittest.mock import patch
+  mod,repo,policy,proposal=self.fixture()
+  profiles=json.loads((self.prefix/'config/work-mode.json').read_text())
+  for profile in profiles['profiles'].values():profile['capabilities']=['worktree_read','worktree_patch','worktree_command']
+  (self.prefix/'config/work-mode.json').write_text(json.dumps(profiles));receipt=op.receipt(self.prefix);receipt['files']['config/work-mode.json']=op.sha(self.prefix/'config/work-mode.json');(self.prefix/'receipt.json').write_text(json.dumps(receipt))
+  op.write(self.prefix/'state/gate/gpu.json',json.dumps({'phase':'RETIRED','retired_confirmed_at':1}));op.write(self.prefix/'state/gate/private-lead/gpu.json',json.dumps({'phase':'OFFLINE'}))
+  before={n:(self.prefix/n).read_bytes() for n in ('config/work-mode.json','config/openclaw.json','gate/SETTINGS.json','receipt.json','gate/FREEZE.json')}
+  item={'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}
+  with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_editing':{'source_manifest_sha256':'0'*64}})
+  with patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_editing':item})
+  op.verify_install(self.prefix);after=json.loads((self.prefix/'config/work-mode.json').read_text())
+  for name,profile in after['profiles'].items():
+   self.assertEqual({k:v for k,v in profile.items() if k!='capabilities'},{k:v for k,v in profiles['profiles'][name].items() if k!='capabilities'})
+   self.assertEqual(profile['capabilities'],['worktree_read','worktree_edit','worktree_command'])
+  self.assertEqual(before['gate/SETTINGS.json'],(self.prefix/'gate/SETTINGS.json').read_bytes())
+  log=next((self.prefix/'state/amendments').iterdir());tx=json.loads((log/'transaction.json').read_text());self.assertEqual(set(tx['after']),{'gate/'+n for n in mod.EDIT_FILES}|{'gate/FREEZE.json','config/work-mode.json','config/openclaw.json'})
+  mod.rollback(self.prefix,log);op.verify_install(self.prefix)
+  for n,raw in before.items():self.assertEqual(raw,(self.prefix/n).read_bytes())
  def test_integrity_amendment_refuses_active_ownership(self):
   mod,repo,policy,proposal=self.fixture();op.write(self.prefix/'state/gate/gpu.json',json.dumps({'phase':'RETIRED','retired_confirmed_at':1}));op.write(self.prefix/'state/gate/private-lead/gpu.json',json.dumps({'phase':'READY','pod_id':'synthetic'}))
   before=(self.prefix/'receipt.json').read_bytes()

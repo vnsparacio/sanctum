@@ -18,6 +18,7 @@ from media import load, expand
 from command_runner import run as run_command
 from source_policy import minimize_query
 import task_evidence
+import worktree_edit
 from workspace import create_worktree, list_entries, read_text, apply_patch, inspect_worktree, cleanup_worktree
 from common import atomic, canonical, private_dir, strict_json
 
@@ -37,6 +38,14 @@ def work_profile(settings,name):
 
 
 def execute(b, settings, remote=None, lifecycle=None):
+    # Reads/editor manage this same lock internally; serialize all other host
+    # workspace routes, including internal patch and cleanup, against mutation.
+    if b['operation'] in {'worktree_list','worktree_patch','worktree_command','worktree_integrity','worktree_acceptance','worktree_cleanup'}:
+        with worktree_edit.locked(settings,work_record(settings,b['scope'])):
+            return _execute(b,settings,remote,lifecycle)
+    return _execute(b,settings,remote,lifecycle)
+
+def _execute(b, settings, remote=None, lifecycle=None):
     op=b['operation']; scope=b['scope']
     if b.get('tier')=='PRIVATE_80B' and op not in ('status','close','stop','sweep'):
         raise Refused('private_80b_retired')
@@ -53,7 +62,11 @@ def execute(b, settings, remote=None, lifecycle=None):
     if op=='worktree_list':
         p=b['packet'];return {'status':'OK','result':list_entries(work_record(settings,scope)['root'],p['path'],p['max_entries'])}
     if op=='worktree_read':
-        p=b['packet'];return {'status':'OK','result':read_text(work_record(settings,scope)['root'],p['path'],p['max_chars'])}
+        p=b['packet'];return {'status':'OK','result':worktree_edit.read(settings,work_record(settings,scope),p['path'],p['max_chars'])}
+    if op=='worktree_observe':
+        p=b['packet'];return {'status':'OK','result':worktree_edit.observe(settings,work_record(settings,scope),p['path'],p['observation'])}
+    if op=='worktree_edit':
+        p=b['packet'];return {'status':'OK','result':worktree_edit.apply(settings,work_record(settings,scope),{k:v for k,v in p.items() if k!='task_id'})}
     if op=='worktree_patch':
         p=b['packet'];record=work_record(settings,scope)
         assessment=task_evidence.patch_assessment(settings,record,p['patch'])

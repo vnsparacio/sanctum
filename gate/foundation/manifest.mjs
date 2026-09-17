@@ -13,7 +13,7 @@ export function currentCapabilityManifest(){
 }
 
 const localUtilities=new Set(['calc','date_math','unit_convert','structured_parse']);
-const workModeCapabilities=new Set(['worktree_list','worktree_read','worktree_patch','worktree_command','source_first_research']);
+const workModeCapabilities=new Set(['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research']);
 const mutations=new Map([
   ['save_local_markdown',{mode:'CREATE_ONLY',undo:null}],
   ['steward_create_folder',{mode:'UNDO_CAPABILITY',undo:'steward_undo_last'}],
@@ -34,7 +34,7 @@ const approvals=new Set(['browser','steward_move','steward_rename','steward_undo
 export function capabilityPolicy(name,repairRules=[]){
   if(!supported.has(name))return deepFreeze({supported:false,effect:'READ',rollback:'NONE',undoCapability:null,authority:'DENY',egress:'UNSUPPORTED',inputDataClass:'RESTRICTED',outputDataClass:'RESTRICTED',untrusted:true,repairRules:[],verifiers:[],remoteResultEligible:false});
   const rollback=mutations.get(name)??{mode:'NONE',undo:null};
-  const effect=mutations.has(name)||name==='worktree_patch'?'MUTATION':['browser','worktree_command'].includes(name)?'CONTROL':'READ';
+  const effect=mutations.has(name)||name==='worktree_edit'?'MUTATION':['browser','worktree_command'].includes(name)?'CONTROL':'READ';
   const taskPrivate=workModeCapabilities.has(name)&&name!=='source_first_research';
   const personalOutput=personal.test(name)||name==='browser'||taskPrivate;
   const personalInput=personalOutput||['web_search','web_fetch','vinceai__hub_repo_search'].includes(name);

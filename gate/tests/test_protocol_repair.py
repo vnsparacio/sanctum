@@ -34,7 +34,7 @@ class StreamingContracts(unittest.TestCase):
   self.assertNotIn('synthetic secret',json.dumps(caught.exception.diagnostic))
  def test_all_branches_roundtrip_with_token_escape_and_unicode_splits(self):
   values=[{'kind':'ESCALATION','reason':'BOUNDED_INABILITY'}, {'kind':'FINAL','text':json.dumps({'verdict':'ACCEPT','findings':[]})}]
-  values += [{'kind':'TOOL_PROPOSAL','capability':name,'arguments':args} for name,args in {'worktree_list':{},'worktree_read':{'path':'index.js'},'worktree_patch':{'patch':'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+雪\n'},'worktree_command':{'operation':'test'},'source_first_research':{'source_need':'WEB_REQUIRED'}}.items()]
+  values += [{'kind':'TOOL_PROPOSAL','capability':name,'arguments':args} for name,args in {'worktree_list':{},'worktree_read':{'path':'index.js'},'worktree_edit':{'path':'index.js','old_text':'old','new_text':'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+雪\n'},'worktree_command':{'operation':'test'},'source_first_research':{'source_need':'WEB_REQUIRED'}}.items()]
   for value in values:
    with self.subTest(kind=value['kind'],capability=value.get('capability')):
     self.assertEqual(self.run_stream(list(json.dumps(value)))['result'],value)

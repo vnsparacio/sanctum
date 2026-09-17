@@ -17,7 +17,7 @@
       "structured_parse",
       "worktree_list",
       "worktree_read",
-      "worktree_patch",
+      "worktree_edit",
       "worktree_command",
       "source_first_research"
     ]
@@ -46,7 +46,7 @@
     "worktree_read": {
       "optional": true
     },
-    "worktree_patch": {
+    "worktree_edit": {
       "optional": true
     },
     "worktree_command": {

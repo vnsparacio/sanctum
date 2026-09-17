@@ -25,7 +25,7 @@ const manifest=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.n
 const evidence=async({scope,workspace,turn})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',bytes:0,digest:'a'.repeat(64)},status:{ok:true,executionState:'COMPLETED',bytes:0,digest:'b'.repeat(64)}});
 const config={verifyProtectedEvidence:syntheticProtection,manifest,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:evidence,invoke:async()=>({ok:true}),egress:()=>({}),evaluate:async()=>({passed:false})};
 test('preflight schema is the exact runtime schema, including branch order',async()=>{
- for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>x!=='worktree_patch')]]){
+ for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>x!=='worktree_edit')]]){
   let captured;
   await createWorkMode({...config,reasoner:{async invoke(request){captured=request;return {kind:'ESCALATION',reason:'SYNTHETIC'};}}}).run({task:'synthetic',scope:'s',capabilities});
   assert.deepEqual(captured.state.workIntent,preflightCurrentWorkIntentSchemas().schemas[surface].request);
@@ -43,7 +43,7 @@ test('oversized accumulated context stops before sending an omitted goal',async(
  assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(calls,6);
 });
 
-const positives=[{kind:'ESCALATION',reason:'BOUNDED_INABILITY'},{kind:'FINAL',text:'synthetic'},...Object.entries({worktree_list:{},worktree_read:{path:'index.js'},worktree_patch:{patch:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'}}).map(([capability,args])=>({kind:'TOOL_PROPOSAL',capability,arguments:args}))];
+const positives=[{kind:'ESCALATION',reason:'BOUNDED_INABILITY'},{kind:'FINAL',text:'synthetic'},...Object.entries({worktree_list:{},worktree_read:{path:'index.js'},worktree_edit:{path:'index.js',old_text:'old',new_text:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'}}).map(([capability,args])=>({kind:'TOOL_PROPOSAL',capability,arguments:args}))];
 test('every semantic branch survives the adapter and canonical binding',async()=>{
  const built=decisionSurface({manifest,names,limit:5,terminalKinds:['FINAL','ESCALATION']});
  for(const value of positives){
@@ -122,10 +122,10 @@ test('signed worker microprobes use production requests, parser, adapter and hos
    writeStream(expected);let inferenceCalls=0,actions=0,seeded=false;const requests=[];
    const adapter=createPrivateLeadReasoner({execute:async(...args)=>{inferenceCalls++;return remote(...args);},profile,body});
    const reasoner={async invoke(request){
-    if(probe==='postPatch'&&!seeded){seeded=true;return {kind:'TOOL_PROPOSAL',capability:'worktree_patch',arguments:{patch:'synthetic host seed'}};}
+    if(probe==='postPatch'&&!seeded){seeded=true;return {kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{path:'index.js',old_text:'old',new_text:'synthetic host seed'}};}
     requests.push(request);return adapter.invoke(request);
    }};
-   const work=await createWorkMode({...config,reasoner,authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),invoke:async({proposal})=>{actions++;if(proposal.capability==='worktree_patch')return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};assert.equal(proposal.capability,expected.capability);assert.equal(proposal.arguments.task_id,'a'.repeat(32));return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),evaluate:async()=>({passed:true})}).run({task:probe==='inspection'?'Read index.js to inspect its exported function.':probe==='postPatch'?'Run the required test for the host-seeded synthetic patch.':'The required external capability is unavailable; report inability.',scope:'a'.repeat(32),capabilities:['worktree_list','worktree_read','worktree_patch','worktree_command'],maxModelCalls:probe==='postPatch'?2:1});
+   const work=await createWorkMode({...config,reasoner,authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),invoke:async({proposal})=>{actions++;if(proposal.capability==='worktree_edit')return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};assert.equal(proposal.capability,expected.capability);assert.equal(proposal.arguments.task_id,'a'.repeat(32));return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),evaluate:async()=>({passed:true})}).run({task:probe==='inspection'?'Read index.js to inspect its exported function.':probe==='postPatch'?'Run the required test for the host-seeded synthetic patch.':'The required external capability is unavailable; report inability.',scope:'a'.repeat(32),capabilities:['worktree_list','worktree_read','worktree_edit','worktree_command'],maxModelCalls:probe==='postPatch'?2:1});
    assert.equal(inferenceCalls,1);assert.equal(requests.length,1);
    if(probe==='inability'){assert.equal(work.reason,'MODEL_ESCALATION');assert.equal(actions,0);}
    else if(probe==='postPatch'){assert.equal(actions,2);assert.equal(work.status,'COMPLETE');assert.deepEqual(requests[0].state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);}
