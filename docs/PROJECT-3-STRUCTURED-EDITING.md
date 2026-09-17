@@ -157,4 +157,14 @@ The following SHA-256 identities allow the owner to verify retained evidence wit
 
 The independent offline review remains [a separate report](PROJECT-3-STRUCTURED-EDITING-REVIEW.md). Final acceptance is based on that reviewed implementation, 509 passing packaged tests and the new live evidence together.
 
+## CI portability follow-up
+
+The initial PR push and pull-request checks both failed on Ubuntu at commit `a9847020bdc1b2a137180e8a6c9610482b0c9c40`. Both logs identify the same two errors and one failure in `WorkIntegrityAmendments`: its successful-amendment and active-ownership fixtures implicitly inherited the Mac test host, so on Linux they hit the deliberate production macOS guard before reaching their intended assertions. The earlier 509-test result and live evidence above were obtained on the Mac; they were not claims of an Ubuntu CI pass.
+
+The follow-up explicitly mocks `platform.system()` as `Darwin` only around the three synthetic Mac-amendment calls. It does not skip tests, stub the safety function, or change production code. A new regression exercises both amendment entry points with a Linux identity, requires the macOS refusal, asserts no subprocess invocation, and verifies the complete synthetic install's file contents remain unchanged. All original closure, policy, active-ownership and rollback assertions remain intact.
+
+The original three failures were reproduced locally under a Linux platform identity before the fix; all five amendment tests then passed under that same outer Linux identity. The complete local validation passed `make deps`, `make build`, **510 packaged tests** (including 28 release tests), and `make audit` with 318 files and zero issues. The repair diff passes `git diff --check`.
+
+The explicit follow-up source freeze is `e28f392552d018e3ff1205f932e564fefc96c7b34c0b9b7bd175457d7907aaed`. Its only changed manifest entry is the reviewed `tests/test_release.py` digest. All runtime code, model/dependency/schema pins, CI workflow and qualification fixtures remain byte-identical to the accepted implementation. The historical live freeze and receipt hashes above remain valid for that run; no GPU inference was rerun for this test-only change. The candidate gateway was stopped and restarted to bind the new source identity after confirming no pods or leases, without changing its installed configuration or runtime overlay.
+
 **PROJECT 3 STRUCTURED EDITING ACCEPTED WITH DOCUMENTED LIMITATIONS**

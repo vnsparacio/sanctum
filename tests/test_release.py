@@ -171,7 +171,8 @@ class WorkIntegrityAmendments(unittest.TestCase):
   item={'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}
   with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_integrity':{**item,'extra':True}})
   with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_integrity':{'source_manifest_sha256':'0'*64}})
-  with patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_integrity':item})
+  # Exercise the Mac amendment contract on every offline test host.
+  with patch('platform.system',return_value='Darwin'),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_integrity':item})
   op.verify_install(self.prefix);after=json.loads((self.prefix/'config/work-mode.json').read_text())
   for name,profile in after['profiles'].items():
    self.assertEqual({k:v for k,v in profile.items() if k!='task_protection'},profiles['profiles'][name])
@@ -190,7 +191,7 @@ class WorkIntegrityAmendments(unittest.TestCase):
   before={n:(self.prefix/n).read_bytes() for n in ('config/work-mode.json','config/openclaw.json','gate/SETTINGS.json','receipt.json','gate/FREEZE.json')}
   item={'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}
   with self.assertRaises(ValueError):mod.configure(self.prefix,{'work_editing':{'source_manifest_sha256':'0'*64}})
-  with patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_editing':item})
+  with patch('platform.system',return_value='Darwin'),patch.object(mod.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout='')):mod.configure(self.prefix,{'work_editing':item})
   op.verify_install(self.prefix);after=json.loads((self.prefix/'config/work-mode.json').read_text())
   for name,profile in after['profiles'].items():
    self.assertEqual({k:v for k,v in profile.items() if k!='capabilities'},{k:v for k,v in profiles['profiles'][name].items() if k!='capabilities'})
@@ -200,10 +201,21 @@ class WorkIntegrityAmendments(unittest.TestCase):
   mod.rollback(self.prefix,log);op.verify_install(self.prefix)
   for n,raw in before.items():self.assertEqual(raw,(self.prefix/n).read_bytes())
  def test_integrity_amendment_refuses_active_ownership(self):
+  from unittest.mock import patch
   mod,repo,policy,proposal=self.fixture();op.write(self.prefix/'state/gate/gpu.json',json.dumps({'phase':'RETIRED','retired_confirmed_at':1}));op.write(self.prefix/'state/gate/private-lead/gpu.json',json.dumps({'phase':'READY','pod_id':'synthetic'}))
   before=(self.prefix/'receipt.json').read_bytes()
-  with self.assertRaisesRegex(ValueError,'Unresolved GPU ownership'):mod.configure(self.prefix,{'work_integrity':{'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}})
+  with patch('platform.system',return_value='Darwin'),self.assertRaisesRegex(ValueError,'Unresolved GPU ownership'):mod.configure(self.prefix,{'work_integrity':{'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}})
   self.assertEqual(before,(self.prefix/'receipt.json').read_bytes())
+ def test_live_amendments_refuse_non_macos_without_effects(self):
+  from unittest.mock import patch
+  mod,repo,policy,proposal=self.fixture()
+  before={p.relative_to(self.prefix):p.read_bytes() for p in self.prefix.rglob('*') if p.is_file()}
+  with patch('platform.system',return_value='Linux'),patch.object(mod.subprocess,'run') as commands:
+   for field in ('work_integrity','work_editing'):
+    with self.subTest(amendment=field),self.assertRaisesRegex(ValueError,'live amendment requires macOS'):
+     mod.configure(self.prefix,{field:{'source_manifest_sha256':op.sha(ROOT/'SOURCE-MANIFEST.json')}})
+   commands.assert_not_called()
+  self.assertEqual(before,{p.relative_to(self.prefix):p.read_bytes() for p in self.prefix.rglob('*') if p.is_file()})
 
 class Publication(unittest.TestCase):
  def test_project_python_names_do_not_shadow_standard_library(self):

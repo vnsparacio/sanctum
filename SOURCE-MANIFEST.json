@@ -302,5 +302,5 @@
   "scripts/upgrade_private_lead.py": "811a9d0a9ed1ea72a37b2430bd47c4252d0d7a1a1c34e9694ee03e8d2d3b77d3",
   "scripts/upgrade_source_first.py": "e5631c8164f144549e800bbf5f4421510be578d01a9168412e91c9fe4f099b75",
   "scripts/upgrade_work_mode.py": "778180e4691b174869a70267c7a371b15af52e50b302e4fa0118c1c49bd9d22a",
-  "tests/test_release.py": "12473334579a0c9f0c650ed3d2a952ae662fda38c0ea0961b15c46957ea8a351"
+  "tests/test_release.py": "2f51030805147a19ec8279c3ffeed7f57df9a6e9836f5ead8a3cd21407da0dbe"
 }
