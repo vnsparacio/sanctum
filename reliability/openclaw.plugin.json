@@ -14,7 +14,12 @@
       "calc",
       "date_math",
       "unit_convert",
-      "structured_parse"
+      "structured_parse",
+      "worktree_list",
+      "worktree_read",
+      "worktree_edit",
+      "worktree_command",
+      "source_first_research"
     ]
   },
   "configSchema": {
@@ -33,6 +38,21 @@
       "optional": true
     },
     "structured_parse": {
+      "optional": true
+    },
+    "worktree_list": {
+      "optional": true
+    },
+    "worktree_read": {
+      "optional": true
+    },
+    "worktree_edit": {
+      "optional": true
+    },
+    "worktree_command": {
+      "optional": true
+    },
+    "source_first_research": {
       "optional": true
     }
   }

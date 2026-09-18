@@ -4,12 +4,12 @@ PREFIX ?= $(CURDIR)/.local
 
 deps:
 	npm ci --ignore-scripts
-	uv venv --python 3.12 .venv
+	uv venv --python 3.12 --allow-existing .venv
 	uv pip install --python .venv/bin/python -r gate/runtime/requirements.txt
 build:
 	$(PYTHON) -B scripts/build.py
 setup doctor up status logs down uninstall:
-	$(PYTHON) -B scripts/operator.py $@ --prefix "$(PREFIX)"
+	$(PYTHON) -B scripts/release_operator.py $@ --prefix "$(PREFIX)"
 test:
 	$(PYTHON) -B scripts/test.py
 audit:

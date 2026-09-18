@@ -46,7 +46,7 @@ def ensure_gpu_offline():
     from common import load_settings
     lc=Private80BLifecycle(load_settings());lc.sweep(immediate=True,manual=True)
     s=lc.status()
-    if s['phase'] not in ['OFFLINE',None] or s['leases']: raise Refused('close_sessions_confirm_gpu_offline_first')
+    if s['phase'] not in ['OFFLINE','RETIRED',None] or s['leases']: raise Refused('close_sessions_confirm_gpu_offline_first')
     # Reconcile against the provider, not just a cached local OFFLINE label.
     with lc.lock(): lc.reconcile(lc.state())
 
@@ -111,7 +111,7 @@ def rollback(state=STATE,runner=launch_action,gpu_check=ensure_gpu_offline,hook=
     finally:c.close()
 
 if __name__=='__main__':
-    raise SystemExit('Historical upgrade adapter: use scripts/operator.py; no production migration is automatic.')
+    raise SystemExit('Historical upgrade adapter: use scripts/release_operator.py; no production migration is automatic.')
     try:
         if sys.argv[1:]==['install']: result=install()
         elif sys.argv[1:]==['rollback']: result=rollback()

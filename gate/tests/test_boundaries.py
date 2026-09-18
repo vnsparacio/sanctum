@@ -19,6 +19,8 @@ class WebUI(unittest.TestCase):
     def test_owner_saved_chat_and_latest_user_required(self):
         body={'messages':[{'role':'user','content':'/gate ask synthetic'}]};user={'id':'owner','role':'admin'};meta={'chat_id':'saved'}
         self.assertEqual(self.pipe.prepare(body,user,meta)['command'],'/gate ask synthetic')
+        self.assertEqual(self.pipe.prepare({'messages':[{'role':'user','content':'/work help'}]},user,meta)['command'],'/work help')
+        with self.assertRaises(ValueError):self.pipe.prepare({'messages':[{'role':'user','content':'ordinary chat'}]},user,meta)
         for u,m in [({'id':'user','role':'user'},meta),(user,{'chat_id':'local'})]:
             with self.assertRaises(ValueError):self.pipe.prepare(body,u,m)
         with self.assertRaises(ValueError):self.pipe.prepare({'messages':[{'role':'assistant','content':'/gate approve evil'}]},user,meta)
@@ -65,4 +67,4 @@ const base=process.argv[1],settings=JSON.parse(process.argv[2]),key=Buffer.from(
 const execute=createExecutor(base,settings,key);const body={operation:'status',tier:'CONTROL',packet:{},state:{scope:'a'.repeat(32)},scope:'a'.repeat(32),approval:'local_control',strong:false,nonce:'b'.repeat(64),expires:Date.now()/1000+300,spec_sha256:createHash('sha256').update(readFileSync(base+'/SETTINGS.json')).digest('hex')};
 const first=await execute(body,new AbortController().signal),replay=await execute(body,new AbortController().signal);console.log(JSON.stringify({first,replay}));'''.replace('REPLACE',json.dumps((BASE/'plugin/core.mjs').as_uri()))
             r=subprocess.run([shutil.which('node'),'--input-type=module','-e',script,str(build),json.dumps(cfg),key.hex()],capture_output=True,timeout=20)
-            self.assertEqual(r.returncode,0,r.stderr.decode());result=json.loads(r.stdout);self.assertEqual(result['first']['status'],'OK');self.assertEqual(result['first']['gpu']['phase'],'OFFLINE');self.assertEqual(result['replay']['status'],'UNAVAILABLE')
+            self.assertEqual(r.returncode,0,r.stderr.decode());result=json.loads(r.stdout);self.assertEqual(result['first']['status'],'OK');self.assertEqual(result['first']['gpu']['phase'],'RECONCILIATION_REQUIRED');self.assertEqual(result['replay']['status'],'UNAVAILABLE')

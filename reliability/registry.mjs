@@ -9,7 +9,7 @@ export const rules=[
  {id:'from_contact_semantics',tools:['messages_search'],pattern:'from:<known contact>',transformation:'existing plugin maps Alex/Alex Example to chat 95 history',security:'UNCHANGED existing implementation; unknown mapping fails closed',tests:'integrations.test.mjs',owner:'plugins/messages-read-tools/dist/index.js'}
 ];
 const fields={messages_chats:['limit'],messages_history:['limit'],messages_search:['limit'],gmail_search:['limit'],calendar_calendars:['limit'],calendar_events:['days','limit'],calendar_search:['days','limit'],steward_list:['limit'],steward_inspect:['max_chars'],date_math:['amount'],unit_convert:['value']};
-export const consequential=new Set(['save_local_markdown','steward_create_folder','steward_move','steward_rename','steward_undo_last','browser','session_status','vinceai__hub_repo_search']);
+export const consequential=new Set(['worktree_edit','save_local_markdown','steward_create_folder','steward_move','steward_rename','steward_undo_last','browser','session_status','vinceai__hub_repo_search']);
 const aliases={from:'from_unit',to:'to_unit'};
 const unitAliases={celsius:'C',fahrenheit:'F',kelvin:'K',kilometers:'km',kilometres:'km',miles:'mi',gibibytes:'GiB',gigabytes:'GB'};
 export function repair(name,input,schema){

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {CONTRACT_VERSION,digest,validateEgressDecision} from '../../gate/foundation/contracts.mjs';
 
 export const INPUT = path.resolve(process.env.VINCEAI_MCP_INPUT_DIR ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../test-data'));
 export const PREFIX = 'vinceai__';
@@ -8,9 +9,30 @@ export const TOOLS = Object.freeze([
   'get_current_time', 'hub_repo_search', 'convert_to_markdown',
 ]);
 const deny = reason => ({block: true, blockReason: `Sanctum MCP: ${reason}`});
+// Native OpenClaw approval remains the enforcement point. This content-free
+// record gives that exact one-call disclosure a stable, destination-bound form.
+export function huggingFaceEgress({capability='vinceai__hub_repo_search',args,scope='mcp',revision=0,now=Date.now()/1000}={}) {
+  const packetDigest=digest(args);
+  const decision={schema:CONTRACT_VERSION,outcome:'ASK',capability,capabilityDigest:digest({capability,policy:'mcp-huggingface-v1'}),requestDigest:digest({scope,revision,capability}),packetDigest,scope,revision,dataClasses:['PERSONAL'],destination:{kind:'EXTERNAL_SERVICE',service:'huggingface.co',model:'repository-search'},purpose:'PUBLIC_SEARCH',expires:now+120,oneUse:true,approvalState:'PENDING',reasonCodes:['EXACT_OWNER_DISCLOSURE_REQUIRED']};
+  if(!validateEgressDecision(decision,now).ok)throw Error('egress_contract');
+  return decision;
+}
 function zone(value) {
   if (typeof value !== 'string' || value.length > 80 || !/^[A-Za-z0-9_+./-]+$/.test(value)) return false;
   try { new Intl.DateTimeFormat('en-US', {timeZone: value}); return true; } catch { return false; }
+}
+const HUB_KEYS=new Set(['author','filters','limit','query','repo_types','sort']);
+const HUB_SORT=new Set(['trendingScore','downloads','likes','createdAt','lastModified']);
+const HUB_TYPES=new Set(['model','dataset','space']);
+function validHubArgs(p){
+  if(Object.keys(p).some(k=>!HUB_KEYS.has(k)))return false;
+  if(Object.hasOwn(p,'author')&&(typeof p.author!=='string'||p.author.length>200))return false;
+  if(Object.hasOwn(p,'query')&&(typeof p.query!=='string'||p.query.length>500))return false;
+  if(Object.hasOwn(p,'limit')&&(typeof p.limit!=='number'||!Number.isFinite(p.limit)||p.limit<1||p.limit>100))return false;
+  if(Object.hasOwn(p,'sort')&&!HUB_SORT.has(p.sort))return false;
+  if(Object.hasOwn(p,'repo_types')&&(!Array.isArray(p.repo_types)||p.repo_types.length<1||p.repo_types.length>3||p.repo_types.some(x=>!HUB_TYPES.has(x))))return false;
+  if(Object.hasOwn(p,'filters')&&(!Array.isArray(p.filters)||p.filters.length>20||p.filters.some(x=>typeof x!=='string'||x.length>100)))return false;
+  return true;
 }
 
 export function decide(event) {
@@ -38,15 +60,18 @@ export function decide(event) {
       return {params: {uri: 'file:///mcp-input/' + relative.split(path.sep).map(encodeURIComponent).join('/')}};
     }
     if (name !== 'hub_repo_search') return deny('no external-data policy exists for this tool.');
+    if (!validHubArgs(p)) return deny('external arguments do not match the reviewed schema.');
     const encoded = JSON.stringify(p);
     if (encoded.length > 2000) return deny('external arguments exceed the bounded request size.');
     const adjusted = {...p, limit: 1};
+    const egress=huggingFaceEgress({args:adjusted});
     return {
       params: adjusted,
       requireApproval: {
         title: 'Send request to Hugging Face',
         description: `This call sends the selected tool arguments to Hugging Face. Review the exact arguments in the approval details. Local/private content must not be sent without your consent. This approval covers only this call.`,
         severity: 'warning', allowedDecisions: ['allow-once','deny'], timeoutMs: 120000,
+        metadata: {egress:{capability:egress.capability,packetDigest:egress.packetDigest,destination:egress.destination,purpose:egress.purpose,expires:egress.expires}},
       },
     };
   } catch { return deny('arguments or local file could not be verified.'); }

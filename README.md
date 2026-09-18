@@ -10,7 +10,7 @@ Sanctum keeps credentials, tools, approvals and privacy policy on your machine w
 
 ## V1 status
 
-Sanctum V1.0.0 is **ready with documented exceptions**. The feature set is frozen. The original deployment was called **VinceAI** and remains the reference installation; publication does not migrate it. Source and documentation use [Apache-2.0](LICENSE), with [external licenses retained](THIRD-PARTY-NOTICES.md).
+Sanctum V1.1.0 is **complete with documented limitations**. This minor release adds the accepted shared-capability foundation, Source-First evidence path, private Qwen Work Mode, and exact structured editing boundary. The original V1.0.0 release and tag remain immutable. The original deployment was called **VinceAI** and remains the reference installation; publication does not migrate it. Source and documentation use [Apache-2.0](LICENSE), with [external licenses retained](THIRD-PARTY-NOTICES.md).
 
 Full operation targets **macOS on Apple Silicon**. This is **hybrid packaged / container-assisted** software: MLX, personal-source brokers, credentials, approvals and GPU cleanup intentionally remain host-native. Optional containers provide a small fixed MCP surface.
 
@@ -55,7 +55,7 @@ The local agent can use narrowly configured tools. Stronger private or hosted mo
 - Use exact local utilities and a fixed MCP catalog. Generic shell, dynamic tool discovery and remote-model local tools are unavailable.
 - Escalate reasoning under exact disclosure, budget and GPU ownership controls. Paid GPU autostart ships disabled and requires operator setup plus independent cleanup.
 
-V1 does not promise full autonomy, universal factual accuracy, full Linux parity, an all-Docker deployment or guaranteed cleanup during simultaneous Mac/network/provider outages. The local model's browser-target selection and exact draft formatting have recorded failures. A reviewed moderate Vitest/mocker advisory remains in development tooling; the vulnerable dev-server path is unused by the prescribed tests. See [qualification](docs/qualification.md), [acceptance](docs/acceptance.md), [Sanctum publication checks](docs/publication.md) and [dependency review](docs/dependency-review.md).
+V1.1 does not promise full autonomy, universal factual accuracy, full Linux product parity, an all-Docker deployment or guaranteed cleanup during simultaneous Mac/network/provider outages. Work Mode permits one exact replacement in one observed existing UTF-8 file; it does not expose file creation, deletion, batching or whole-file fallback. The local model's browser-target selection and exact draft formatting have recorded failures. A reviewed moderate Vitest/mocker advisory remains in development tooling; the vulnerable dev-server path is unused by the prescribed tests. See [the V1.1 release record](docs/V1.1-RELEASE-COMPLETION.md), [qualification](docs/qualification.md), [acceptance](docs/acceptance.md), [Sanctum publication checks](docs/publication.md) and [dependency review](docs/dependency-review.md).
 
 ## Read more
 

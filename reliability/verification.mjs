@@ -25,27 +25,27 @@ export function exactFact(tool,args,result){
  }
 }
 export function verifyExactAnswer(fact,answer){
- if(!fact||typeof answer!=='string'||answer.length>4096)return {status:'not_applicable'};
+ if(!fact||typeof answer!=='string'||answer.length>4096)return {status:'UNKNOWN'};
  let text=answer.trim().replace(/^\*\*([^*]+)\*\*$/,'$1').replace(/^`([^`]+)`$/,'$1');
  text=text.replace(/^(?:the )?(?:exact )?(?:answer|result|date|weekday)(?: is|:)\s*/i,'').replace(/[.!]$/,'').trim();
  let match,agrees;
  if(fact.kind==='number'){
   match=new RegExp(`^(${NUMBER})(?:\\s+([A-Za-z°/]+))?$`).exec(text);
-  if(!match)return {status:'not_applicable'};
+  if(!match)return {status:'UNKNOWN'};
   // Unrecognized units are not interpreted or guessed.
   const label=match[2],unit=label&&(units[label]??label);
-  if(label&&!fact.unit)return {status:'not_applicable'};
-  if(label&&unit!==fact.unit)return {status:'not_applicable'};
-  const value=decimal(match[1]);if(value===undefined)return {status:'not_applicable'};
+  if(label&&!fact.unit)return {status:'UNKNOWN'};
+  if(label&&unit!==fact.unit)return {status:'UNKNOWN'};
+  const value=decimal(match[1]);if(value===undefined)return {status:'UNKNOWN'};
   agrees=value===decimal(fact.value);
  }else if(fact.kind==='date'){
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return {status:'not_applicable'};
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return {status:'UNKNOWN'};
   agrees=text===fact.value;
  }else if(fact.kind==='weekday'){
-  if(!/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/i.test(text))return {status:'not_applicable'};
+  if(!/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/i.test(text))return {status:'UNKNOWN'};
   agrees=text.toLowerCase()===fact.value.toLowerCase();
- }else return {status:'not_applicable'};
- return {status:agrees?'verified':'contradiction',tool:fact.tool};
+ }else return {status:'UNKNOWN'};
+ return {status:agrees?'VERIFIED':'REJECTED',tool:fact.tool};
 }
 export const exactFallback=fact=>`The exact local result is ${fact.value}${fact.unit?' '+fact.unit:''}. The model's conflicting answer was not verified; stronger-model escalation is unavailable under the current policy.`;
 
@@ -62,8 +62,8 @@ export function createVerification({escalate,record,now=Date.now}){
    const id=event.runId??ctx?.runId,s=runs.get(id);prune();
    if(!s||now()-s.at>=900000||s.facts.length!==1||s.tools.size!==1)return;
    const fact=s.facts[0],check=verifyExactAnswer(fact,event.lastAssistantMessage);
-   if(check.status==='verified'){record({tool:fact.tool,status:'ok',outcome:'VERIFIED'});return;}
-   if(check.status!=='contradiction'||s.failed)return;
+   if(check.status==='VERIFIED'){record({tool:fact.tool,status:'ok',outcome:'VERIFIED'});return;}
+   if(check.status!=='REJECTED'||s.failed)return;
    // Set synchronously before awaiting policy so no simultaneous call can replay.
    s.failed=true;s.fallback=exactFallback(fact);
    await escalate(fact.tool,'VERIFICATION_FAILED');

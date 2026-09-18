@@ -1,8 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import plugin from '../index.mjs';
+import {currentCapabilityManifest} from '../../gate/foundation/manifest.mjs';
 const hooks=new Map(),tools=[];let middleware;
 plugin.register({on:(name,fn)=>hooks.set(name,fn),registerTool:t=>tools.push(t),registerAgentToolResultMiddleware:fn=>{middleware=fn;}});
+test('runtime publishes one manifest and gate-local agents cannot bypass source coordination',async()=>{
+ assert.equal(currentCapabilityManifest().byName.web_search.runtime.exposed,true);
+ const blocked=await hooks.get('before_tool_call')({toolName:'web_search',params:{query:'synthetic'},toolCallId:'source-bypass'},{runId:'source-run',sessionKey:'agent:main:mac-gate-local-synthetic'});
+ assert.equal(blocked.block,true);assert.match(blocked.blockReason,/SOURCE_COORDINATOR_REQUIRED/);
+});
 test('installed hook repairs before execution and records explicit clamp on returned result',async()=>{
  const ctx={runId:'synthetic-run',toolCallId:'synthetic-call'};
  const decision=await hooks.get('before_tool_call')({toolName:'messages_search',params:{query:'from:Alex Example',limit:'100'},toolCallId:ctx.toolCallId},ctx);

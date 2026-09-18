@@ -1,0 +1,20 @@
+{
+  "schema": "sanctum-work-runner/v1",
+  "base_image": "node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553",
+  "platforms": ["linux/arm64", "linux/amd64"],
+  "policy": {
+    "cpus": 2,
+    "memory_bytes": 4294967296,
+    "pids": 64,
+    "open_files": 256,
+    "file_bytes": 67108864,
+    "tmp_bytes": 268435456,
+    "timeout_seconds": 120,
+    "output_bytes": 65536,
+    "workspace_transport": "docker_cp_snapshot",
+    "network": "none",
+    "read_only_root": true,
+    "capabilities": "drop-all",
+    "no_new_privileges": true
+  }
+}

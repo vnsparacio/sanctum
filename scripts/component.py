@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse,os,shutil,subprocess,sys,json,urllib.request
 import importlib.util
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
+spec=importlib.util.spec_from_file_location('release_operator',ROOT/'scripts/release_operator.py');op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 p=argparse.ArgumentParser();p.add_argument('component',choices=['mlx','messages','gmail','calendar','markdown','files','webui']);p.add_argument('--prefix',type=Path,default=ROOT/'.local');p.add_argument('--health',action='store_true');p.add_argument('--cache-only',action='store_true');a=p.parse_args();prefix=a.prefix.absolute();op.verify();r=op.verify_install(prefix);env=op.environment(prefix)
 if a.health:
  if a.component not in ('mlx','webui'):raise SystemExit('Health probe is supported for mlx/webui only')
@@ -14,7 +14,7 @@ if a.health:
   if a.component=='webui' and result.get('status') is not True:raise ValueError('WebUI not healthy')
  except Exception:raise SystemExit('Component unavailable or identity mismatch; inspect its private log and start the candidate component. No fallback was used.')
  print('Healthy:',a.component);raise SystemExit(0)
-env['VINCEAI_NOTES_DIR']=str(prefix/'notes');env['VINCEAI_GOOGLE_HOME']=str(prefix/'state/google-readonly')
+env.setdefault('VINCEAI_NOTES_DIR',str(prefix/'notes'));env['VINCEAI_GOOGLE_HOME']=str(prefix/'state/google-readonly')
 python=str(ROOT/'.venv/bin/python');brokers={'messages':'messages-read-broker.py','gmail':'gmail-read-broker.py','calendar':'calendar-read-broker.py','markdown':'local-markdown-broker.py','files':'file-steward-broker.py'}
 if a.component in brokers:
  if a.component in ('messages','gmail','calendar') and (not (prefix/'config'/(a.component+'.enabled')).is_file() or (prefix/'config'/(a.component+'.enabled')).read_text().strip()!='enabled'):raise SystemExit('Configure the read-only integration and create config/'+a.component+'.enabled first; see docs/installation.md')

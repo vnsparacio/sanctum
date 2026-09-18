@@ -10,6 +10,9 @@ import {modelResult} from './output.mjs';
 import {logger} from './telemetry.mjs';
 import {rules} from './registry.mjs';
 import {createVerification} from './verification.mjs';
+import {deriveCapabilityManifest,PINNED_ADAPTER_TOOLS,publishCapabilityManifest} from '../gate/foundation/manifest.mjs';
+import {validateToolProposal} from '../gate/foundation/contracts.mjs';
+import {registeredWorkModeTools,workModeTools} from '../gate/plugin/workspace-tools.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function python(script,payload,signal){
  return new Promise(resolve=>{
@@ -32,6 +35,29 @@ export default {
  register(api){
   const schemas=JSON.parse(fs.readFileSync(path.join(ROOT,'schema-snapshot.json'),'utf8'));
   const validators=compile([...schemas.filter(s=>!utilityTools.some(u=>u.name===s.name)),...utilityTools]);
+  const syntheticRuntime=!api.runtime;
+  const runtimeConfig=api.runtime?.config?.current?.()??{tools:{alsoAllow:[...validators.keys()]},plugins:{allow:[],entries:{}},browser:{enabled:true}};
+  // Generated plugin declarations are checked against actual registration by
+  // the build. Runtime configuration then determines which implementations are
+  // present and exposed; a captured schema alone never makes a tool available.
+  const declaredTools=[],registeredTools=[];
+  for(const directory of fs.readdirSync(path.resolve(ROOT,'../plugins')).sort()){
+   const plugin=JSON.parse(fs.readFileSync(path.resolve(ROOT,'../plugins',directory,'openclaw.plugin.json'),'utf8'));
+   const names=plugin.contracts?.tools??[];declaredTools.push(...names);
+   if(syntheticRuntime||(runtimeConfig.plugins?.entries?.[plugin.id]?.enabled!==false&&(runtimeConfig.plugins?.allow??[]).includes(plugin.id)))registeredTools.push(...names.map(name=>({name,source:`plugin:${plugin.id}`})));
+  }
+  declaredTools.push(...utilityTools.map(x=>x.name),...workModeTools.map(x=>x.name));registeredTools.push(...utilityTools.map(x=>({...x,source:'plugin:vinceai-reliability'})),...workModeTools.map(x=>({...x,source:'plugin:vinceai-reliability'})));
+  const adaptedTools=[];
+  if(runtimeConfig.browser?.enabled===true)adaptedTools.push('browser');
+  if(runtimeConfig.tools?.web?.search?.enabled===true)adaptedTools.push('web_search');
+  if(runtimeConfig.tools?.web?.fetch?.enabled===true)adaptedTools.push('web_fetch');
+  if(runtimeConfig.mcp?.servers?.vinceai?.enabled===true)adaptedTools.push('vinceai__get_current_time','vinceai__convert_to_markdown','vinceai__hub_repo_search');
+  // Unit-test plugin registries omit the runtime surface; expose the pinned
+  // adapters there only so tests can exercise the same policy hook.
+  if(syntheticRuntime)adaptedTools.push(...PINNED_ADAPTER_TOOLS);
+  const repairRulesByTool={};for(const rule of rules)for(const tool of rule.tools)(repairRulesByTool[tool]??=[]).push(rule.id);
+  const manifest=deriveCapabilityManifest({schemas:[...schemas.filter(s=>!utilityTools.some(u=>u.name===s.name)),...utilityTools],declaredTools,registeredTools,adaptedTools,runtimeConfig,repairRulesByTool,allowedRepairRules:rules.map(x=>x.id)});
+  publishCapabilityManifest(manifest);
   const record=logger(path.join(process.env.VINCEAI_STATE_DIR ?? path.join(ROOT,'state'),'failures.jsonl'),[...validators.keys()],rules.map(r=>r.id));
   // Artifact pins prevent use of stale repair schemas after an owner/runtime upgrade.
   const pins=JSON.parse(fs.readFileSync(path.join(ROOT,'runtime-pins.json'),'utf8'));
@@ -51,14 +77,20 @@ export default {
   api.on('reply_payload_sending',event=>verification.delivery(event),{priority:2000});
   api.on('agent_end',(event,ctx)=>verification.end(event.runId??ctx?.runId));
   api.on('before_tool_call',async(event,ctx)=>{
+   if(['web_search','web_fetch'].includes(event.toolName)&&String(ctx?.sessionKey??'').startsWith('agent:main:mac-gate-local-')){
+    record({tool:event.toolName,runId:ctx?.runId??event.runId,code:'SOURCE_COORDINATOR_REQUIRED',outcome:'BLOCKED'});
+    return {block:true,blockReason:JSON.stringify(failure('SOURCE_COORDINATOR_REQUIRED','Gate-local web retrieval must use the Mac Source-First coordinator.'))};
+   }
    if(verification.proposed(ctx?.runId??event.runId,event.toolName))return {block:true,blockReason:JSON.stringify(failure('VERIFICATION_FAILED','Exact-answer verification failed. No further tools may execute in this run.'))};
-   if(!intact){record({tool:event.toolName,code:'UNKNOWN_SCHEMA',outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure('SCHEMA_SNAPSHOT_STALE','Operator must recapture schemas after a runtime upgrade.'))};}
+   if(!intact){record({tool:event.toolName,runId:ctx?.runId??event.runId,code:'UNKNOWN_SCHEMA',outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure('SCHEMA_SNAPSHOT_STALE','Operator must recapture schemas after a runtime upgrade.'))};}
+   const proposal=validateToolProposal({schema:'sanctum-capability/v1',proposalId:String(event.toolCallId??ctx?.toolCallId??'unknown'),requestId:String(ctx?.runId??event.runId??'local'),revision:0,reasoner:'LOCAL_4B',capability:event.toolName,capabilityDigest:manifest.byName[event.toolName]?.digest??'0'.repeat(64),arguments:event.params},manifest);
+   if(!proposal.ok){record({tool:event.toolName,runId:ctx?.runId??event.runId,code:proposal.code,outcome:'BLOCKED'});return {block:true,blockReason:JSON.stringify(failure(proposal.code))};}
    let p=prepare(event.toolName,event.params,validators);
    const key=`${ctx?.runId??event.runId??'unknown'}:${event.toolCallId??ctx?.toolCallId??'unknown'}`;
    const prior=preparedCalls.get(key);preparedCalls.delete(key);
    if(prior&&p.ok)p={...p,attempts:prior.attempts,rules:prior.rules,firstValid:prior.firstValid};
    if(calls.size>1024)calls.clear();calls.set(key,p);
-   record({tool:event.toolName,code:p.code,attempts:p.attempts,rules:p.rules,repair_success:p.ok&&p.attempts===1,outcome:p.ok?(p.attempts?'REPAIRED':'VALID'):'BLOCKED'});
+   record({tool:event.toolName,runId:ctx?.runId??event.runId,code:p.code,attempts:p.attempts,rules:p.rules,repair_success:p.ok&&p.attempts===1,outcome:p.ok?(p.attempts?'REPAIRED':'VALID'):'BLOCKED'});
    if(!p.ok){const decision=await escalate(event.toolName,'TOOL_VALIDATION_FAILED');return {block:true,blockReason:JSON.stringify({...failure(p.code),escalation:decision})};}
    // The operator tools.invoke path skips owned preparation and shallow-merges
    // hook params. Retain this exact validated proposal, never a later rewrite.
@@ -89,18 +121,21 @@ export default {
    verification.proof(_id,utility.name,prepared.params,result.details);
    return result;
   }},{optional:true});
+  for(const tool of registeredWorkModeTools())api.registerTool(tool,{optional:true});
   api.registerAgentToolResultMiddleware(async(event,ctx)=>{
    verification.result(ctx?.runId,event.toolCallId,event.toolName,event.result?.details);
    const result=modelResult(event.toolName,event.result);
    const key=`${ctx?.runId??'unknown'}:${event.toolCallId}`;const p=calls.get(key);calls.delete(key);
    if(p?.rules.length){result.details.repair={rules:p.rules,attempts:p.attempts};if(p.rules.includes('bounded_limit'))result.details.truncated=true;result.content[0].text=JSON.stringify(result.details);}
    const failed=result.isError;
-   record({tool:event.toolName,attempts:p?.attempts,rules:p?.rules,status:failed?'error':'ok',outcome:failed?'FAILED':'SUCCESS'});
+   record({tool:event.toolName,runId:ctx?.runId,attempts:p?.attempts,rules:p?.rules,status:failed?'error':'ok',outcome:failed?'FAILED':'SUCCESS'});
    if(failed&&result.details?.error?.code==='INCOMPATIBLE_ARGUMENT'){
     const run=ctx?.runId;if(run){const k=`${run}:${event.toolName}`;const n=(failures.get(k)??0)+1;if(failures.size>1024)failures.clear();failures.set(k,n);if(n===2)result.details.escalation=await escalate(event.toolName,'TOOL_INCOMPATIBILITY_REPEATED',n);}
     result.content[0].text=JSON.stringify(result.details);
    }
    return {result};
   },{runtimes:['openclaw']});
+  // Read-only metadata for trusted diagnostics/tests; it contains schemas and
+  // policy labels, never private runtime state or approval material.
  }
 };

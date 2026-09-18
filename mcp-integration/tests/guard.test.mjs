@@ -28,6 +28,8 @@ test('bounded query and retrieval output',()=>{
   assert.equal(call('search_papers',{query:'x'.repeat(2001)}).block,true);
   assert.equal(call('hub_repo_search',{query:'x'.repeat(2001)}).block,true);
   assert.equal(call('hub_repo_search',{query:'Qwen',limit:100}).params.limit,1);
+  assert.equal(call('hub_repo_search',{query:'Qwen',privateBody:'smuggled'}).block,true);
+  assert.equal(call('hub_repo_search',{query:'Qwen',repo_types:['model','unreviewed']}).block,true);
   assert.equal(call('search_papers',{query:'attention',max_results:50}).block,true);
 });
 test('offline document path stays inside one read-only mount',()=>{

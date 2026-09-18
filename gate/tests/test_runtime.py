@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -16,18 +17,19 @@ from common import Refused, canonical, database, strict_json
 from authority import authorize
 from dispatch import assess
 from schema import validate
-from backends import Remote, Private80BBackend, LocalMultimodalBackend, extract_chat, answer_result
-from lifecycle import Private80BLifecycle
+from backends import Remote, Private80BBackend, PrivateLeadBackend, LocalMultimodalBackend, extract_chat, answer_result, structured_http_reason
+from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from runpod import capacity_rejected
 from media import prepare, load, expand
 import install
+import manage
 
 
 def settings(root):
-    s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;return s
+    s=json.loads((BASE/'SETTINGS.json').read_text());s['state_directory']=str(root);s['python']=sys.executable;s['gpu']['auto_start']=True;s['gpu']['enabled']=True;return s
 
 def audit(tier='LOCAL_4B'):
-    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
+    return {'urgency':'ABSENT','stakes':'NORMAL','domains':['other_unknown'],'request_role':'explanation','uncertainty':[], 'quality':{'recommended_tier':tier,'reason_codes':['ROUTINE_LANGUAGE']},'source_need':{'classification':'NONE','reason_codes':['DETERMINISTIC_OR_SELF_CONTAINED']},'context_need':{'classification':{'attachments':'NONE','prior_context':'NONE'},'answer':{'attachments':'NONE','prior_context':'NONE'}},'needs_local_tools':False}
 
 def packet(): return {'scope':'a'*32,'revision':0,'prompt':'synthetic question','semantic_state':{'high_stakes':False,'privacy_floor':'PERSONAL'},'attachment_summary':{'count':0,'visual_count':0,'document_count':0,'video_count':0},'disclosed':{}}
 def state(): return {'scope':'a'*32,'revision':-1,'high_stakes':False,'privacy_floor':'PERSONAL','request_digest':''}
@@ -45,9 +47,9 @@ class Temp(unittest.TestCase):
 class Policy(Temp):
     def test_tiers_independent_of_stakes(self):
         for tier in ['LOCAL_4B','PRIVATE_80B','HOSTED_235B','OPENAI_FRONTIER']:
-            self.assertEqual(assess(packet(),state(),audit(tier))['route'],tier)
-    def test_complex_code_promotes_80(self):
-        a=audit();a['quality']['reason_codes']=['TECHNICAL_DEBUGGING'];self.assertEqual(assess(packet(),state(),a)['route'],'PRIVATE_80B')
+            self.assertEqual(assess(packet(),state(),audit(tier))['route'],'HOSTED_235B' if tier=='PRIVATE_80B' else tier)
+    def test_complex_code_uses_eligible_hosted_policy(self):
+        a=audit();a['quality']['reason_codes']=['TECHNICAL_DEBUGGING'];self.assertEqual(assess(packet(),state(),a)['route'],'HOSTED_235B')
     def test_high_stakes_forces_openai(self):
         a=audit();a['stakes']='HIGH_STAKES';self.assertEqual(assess(packet(),state(),a)['route'],'OPENAI_FRONTIER')
     def test_high_stakes_persists(self):
@@ -60,8 +62,8 @@ class Policy(Temp):
         a=audit('HOSTED_235B');a['needs_local_tools']=True;self.assertEqual(assess(packet(),state(),a)['route'],'LOCAL_4B')
     def test_visual_capability_route(self):
         p=packet();p['attachment_summary'].update(count=1,visual_count=1);self.assertEqual(assess(p,state(),audit('MULTIMODAL'))['route'],'MULTIMODAL')
-    def test_documents_use_private_reasoning(self):
-        p=packet();p['attachment_summary'].update(count=1,document_count=1);a=audit();a['context_need']['answer']['attachments']='REQUIRED';self.assertEqual(assess(p,state(),a)['route'],'PRIVATE_80B')
+    def test_documents_require_eligible_reasoning(self):
+        p=packet();p['attachment_summary'].update(count=1,document_count=1);a=audit();a['context_need']['answer']['attachments']='REQUIRED';self.assertEqual(assess(p,state(),a)['route'],'HOSTED_235B')
 
     def test_irrelevant_attachment_does_not_escalate(self):
         p=packet();p['attachment_summary'].update(count=1,visual_count=1);self.assertEqual(assess(p,state(),audit())['route'],'LOCAL_4B')
@@ -81,8 +83,15 @@ class Authority(Temp):
         raw=canonical(b);return {'body':raw,'mac':hmac.new(self.key,raw.encode(),hashlib.sha256).hexdigest()}
     def auth(self,b):return authorize(self.signed(b),self.s,now=lambda:1000,settings_hash='spec')
     def test_once_only_durable_across_calls(self):
-        b=self.body();self.auth(b)
+        b=self.body();b.update(tier='HOSTED_235B',approval='exact_disclosure');self.auth(b)
         with self.assertRaises(sqlite3.IntegrityError):self.auth(b)
+    def test_disabled_80b_refuses_both_inference_approval_classes(self):
+        self.s['gpu']['enabled']=False
+        for approval in ('session_private_prompt','exact_disclosure'):
+            b=self.body();b['approval']=approval
+            with self.assertRaisesRegex(Refused,'private_80b_retired'):self.auth(b)
+        b=self.body();b.update(operation='status',tier='CONTROL',approval='local_control',packet={})
+        self.auth(b)
     def test_wrong_signature(self):
         e=self.signed(self.body());e['body']+=' '
         with self.assertRaises(Refused):authorize(e,self.s,now=lambda:1000,settings_hash='spec')
@@ -99,6 +108,12 @@ class Authority(Temp):
     def test_high_stakes_cannot_use_80(self):
         b=self.body();b['state']['high_stakes']=True
         with self.assertRaises(Refused):self.auth(b)
+    def test_private_lead_proposal_requires_exact_signed_scope(self):
+        b=self.body();b.update(operation='private_lead_propose',tier='PRIVATE_LEAD',approval='private_lead_workmode',packet={'request':{'system':'synthetic','request':{}}})
+        self.auth(b)
+        for key,value in [('approval','exact_disclosure'),('tier','PRIVATE_80B'),('packet',{'request':{'system':'x','request':{}},'extra':True})]:
+            bad=self.body();bad.update(operation='private_lead_propose',tier='PRIVATE_LEAD',approval='private_lead_workmode',packet={'request':{'system':'synthetic','request':{}}});bad[key]=value
+            with self.assertRaises(Refused):self.auth(bad)
 
 class Transport(Temp):
     def test_minimal_classifier_packet_and_provider_policy(self):
@@ -137,10 +152,43 @@ class Transport(Temp):
         with self.assertRaises(Refused):Private80BBackend(self.s).infer({'prompt':'x','images':[{}]})
     def test_80_readiness_requires_alias_and_smoke(self):
         def send(url,p=None,*args,**kw):return {'data':[{'id':'vinceai-qwen80b'}]} if url.endswith('/models') else chat('READY')
-        self.assertTrue(Private80BBackend(self.s,send).health_check(smoke=True))
+        with self.assertRaisesRegex(Refused,'private_80b_retired'):Private80BBackend(self.s,send).health_check(smoke=True)
         with self.assertRaises(Refused):Private80BBackend(self.s,lambda *a,**k:{'data':[{'id':'wrong'}]}).health_check()
+    def test_private_lead_has_its_own_alias_and_loopback_port(self):
+        self.s['private_lead']['enabled']=True
+        calls=[]
+        def send(url,p=None,*args,**kw):
+            if not url.endswith('/models'): calls.append(p)
+            return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]} if url.endswith('/models') else chat('READY')
+        self.assertTrue(PrivateLeadBackend(self.s,send).health_check(smoke=True))
+        self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False})
+        self.assertEqual(PrivateLeadBackend(self.s).url,'http://127.0.0.1:18002/v1')
+    def test_private_lead_proposal_is_data_only_and_thinking_off(self):
+        self.s['private_lead']['enabled']=True;calls=[];response={'kind':'FINAL','text':'synthetic'}
+        def send(url,p=None,*args,**kw):
+            if url.endswith('/models'): return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
+            calls.append(p);return chat(canonical(response))
+        schema={'type':'object'};intent={'version':'sanctum-work-intent/v1','dialect':'vllm-0.20.1-outlines','schema':schema,'schemaDigest':hashlib.sha256(canonical(schema).encode()).hexdigest(),'semanticSchemaDigest':'a'*64}
+        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
+        self.assertEqual(result['status'],'OK');self.assertEqual(result['result'],response);self.assertEqual(result['telemetry']['result_kind'],'FINAL');self.assertIn('elapsed_seconds',result['telemetry']);self.assertEqual(calls[0]['chat_template_kwargs'],{'enable_thinking':False});self.assertNotIn('tools',calls[0]);self.assertEqual(calls[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertTrue(calls[0]['response_format']['json_schema']['strict'])
+        self.assertEqual(structured_http_reason(400),'structured_decoding_http_400');self.assertEqual(structured_http_reason(422),'structured_decoding_http_422');self.assertEqual(structured_http_reason(503),'http_503')
+    def test_private_lead_proposal_refuses_invalid_request(self):
+        with self.assertRaises(Refused):PrivateLeadBackend(self.s).propose({'request':{}})
+    def test_private_lead_accepts_exact_production_preflight_schema(self):
+        self.s['private_lead']['enabled']=True;captured=[]
+        document=json.loads(subprocess.check_output(['node',str(BASE/'preflight-work-intent.mjs'),'--json'],text=True));intent=document['schemas']['ordinaryEligible']['request']
+        def send(url,p=None,*args,**kwargs):
+            if url.endswith('/models'):return {'data':[{'id':'sanctum-private-lead-qwen35-122b'}]}
+            captured.append(p);return chat(canonical({'kind':'FINAL','text':'READY'}))
+        result=PrivateLeadBackend(self.s,send).propose({'system':'synthetic','request':{'state':{'workIntent':intent}}})
+        self.assertEqual(result['status'],'OK');self.assertEqual(captured[0]['response_format']['json_schema']['schema'],intent['schema']);self.assertRegex(intent['schemaDigest'],r'^[a-f0-9]{64}$')
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
+    def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
+        sent=[];grounded={'kind':'GROUNDED_FINAL','text':'documented','grounding':'GROUNDED','citations':[{'sourceId':'s1','url':'https://example.test'}],'inferences':[],'missingReasons':[],'escalation':'NONE'}
+        def send(url,p,headers,**kw):sent.append(p);return chat(canonical(grounded),self.s['models']['HOSTED_235B'])
+        result=Remote(self.s,send,lambda:'test').infer('HOSTED_235B',{'prompt':'current','evidence':{'profile':'HOSTED_RICH'}},'grounded')
+        self.assertEqual(result['grounded'],grounded);self.assertEqual(sent[0]['response_format']['json_schema']['schema']['properties']['kind']['enum'],['GROUNDED_FINAL'])
 
 class FakeProvider:
     def ensure_guard(self):pass
@@ -169,9 +217,10 @@ class FakeBackend:
         self.calls.append('health')
         if self.fail:raise Refused('not_ready')
     def infer(self,p):self.calls.append('infer');return {'status':'OK','text':'synthetic','escalation':'NONE'}
+    def propose(self,p):self.calls.append('propose');return {'status':'OK','result':{'kind':'FINAL','text':'synthetic'}}
 class Lifecycle(Temp):
     def setUp(self):
-        super().setUp();self.time=1000;self.p=FakeProvider();self.b=FakeBackend();self.lc=Private80BLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        super().setUp();self.s['private_lead']['auto_start']=True;self.time=1000;self.p=FakeProvider();self.b=FakeBackend();self.lc=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
     def advance(self,n):self.time+=n
     def test_capacity_rejection_recovers_without_duplicate_compute(self):
         original=self.p.create;attempts=[]
@@ -183,7 +232,7 @@ class Lifecycle(Temp):
         self.lc.infer('a',{})
         self.assertEqual(len(attempts),2);self.assertEqual(self.p.created,1);self.assertEqual(self.lc.status()['phase'],'READY')
     def test_capacity_rejection_is_bounded_and_cancellable(self):
-        self.s['gpu']['capacity_wait_seconds']=20
+        self.s['private_lead']['capacity_wait_seconds']=20
         def create(name):raise Refused('gpu_capacity_unavailable')
         self.p.create=create
         with self.assertRaisesRegex(Refused,'capacity_timeout'):self.lc.infer('a',{})
@@ -200,6 +249,12 @@ class Lifecycle(Temp):
     def test_create_ready_reuse_close_preserves_volume(self):
         self.lc.infer('a',{'prompt':'one'});self.lc.infer('a',{'prompt':'two'});self.assertEqual(self.p.created,1);self.assertEqual(self.lc.status()['phase'],'READY')
         self.lc.release('a',close=True);self.assertEqual(self.p.deleted,['pod1']);self.assertEqual(self.lc.status()['phase'],'OFFLINE');self.assertNotIn('delete_volume',dir(self.p))
+    def test_new_allocation_clears_prior_allocation_telemetry(self):
+        self.lc.save(self.lc.state(),ready_at=1,first_inference_at=2,last_inference_at=3,delete_requested_at=4,absent_confirmed_at=5,allocation_id='old')
+        self.lc.infer('a',{})
+        state=self.lc.state();self.assertEqual(state['allocation_id'],'pod1')
+        self.assertIsNone(state['delete_requested_at']);self.assertIsNone(state['absent_confirmed_at'])
+        self.assertEqual(state['ready_at'],self.time);self.assertIsNone(state['first_inference_at']);self.assertIsNone(state['last_inference_at'])
     def test_final_lease_only_terminates(self):
         self.lc.infer('a',{});self.lc.infer('b',{});self.lc.release('a',close=True);self.assertEqual(self.p.deleted,[]);self.lc.release('b',close=True);self.assertEqual(self.p.deleted,['pod1'])
     def test_close_during_query_deletes_as_final_request_releases(self):
@@ -214,7 +269,7 @@ class Lifecycle(Temp):
             with self.assertRaises(Refused):self.lc.infer('a',{})
         self.assertEqual(self.p.created,1)
     def test_crash_after_create_recovered(self):
-        self.p.rows=[{'id':'pod1','name':'vinceai-qwen80b-phase10-intent'}]
+        self.p.rows=[{'id':'pod1','name':'sanctum-private-lead-phase10-intent'}]
         self.lc.save(self.lc.state(),pod_name=self.p.rows[0]['name'],allocation_uncertain=True,started_at=self.time,hourly_usd=2)
         self.lc.infer('a',{});self.assertEqual(self.p.created,0);self.assertTrue(self.p.booted)
     def test_stale_process_lease_and_idle_grace(self):
@@ -227,10 +282,10 @@ class Lifecycle(Temp):
         self.assertEqual(self.p.created,1)
     def test_manual_stop_persists_while_lock_busy(self):
         with self.lc.lock():self.lc.sweep(manual=True)
-        self.assertTrue((self.root/'manual-stop').exists())
+        self.assertTrue((self.lc.root/'manual-stop').exists())
         with self.assertRaises(Refused):self.lc.infer('a',{})
     def test_readiness_failure_never_queries_and_cleans(self):
-        self.b.fail=True;self.s['gpu']['readiness_seconds']=10
+        self.b.fail=True;self.s['private_lead']['readiness_seconds']=10
         with self.assertRaises(Refused):self.lc.infer('a',{})
         self.assertNotIn('infer',self.b.calls);self.assertEqual(self.p.deleted,['pod1'])
     def test_delete_unconfirmed_not_offline(self):
@@ -256,6 +311,40 @@ class Lifecycle(Temp):
         for t in threads:t.start()
         for t in threads:t.join(5)
         self.assertFalse(errors);self.assertEqual(self.p.created,1)
+    def test_lead_refuses_coexisting_80b_pod(self):
+        self.s['private_lead']['enabled']=True; self.s['private_lead']['auto_start']=True
+        self.p.rows=[{'id':'old','name':'vinceai-qwen80b-stage-existing'}]
+        lead=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        with self.assertRaisesRegex(Refused,'untracked_or_duplicate_pod'): lead.infer('lead',{})
+    def test_explicit_signed_lead_proposal_can_start_while_background_autostart_stays_off(self):
+        self.s['private_lead']['enabled']=True;self.s['private_lead']['auto_start']=False
+        lead=PrivateLeadLifecycle(self.s,self.p,self.b,lambda:self.time,self.advance)
+        self.assertEqual(lead.propose('lead',{})['status'],'OK');self.assertEqual(self.p.created,1);self.assertIn('propose',self.b.calls)
+
+class Janitor(Temp):
+    def test_private_lead_resume_preflight_uses_production_schema(self):
+        result=manage.work_intent_preflight();eligible=result['schemas']['ordinaryEligible'];ineligible=result['schemas']['ordinaryIneligible']
+        self.assertTrue(result['ok']);self.assertEqual(eligible['dialect'],'vllm-0.20.1-outlines');self.assertEqual(eligible['branches'],6);self.assertEqual(ineligible['branches'],5);self.assertNotEqual(eligible['schemaDigest'],ineligible['schemaDigest'])
+
+    def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):
+        calls=[]
+        class Fake:
+            def __init__(self,release):self.release=release
+            def sweep(self):
+                calls.append(self.release)
+                if self.release=='PRIVATE_80B':raise Refused('other_release_active')
+            def status(self):return {'phase':'READY'}
+        original=manage.lifecycle;manage.lifecycle=lambda _settings,release:Fake(release)
+        self.addCleanup(setattr,manage,'lifecycle',original)
+        result=manage.sweep_all(self.s)
+        self.assertEqual(calls,list(manage.RELEASES));self.assertEqual(result['PRIVATE_80B']['phase'],'UNAVAILABLE');self.assertEqual(result['PRIVATE_LEAD']['phase'],'READY')
+
+    def test_default_sweep_fails_if_neither_release_can_be_reconciled(self):
+        class Fake:
+            def sweep(self):raise Refused('provider_unavailable')
+        original=manage.lifecycle;manage.lifecycle=lambda _settings,_release:Fake()
+        self.addCleanup(setattr,manage,'lifecycle',original)
+        with self.assertRaisesRegex(Refused,'janitor_all_releases_failed'):manage.sweep_all(self.s)
 
 class Media(Temp):
     def test_image_strips_exif_and_no_source_path(self):
@@ -317,3 +406,27 @@ class Installer(Temp):
         self.assertTrue(self.launch.exists())
 
 if __name__=='__main__':unittest.main()
+
+class IsolatedTunnel(Temp):
+    def test_private_lead_guard_uses_release_specific_state_root(self):
+        from runpod import Runpod
+        self.assertEqual(Runpod(self.s).guard_root(),self.root)
+        self.assertEqual(Runpod(self.s,self.s['private_lead']).guard_root(),self.root/'private-lead')
+
+    def test_private_backend_and_ssh_use_the_same_loopback_port(self):
+        from runpod import Runpod
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        self.s['gpu']['local_port']=28001
+        self.assertEqual(Private80BBackend(self.s).url,'http://127.0.0.1:28001/v1')
+        provider=Runpod(self.s)
+        with patch.object(provider,'socket_path',return_value=str(self.root/'test.sock')), patch.object(provider,'ssh_args',return_value=['ssh']), patch('runpod.subprocess.run',side_effect=[SimpleNamespace(returncode=1),SimpleNamespace(returncode=0)]) as run:
+            provider.tunnel('synthetic-pod','192.0.2.1',22)
+        args=run.call_args.args[0]
+        self.assertEqual(args[args.index('-L')+1],'127.0.0.1:28001:127.0.0.1:8000')
+    def test_invalid_tunnel_port_never_reaches_a_transport(self):
+        from runpod import Runpod
+        for value in [True,0,80,65536,'28001']:
+            self.s['gpu']['local_port']=value
+            with self.assertRaises(Refused):Private80BBackend(self.s)
+            with self.assertRaises(Refused):Runpod(self.s)
