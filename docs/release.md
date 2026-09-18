@@ -1,6 +1,33 @@
-# Release checklist and later publication commands
+# Release checklist and publication commands
 
-The Sanctum V1 release uses the [documented qualification exceptions](qualification.md) and [rename/publication checks](publication.md). The owner authorized a public repository and v1.0.0 release. The commands below describe the initial-publication procedure; do not rerun initialization or recreate an existing tag/release. Production migration remains separate.
+## V1.1.0 release completion
+
+V1.1.0 is a completed minor-release candidate. Its source version is `1.1.0`; the immutable V1.0.0 tag and release are not recreated or moved. The release-completion PR must merge into `v1.1-dev` before an owner creates the `v1.1.0` tag and GitHub release. Production migration remains separate.
+
+Review [the V1.1 release record](V1.1-RELEASE-COMPLETION.md), [structured-editing evidence](PROJECT-3-STRUCTURED-EDITING.md), documented limitations, source audit and CI before tagging. Do not treat the completion PR itself as authorization to move `main`, delete private evidence, change a private runtime, or launch compute.
+
+After the PR is merged and the intended release commit is verified, use an approved public Git identity and run:
+
+```sh
+git checkout v1.1-dev
+git pull --ff-only origin v1.1-dev
+git status --short
+git show --no-patch --format=fuller HEAD
+make deps
+make build
+make test
+make audit
+git tag -a v1.1.0 -m "Sanctum v1.1.0"
+git push origin v1.1.0
+gh release create v1.1.0 --repo vnsparacio/sanctum --verify-tag \
+  --title "Sanctum v1.1.0" --notes-file CHANGELOG.md
+```
+
+Stop if the checkout is dirty, `v1.1-dev` differs from the reviewed PR merge commit, a tag already exists, or any validation fails. The tag/release are owner-controlled publication actions; they are intentionally not created by this source-change PR.
+
+## V1.0.0 historical initial publication
+
+The following retained procedure describes the already-completed initial V1.0.0 publication. Do not rerun initialization or recreate its tag/release.
 
 1. Review the documented qualification exceptions and final source audit. Disk recovery, janitor/GPU cleanup, interactive WebUI and bounded personal/tool checks now have fresh evidence.
 2. Confirm the source-only inventory and external license scope. Preserve the documented Vitest exception; do not call the dependency tree vulnerability-free.
