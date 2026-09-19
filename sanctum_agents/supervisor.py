@@ -32,11 +32,20 @@ def _usage_value(payload: Any) -> int | None:
         node = payload.get("params", {}).get("tokenUsage", {}).get("total", {})
         value = node.get("totalTokens") if isinstance(node, dict) else None
         return value if type(value) is int and value >= 0 else None
+    if payload.get("type") == "turn.completed":
+        usage = payload.get("usage", {})
+        if isinstance(usage, dict):
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            if type(input_tokens) is int and type(output_tokens) is int:
+                return max(0, input_tokens) + max(0, output_tokens)
     return None
 
 
 def _is_turn(payload: Any) -> bool:
-    return isinstance(payload, dict) and payload.get("method") == "turn/started"
+    return isinstance(payload, dict) and (
+        payload.get("method") == "turn/started" or payload.get("type") == "turn.started"
+    )
 
 
 class BoundedProcess:

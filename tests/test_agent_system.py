@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from sanctum_agents.authority import (
     Action,
@@ -18,6 +20,14 @@ from sanctum_agents.authority import (
 )
 from sanctum_agents.config import ConfigError, load_config, validate_model_catalog
 from sanctum_agents.integrations import LinearGraphQLClient, MissingAuth
+from sanctum_agents.management import (
+    Evidence,
+    MalformedModelOutput,
+    parse_findings,
+    suppress_duplicates,
+)
+from sanctum_agents.reasoner import CodexReasoner
+from sanctum_agents.repo_steward import collect_evidence, run_repo_steward
 from sanctum_agents.runtime import (
     Budget,
     BudgetExceeded,
@@ -198,6 +208,103 @@ class SupervisorTests(unittest.TestCase):
             Budget(2, 1, 1, 1, 1, 50),
         )
         self.assertEqual("turns_budget", turn_result.reason)
+
+    def test_turn_and_token_limits_use_codex_exec_events(self):
+        events = [
+            {"type": "turn.started"},
+            {"type": "turn.completed", "usage": {"input_tokens": 7, "output_tokens": 2}},
+        ]
+        code = "import json,time\nfor x in " + repr(events) + ":\n print(json.dumps(x),flush=True); time.sleep(.03)\ntime.sleep(2)"
+        result = self.run_child(code, Budget(2, 1, 1, 1, 3, 8))
+        self.assertEqual("tokens_budget", result.reason)
+
+
+class ManagementFindingTests(unittest.TestCase):
+    def setUp(self):
+        self.evidence = [Evidence("e-1", "reliability", "A concrete observed condition.", "WORKFLOW.md")]
+        self.valid = {
+            "findings": [{
+                "title": "Add a bounded execution watchdog",
+                "summary": "The supplied evidence shows that total execution time is not independently bounded.",
+                "severity": "high",
+                "recommendation": "Investigate",
+                "evidence_ids": ["e-1"],
+                "labels": ["reliability", "agent-quality"],
+            }]
+        }
+
+    def test_malformed_and_unsubstantiated_model_output_fails_closed(self):
+        with self.assertRaises(MalformedModelOutput):
+            parse_findings({"findings": [], "extra": True}, self.evidence, source="test", max_items=1)
+        unknown = json.loads(json.dumps(self.valid))
+        unknown["findings"][0]["evidence_ids"] = ["invented"]
+        with self.assertRaisesRegex(MalformedModelOutput, "unknown"):
+            parse_findings(unknown, self.evidence, source="test", max_items=1)
+        forbidden = json.loads(json.dumps(self.valid))
+        forbidden["findings"][0]["labels"] = ["symphony"]
+        with self.assertRaisesRegex(MalformedModelOutput, "labels"):
+            parse_findings(forbidden, self.evidence, source="test", max_items=1)
+
+    def test_duplicate_suppression_is_deterministic(self):
+        finding = parse_findings(self.valid, self.evidence, source="test", max_items=1)[0]
+        accepted, suppressed = suppress_duplicates([finding, finding], [])
+        self.assertEqual([finding], accepted)
+        self.assertEqual([finding.fingerprint()], suppressed)
+        accepted, suppressed = suppress_duplicates([finding], [finding.fingerprint()])
+        self.assertEqual([], accepted)
+        self.assertEqual([finding.fingerprint()], suppressed)
+
+    def test_reasoner_extracts_only_final_agent_message(self):
+        output = "\n".join([
+            json.dumps({"type": "item.completed", "item": {"type": "command_execution", "text": "ignored"}}),
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(self.valid)}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}),
+        ])
+        self.assertEqual(self.valid, CodexReasoner._final_message(output))
+
+
+class RepoStewardTests(unittest.TestCase):
+    def test_evidence_scan_is_scoped_and_bounded(self):
+        commit, evidence = collect_evidence(
+            ROOT,
+            ("WORKFLOW.md", "sanctum_agents", "tests"),
+            None,
+            deep=True,
+            max_files=2,
+            max_markers=1,
+        )
+        self.assertRegex(commit, r"^[0-9a-f]{40}$")
+        scan = next(item for item in evidence if item.id == "scan-range")
+        self.assertIn("Inspected 2 scoped tracked files", scan.summary)
+        self.assertLessEqual(len([item for item in evidence if item.kind == "debt_marker"]), 1)
+
+    def test_shadow_run_is_read_only_and_suppresses_repeat(self):
+        config = load_config(CONFIG)
+        before = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"SANCTUM_AGENT_PREFIX": str(Path(directory) / "agents")}
+        ):
+            first = run_repo_steward(config, ROOT, RunMode.SHADOW, use_model=False)
+            second = run_repo_steward(config, ROOT, RunMode.SHADOW, use_model=False)
+            self.assertEqual("shadow", first["mode"])
+            self.assertEqual(0, first["linear_writes"])
+            self.assertTrue(Path(first["artifact_path"]).is_file())
+            self.assertGreaterEqual(second["duplicates_suppressed"], 1)
+            self.assertEqual([], second["findings"])
+        after = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

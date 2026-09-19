@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "role": "repo_steward",
+  "mode": "shadow",
+  "model": "gpt-5.6-terra",
+  "reasoning": "medium",
+  "linear_writes": 0,
+  "runtime_seconds": 6.02,
+  "usage": {
+    "turns": 1,
+    "tokens": 14133
+  },
+  "evidence_count": 3,
+  "findings": [
+    {
+      "title": "Workflow continuation has no hard runtime limit",
+      "summary": "Retries and continuations can outlive intended execution limits because turn and activity timeouts do not impose a total-runtime cap.",
+      "severity": "medium",
+      "recommendation": "Investigate",
+      "evidence_ids": [
+        "workflow-hard-runtime"
+      ],
+      "labels": [
+        "reliability"
+      ],
+      "source": "Repo Steward"
+    }
+  ],
+  "acceptance": {
+    "bounded_process_completed": true,
+    "repository_unchanged": true,
+    "private_runtime_permissions": "0700 directories, 0600 files",
+    "duplicate_suppression_enabled": true
+  }
+}
