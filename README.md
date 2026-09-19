@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/sanctum-logo.png" alt="Sanctum logo" width="300">
+</p>
+
 # Sanctum
 
 **Local authority for hybrid personal AI.**
