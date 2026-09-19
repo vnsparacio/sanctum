@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import StrEnum
 import json
 import os
-from pathlib import Path
 import time
-from typing import Any, Callable
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
 
 class RunMode(StrEnum):
@@ -36,13 +37,15 @@ class Budget:
     max_tokens: int
     clock: Callable[[], float] = time.monotonic
     started_at: float = field(init=False)
-    counters: dict[str, int] = field(default_factory=lambda: {
-        "items": 0,
-        "sources": 0,
-        "retries": 0,
-        "turns": 0,
-        "tokens": 0,
-    })
+    counters: dict[str, int] = field(
+        default_factory=lambda: {
+            "items": 0,
+            "sources": 0,
+            "retries": 0,
+            "turns": 0,
+            "tokens": 0,
+        }
+    )
 
     def __post_init__(self) -> None:
         self.started_at = self.clock()
@@ -90,7 +93,9 @@ def ensure_private_prefix(path: Path) -> None:
 
 
 class ExclusiveRoleLock:
-    def __init__(self, path: Path, stale_seconds: int, clock: Callable[[], float] = time.time):
+    def __init__(
+        self, path: Path, stale_seconds: int, clock: Callable[[], float] = time.time
+    ):
         self.path = path
         self.stale_seconds = stale_seconds
         self.clock = clock
@@ -119,8 +124,16 @@ class ExclusiveRoleLock:
                     current = json.loads(self.path.read_text())
                     age = self.clock() - float(current["created_at"])
                     pid = int(current["pid"])
-                except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                    raise RuntimeError(f"invalid existing lock {self.path}: {exc}") from exc
+                except (
+                    OSError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    raise RuntimeError(
+                        f"invalid existing lock {self.path}: {exc}"
+                    ) from exc
                 if age <= self.stale_seconds or self._alive(pid):
                     raise RuntimeError(f"role already running: {self.path.name}")
                 try:
@@ -143,12 +156,12 @@ class ExclusiveRoleLock:
                 pass
             self.acquired = False
 
-    def __enter__(self) -> "ExclusiveRoleLock":
+    def __enter__(self) -> ExclusiveRoleLock:
         if not self.acquired:
             raise RuntimeError("acquire the role lock before entering")
         return self
 
-    def acquired_for(self, run_id: str) -> "ExclusiveRoleLock":
+    def acquired_for(self, run_id: str) -> ExclusiveRoleLock:
         self.acquire(run_id)
         return self
 

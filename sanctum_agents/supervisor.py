@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import selectors
 import signal
 import subprocess
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from .runtime import Budget, BudgetExceeded
 
@@ -49,7 +50,9 @@ def _is_turn(payload: Any) -> bool:
 
 
 class BoundedProcess:
-    def __init__(self, grace_seconds: float = 5, clock: Callable[[], float] = time.monotonic):
+    def __init__(
+        self, grace_seconds: float = 5, clock: Callable[[], float] = time.monotonic
+    ):
         self.grace_seconds = grace_seconds
         self.clock = clock
 
@@ -80,7 +83,9 @@ class BoundedProcess:
         stall_seconds: float | None = None,
         output_limit_bytes: int = 262144,
     ) -> ProcessResult:
-        if not command or any(not isinstance(item, str) or not item for item in command):
+        if not command or any(
+            not isinstance(item, str) or not item for item in command
+        ):
             raise ValueError("command must contain non-empty strings")
         if output_limit_bytes <= 0:
             raise ValueError("output_limit_bytes must be positive")
@@ -96,7 +101,9 @@ class BoundedProcess:
                 start_new_session=True,
             )
         except OSError as exc:
-            return ProcessResult(None, "spawn_failed", str(exc), 0, dict(budget.counters))
+            return ProcessResult(
+                None, "spawn_failed", str(exc), 0, dict(budget.counters)
+            )
         assert process.stdout is not None
         os.set_blocking(process.stdout.fileno(), False)
         selector = selectors.DefaultSelector()
@@ -115,7 +122,11 @@ class BoundedProcess:
                 except BudgetExceeded:
                     reason = "wall_clock_budget"
                     break
-                if stall_seconds is not None and stall_seconds > 0 and now - last_activity > stall_seconds:
+                if (
+                    stall_seconds is not None
+                    and stall_seconds > 0
+                    and now - last_activity > stall_seconds
+                ):
                     reason = "stall_budget"
                     break
                 events = selector.select(0.1)

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-from pathlib import Path
 import json
 import os
 import re
 import socketserver
 import subprocess
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HOME = os.path.expanduser("~")
-SOCKET = str(Path(os.environ.get("VINCEAI_CACHE_DIR", Path.home()/".cache/vinceai"))/"gmail-read.sock")
+SOCKET = str(
+    Path(os.environ.get("VINCEAI_CACHE_DIR", Path.home() / ".cache/vinceai"))
+    / "gmail-read.sock"
+)
 WRAPPER = str(Path(__file__).with_name("ai-gmail-read"))
 MAX_WRAPPER_BYTES = 96 * 1024
 MAX_SEARCH_LIMIT = 8
@@ -18,7 +21,7 @@ MAX_STRING = 8000
 
 WRAPPED_TEXT = re.compile(
     r'^<<<EXTERNAL_UNTRUSTED_CONTENT id="[^"]+">>>\n'
-    r'Source: [^\n]+\n---\n(.*)\n'
+    r"Source: [^\n]+\n---\n(.*)\n"
     r'<<<END_EXTERNAL_UNTRUSTED_CONTENT id="[^"]+">>>$',
     re.DOTALL,
 )
@@ -28,7 +31,9 @@ def trim(value, depth=0):
     if depth > 12:
         return "[truncated-depth]"
     if isinstance(value, str):
-        return value if len(value) <= MAX_STRING else value[:MAX_STRING] + "\n[truncated]"
+        return (
+            value if len(value) <= MAX_STRING else value[:MAX_STRING] + "\n[truncated]"
+        )
     if isinstance(value, list):
         return [trim(v, depth + 1) for v in value[:MAX_SEARCH_LIMIT]]
     if isinstance(value, dict):
@@ -59,15 +64,19 @@ def compact_search(parsed):
         if not isinstance(item, dict):
             continue
         msg_id = item.get("id")
-        if not isinstance(msg_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", msg_id):
+        if not isinstance(msg_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}", msg_id
+        ):
             continue
         date = item.get("internalDateIso") or item.get("date") or ""
-        compact.append({
-            "id": msg_id,
-            "date": str(date)[:80],
-            "from": unwrap_search_text(item.get("from", ""))[:1000],
-            "subject": unwrap_search_text(item.get("subject", ""))[:2000],
-        })
+        compact.append(
+            {
+                "id": msg_id,
+                "date": str(date)[:80],
+                "from": unwrap_search_text(item.get("from", ""))[:1000],
+                "subject": unwrap_search_text(item.get("subject", ""))[:2000],
+            }
+        )
     return compact
 
 
@@ -76,8 +85,7 @@ def run_wrapper(args, compact=False):
         proc = subprocess.run(
             [WRAPPER, *args],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=20,
             check=False,
         )
@@ -107,7 +115,9 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _send(self, code, payload):
-        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -135,7 +145,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(code, payload)
         if parsed.path == "/read":
             msg_id = qs.get("id", [""])[0]
-            if not msg_id or len(msg_id) > 128 or not all(c.isalnum() or c in "_-" for c in msg_id):
+            if (
+                not msg_id
+                or len(msg_id) > 128
+                or not all(c.isalnum() or c in "_-" for c in msg_id)
+            ):
                 return self._send(400, {"error": "invalid message id"})
             code, payload = run_wrapper(["read", msg_id], compact=False)
             return self._send(code, payload)
@@ -143,6 +157,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         return self._send(405, {"error": "method not allowed"})
+
     do_PUT = do_POST
     do_PATCH = do_POST
     do_DELETE = do_POST

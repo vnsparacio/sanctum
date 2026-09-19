@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +47,14 @@ class Finding:
 _SEVERITIES = {"low", "medium", "high"}
 _RECOMMENDATIONS = {"Investigate", "Watch", "Ignore"}
 _LABELS = {
-    "tech-debt", "architecture", "security", "reliability", "agent-quality",
-    "documentation", "research", "product-discovery",
+    "tech-debt",
+    "architecture",
+    "security",
+    "reliability",
+    "agent-quality",
+    "documentation",
+    "research",
+    "product-discovery",
 }
 
 
@@ -66,14 +72,26 @@ def parse_findings(
     known = {item.id for item in evidence}
     findings: list[Finding] = []
     for item in payload["findings"]:
-        required = {"title", "summary", "severity", "recommendation", "evidence_ids", "labels"}
+        required = {
+            "title",
+            "summary",
+            "severity",
+            "recommendation",
+            "evidence_ids",
+            "labels",
+        }
         if not isinstance(item, dict) or set(item) != required:
             raise MalformedModelOutput("finding fields are malformed")
         if not isinstance(item["title"], str) or not (8 <= len(item["title"]) <= 140):
             raise MalformedModelOutput("finding title is malformed")
-        if not isinstance(item["summary"], str) or not (20 <= len(item["summary"]) <= 2000):
+        if not isinstance(item["summary"], str) or not (
+            20 <= len(item["summary"]) <= 2000
+        ):
             raise MalformedModelOutput("finding summary is malformed")
-        if item["severity"] not in _SEVERITIES or item["recommendation"] not in _RECOMMENDATIONS:
+        if (
+            item["severity"] not in _SEVERITIES
+            or item["recommendation"] not in _RECOMMENDATIONS
+        ):
             raise MalformedModelOutput("finding classification is malformed")
         evidence_ids = item["evidence_ids"]
         labels = item["labels"]
@@ -83,7 +101,9 @@ def parse_findings(
             or len(evidence_ids) != len(set(evidence_ids))
             or any(value not in known for value in evidence_ids)
         ):
-            raise MalformedModelOutput("finding references unknown or duplicate evidence")
+            raise MalformedModelOutput(
+                "finding references unknown or duplicate evidence"
+            )
         if (
             not isinstance(labels, list)
             or not labels
@@ -92,15 +112,17 @@ def parse_findings(
             or "symphony" in labels
         ):
             raise MalformedModelOutput("finding labels are malformed")
-        findings.append(Finding(
-            title=item["title"].strip(),
-            summary=item["summary"].strip(),
-            severity=item["severity"],
-            recommendation=item["recommendation"],
-            evidence_ids=tuple(evidence_ids),
-            labels=tuple(labels),
-            source=source,
-        ))
+        findings.append(
+            Finding(
+                title=item["title"].strip(),
+                summary=item["summary"].strip(),
+                severity=item["severity"],
+                recommendation=item["recommendation"],
+                evidence_ids=tuple(evidence_ids),
+                labels=tuple(labels),
+                source=source,
+            )
+        )
     return findings
 
 
@@ -110,7 +132,11 @@ class RoleState:
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"schema_version": 1, "last_successful_commit": None, "fingerprints": []}
+            return {
+                "schema_version": 1,
+                "last_successful_commit": None,
+                "fingerprints": [],
+            }
         try:
             value = json.loads(self.path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
@@ -126,16 +152,24 @@ class RoleState:
     def save(self, *, commit: str | None, fingerprints: list[str]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({
-            "schema_version": 1,
-            "last_successful_commit": commit,
-            "fingerprints": sorted(set(fingerprints))[-5000:],
-        }, sort_keys=True) + "\n")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "last_successful_commit": commit,
+                    "fingerprints": sorted(set(fingerprints))[-5000:],
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
         temporary.chmod(0o600)
         temporary.replace(self.path)
 
 
-def suppress_duplicates(findings: list[Finding], prior: list[str]) -> tuple[list[Finding], list[str]]:
+def suppress_duplicates(
+    findings: list[Finding], prior: list[str]
+) -> tuple[list[Finding], list[str]]:
     known = set(prior)
     accepted: list[Finding] = []
     suppressed: list[str] = []
@@ -165,6 +199,8 @@ def shadow_document(
         "mode": mode,
         "repository_commit": commit,
         "linear_writes": 0,
-        "findings": [{**asdict(item), "fingerprint": item.fingerprint()} for item in findings],
+        "findings": [
+            {**asdict(item), "fingerprint": item.fingerprint()} for item in findings
+        ],
         "evidence": [asdict(item) for item in evidence],
     }

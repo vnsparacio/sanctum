@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from .config import ConfigError, load_config, validate_model_catalog
 from .integrations import CodexCatalogClient, ExternalCallError, LinearGraphQLClient
@@ -13,11 +13,15 @@ from .linear_integration import LinearWriter, load_qualified_metadata
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
-from .scheduler import load_schedule_plan
 from .runtime import RunMode
-from .symphony_supervisor import preflight as symphony_preflight, supervise as supervise_symphony
+from .scheduler import load_schedule_plan
+from .symphony_supervisor import (
+    preflight as symphony_preflight,
+)
+from .symphony_supervisor import (
+    supervise as supervise_symphony,
+)
 from .triage import run_triage
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "agents.json"
@@ -35,13 +39,19 @@ def parser() -> argparse.ArgumentParser:
     linear_check = subcommands.add_parser("linear-metadata-check")
     linear_check.add_argument("--path", type=Path)
     run = subcommands.add_parser("run")
-    run.add_argument("role", choices=["repo-steward", "product-scout", "triage", "reviewer"])
-    run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
+    run.add_argument(
+        "role", choices=["repo-steward", "product-scout", "triage", "reviewer"]
+    )
+    run.add_argument(
+        "--mode", choices=[item.value for item in RunMode], default="shadow"
+    )
     run.add_argument("--deep", action="store_true")
     run.add_argument("--snapshot", type=Path)
     run.add_argument("--packet", type=Path)
     run.add_argument("--escalate", action="store_true")
-    run.add_argument("--deterministic", action="store_true", help="skip model invocation for tests")
+    run.add_argument(
+        "--deterministic", action="store_true", help="skip model invocation for tests"
+    )
     return result
 
 
@@ -55,13 +65,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "models-check":
             catalog = CodexCatalogClient().list_models()
             validate_model_catalog(config, catalog)
-            print(json.dumps({
-                "ok": True,
-                "models": {
-                    role: {"model": selected.model, "reasoning": selected.reasoning}
-                    for role, selected in sorted(config.models.items())
-                },
-            }, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "models": {
+                            role: {
+                                "model": selected.model,
+                                "reasoning": selected.reasoning,
+                            }
+                            for role, selected in sorted(config.models.items())
+                        },
+                    },
+                    sort_keys=True,
+                )
+            )
             return 0
         if args.command == "symphony-preflight":
             print(json.dumps(symphony_preflight(config, ROOT), sort_keys=True))
@@ -69,19 +87,33 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "symphony-run":
             return supervise_symphony(config, ROOT)
         if args.command == "schedule-plan":
-            print(json.dumps(load_schedule_plan(ROOT / "config" / "schedules.json"), sort_keys=True))
+            print(
+                json.dumps(
+                    load_schedule_plan(ROOT / "config" / "schedules.json"),
+                    sort_keys=True,
+                )
+            )
             return 0
         if args.command == "linear-metadata-check":
-            path = args.path or (config.runtime_prefix() / "state" / "linear-metadata.json")
-            metadata = load_qualified_metadata(path, config.project["linear_project_slug"])
-            print(json.dumps({
-                "ok": True,
-                "path": str(path),
-                "project_slug": metadata.project_slug,
-                "state_count": len(metadata.states),
-                "label_count": len(metadata.labels),
-                "template_count": len(metadata.templates),
-            }, sort_keys=True))
+            path = args.path or (
+                config.runtime_prefix() / "state" / "linear-metadata.json"
+            )
+            metadata = load_qualified_metadata(
+                path, config.project["linear_project_slug"]
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "path": str(path),
+                        "project_slug": metadata.project_slug,
+                        "state_count": len(metadata.states),
+                        "label_count": len(metadata.labels),
+                        "template_count": len(metadata.templates),
+                    },
+                    sort_keys=True,
+                )
+            )
             return 0
         mode = RunMode(args.mode)
         linear_writer = None
@@ -107,27 +139,44 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.role == "triage":
             if args.snapshot is None:
-                raise ValueError("Triage requires --snapshot until live Linear qualification")
+                raise ValueError(
+                    "Triage requires --snapshot until live Linear qualification"
+                )
             if args.deterministic:
-                raise ValueError("Triage deterministic runs require an explicit test fixture")
+                raise ValueError(
+                    "Triage deterministic runs require an explicit test fixture"
+                )
             result = run_triage(
-                config, ROOT, args.snapshot.resolve(), mode, escalate=args.escalate,
+                config,
+                ROOT,
+                args.snapshot.resolve(),
+                mode,
+                escalate=args.escalate,
                 linear_writer=linear_writer,
             )
         elif args.role == "reviewer":
             if args.packet is None:
-                raise ValueError("Reviewer requires --packet until live GitHub/Linear qualification")
+                raise ValueError(
+                    "Reviewer requires --packet until live GitHub/Linear qualification"
+                )
             if args.deterministic:
-                raise ValueError("Reviewer deterministic runs require an explicit test fixture")
+                raise ValueError(
+                    "Reviewer deterministic runs require an explicit test fixture"
+                )
             result = run_reviewer(config, ROOT, args.packet.resolve(), mode)
         elif args.deterministic:
-            raise ValueError("Product Scout deterministic runs require an explicit test fixture")
+            raise ValueError(
+                "Product Scout deterministic runs require an explicit test fixture"
+            )
         else:
             result = run_product_scout(config, ROOT, mode, linear_writer=linear_writer)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConfigError, ExternalCallError, RuntimeError, ValueError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps({"ok": False, "error": str(exc)}, sort_keys=True),
+            file=sys.stderr,
+        )
         return 2
 
 

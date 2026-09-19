@@ -19,10 +19,11 @@ import json
 import sys
 from pathlib import Path
 
-from request_classifier import load_rules, classify_request
-from router import load_policy
-from provenance import load_registry, build_envelope, route_envelope
+from provenance import build_envelope, load_registry, route_envelope
+from request_classifier import classify_request, load_rules
 from session_state import SessionStore
+
+from router import load_policy
 
 
 def state_to_classifier_context(state: str) -> str:
@@ -174,10 +175,14 @@ def main() -> int:
     print(f"Preferred route:  {decision['preferred_route']}")
     print(f"Action:           {decision['action']}")
     print(f"Reasoning tier:   {decision['reasoning_tier']}")
-    print(f"Hosted egress:    {'ALLOWED' if decision['hosted_egress_allowed'] else 'BLOCKED'}")
+    print(
+        f"Hosted egress:    {'ALLOWED' if decision['hosted_egress_allowed'] else 'BLOCKED'}"
+    )
     print(f"Authority:        {decision['authority']}")
     print(f"Session after:    {after['privacy']}")
-    print(f"State updated:    {'YES' if result['state_updated'] else 'NO — UNKNOWN session must be started'}")
+    print(
+        f"State updated:    {'YES' if result['state_updated'] else 'NO — UNKNOWN session must be started'}"
+    )
     return 0
 
 

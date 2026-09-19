@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any
 
 
 class AuthorityError(PermissionError):
@@ -32,8 +33,16 @@ class Action(StrEnum):
 
 
 _ALLOWED = {
-    Role.REPO_STEWARD: {Action.READ_REPOSITORY, Action.READ_LINEAR, Action.PROPOSE_LINEAR},
-    Role.PRODUCT_SCOUT: {Action.READ_REPOSITORY, Action.READ_LINEAR, Action.PROPOSE_LINEAR},
+    Role.REPO_STEWARD: {
+        Action.READ_REPOSITORY,
+        Action.READ_LINEAR,
+        Action.PROPOSE_LINEAR,
+    },
+    Role.PRODUCT_SCOUT: {
+        Action.READ_REPOSITORY,
+        Action.READ_LINEAR,
+        Action.PROPOSE_LINEAR,
+    },
     Role.TRIAGE: {Action.READ_LINEAR, Action.TRIAGE_LINEAR},
     Role.IMPLEMENTATION: {
         Action.READ_REPOSITORY,
@@ -66,7 +75,9 @@ def validate_issue_mutation(role: Role | str, mutation: dict[str, Any]) -> None:
     labels = mutation.get("add_labels", [])
     if state is not None and not isinstance(state, str):
         raise AuthorityError("issue mutation state must be a string")
-    if not isinstance(labels, list) or any(not isinstance(label, str) for label in labels):
+    if not isinstance(labels, list) or any(
+        not isinstance(label, str) for label in labels
+    ):
         raise AuthorityError("issue mutation add_labels must be strings")
     normalized_labels = {label.strip().lower() for label in labels}
     if selected_role in {Role.REPO_STEWARD, Role.PRODUCT_SCOUT, Role.TRIAGE}:
@@ -82,8 +93,14 @@ def validate_issue_mutation(role: Role | str, mutation: dict[str, Any]) -> None:
         if state.strip().lower() not in permitted:
             raise AuthorityError("triage may move work only within management queues")
     if selected_role is Role.IMPLEMENTATION:
-        if state and state.strip().lower() not in {"in progress", "human review", "rework"}:
-            raise AuthorityError("implementation may move work only within its handoff lifecycle")
+        if state and state.strip().lower() not in {
+            "in progress",
+            "human review",
+            "rework",
+        }:
+            raise AuthorityError(
+                "implementation may move work only within its handoff lifecycle"
+            )
     if selected_role is Role.REVIEWER and (state is not None or labels):
         raise AuthorityError("reviewer mutations are disabled by default")
     if state and state.strip().lower() == "done":
@@ -92,5 +109,9 @@ def validate_issue_mutation(role: Role | str, mutation: dict[str, Any]) -> None:
 
 def assert_repository_unchanged(before: str, after: str, role: Role | str) -> None:
     selected_role = Role(role)
-    if selected_role in {Role.REPO_STEWARD, Role.PRODUCT_SCOUT, Role.TRIAGE, Role.REVIEWER} and before != after:
+    if (
+        selected_role
+        in {Role.REPO_STEWARD, Role.PRODUCT_SCOUT, Role.TRIAGE, Role.REVIEWER}
+        and before != after
+    ):
         raise AuthorityError(f"{selected_role.value} changed repository state")

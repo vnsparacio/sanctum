@@ -13,7 +13,9 @@ from .supervisor import BoundedProcess, ProcessResult
 
 
 class CodexReasoner:
-    def __init__(self, command: str = "codex", supervisor: BoundedProcess | None = None):
+    def __init__(
+        self, command: str = "codex", supervisor: BoundedProcess | None = None
+    ):
         self.command = command
         self.supervisor = supervisor or BoundedProcess()
 
@@ -28,7 +30,11 @@ class CodexReasoner:
             if payload.get("type") != "item.completed":
                 continue
             item = payload.get("item")
-            if isinstance(item, dict) and item.get("type") == "agent_message" and isinstance(item.get("text"), str):
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "agent_message"
+                and isinstance(item.get("text"), str)
+            ):
                 messages.append(item["text"])
         if not messages:
             raise ExternalCallError("Codex returned no final agent message")
@@ -54,25 +60,27 @@ class CodexReasoner:
         command = [self.command]
         if enable_search:
             command.append("--search")
-        command.extend([
-            "exec",
-            "--json",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--strict-config",
-            "-m",
-            model.model,
-            "-c",
-            f'model_reasoning_effort="{model.reasoning}"',
-            "-s",
-            "read-only",
-            "-C",
-            str(cwd),
-            "--output-schema",
-            str(schema),
-            prompt,
-        ])
+        command.extend(
+            [
+                "exec",
+                "--json",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--strict-config",
+                "-m",
+                model.model,
+                "-c",
+                f'model_reasoning_effort="{model.reasoning}"',
+                "-s",
+                "read-only",
+                "-C",
+                str(cwd),
+                "--output-schema",
+                str(schema),
+                prompt,
+            ]
+        )
         result = self.supervisor.run(
             command,
             cwd,

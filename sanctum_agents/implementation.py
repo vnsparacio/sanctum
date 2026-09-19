@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from .authority import implementation_eligible
 
@@ -27,10 +27,17 @@ def validation_profile(changed_files: list[str]) -> str:
         raise LifecycleError("validation profile requires changed files")
     normalized = [Path(item) for item in changed_files]
     architecture_markers = {
-        "AGENTS.md", "WORKFLOW.md", "SECURITY.md", "config/agents.json",
-        "sanctum_agents/authority.py", "sanctum_agents/symphony_supervisor.py",
+        "AGENTS.md",
+        "WORKFLOW.md",
+        "SECURITY.md",
+        "config/agents.json",
+        "sanctum_agents/authority.py",
+        "sanctum_agents/symphony_supervisor.py",
     }
-    if any(str(item) in architecture_markers or "security" in str(item).lower() for item in normalized):
+    if any(
+        str(item) in architecture_markers or "security" in str(item).lower()
+        for item in normalized
+    ):
         return "architecture-security"
     docs_config = {".md", ".json", ".yaml", ".yml", ".toml"}
     if all(item.suffix.lower() in docs_config for item in normalized):
@@ -55,7 +62,9 @@ def validate_handoff(value: PullRequestHandoff, identifier: str) -> None:
     if value.base_branch != "v1.2-dev":
         raise LifecycleError("pull request must target v1.2-dev")
     if value.head_branch != issue_branch(identifier):
-        raise LifecycleError("pull request branch is not deterministic and issue-scoped")
+        raise LifecycleError(
+            "pull request branch is not deterministic and issue-scoped"
+        )
     if value.merged:
         raise LifecycleError("implementation worker may not merge")
     if value.issue_state != "Human Review":
