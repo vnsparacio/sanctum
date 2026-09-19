@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "issue": {
+    "id": "issue-review-1",
+    "identifier": "SAN-200",
+    "title": "Document the bounded worker stop code",
+    "state": "Human Review",
+    "acceptance_criteria": [
+      {
+        "id": "AC-1",
+        "text": "The operator documentation states that budget stops exit with code 75."
+      },
+      {
+        "id": "AC-2",
+        "text": "No implementation or runtime behavior is changed."
+      }
+    ],
+    "workpad": "Changed only docs/operations.md and verified git diff --check plus make audit."
+  },
+  "pull_request": {
+    "number": 999,
+    "url": "https://github.com/vnsparacio/sanctum/pull/999",
+    "base_branch": "v1.2-dev",
+    "head_branch": "symphony/san-200",
+    "merged": false,
+    "changed_files": ["docs/operations.md"],
+    "diff": "diff --git a/docs/operations.md b/docs/operations.md\n+Budget stops exit with code 75 and leave Linear state unchanged.\n",
+    "ci": [
+      {"name": "Offline contracts", "status": "completed", "conclusion": "success"}
+    ],
+    "validation_evidence": ["git diff --check: pass", "make audit: pass"]
+  },
+  "relevant_context": [
+    {
+      "path": "docs/agents/implementation-worker.md",
+      "content": "A violation exits with code 75 and leaves Linear state untouched."
+    }
+  ]
+}

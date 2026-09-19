@@ -13,7 +13,7 @@ PATTERNS={'private_key':r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----','pr
 # No directory-wide exemption: additional home bindings in either file fail.
 APPROVED_LOCATION_DECLARATIONS = {
  'AGENTS.md': (
-  '- `/Users/tter/Projects/sanctum` is the canonical V1.1 source. Its remote is `https://github.com/vnsparacio/sanctum.git`; preserve the V1 tag and stable `main` history.',
+  '- `/Users/tter/Projects/sanctum` is the canonical Sanctum source. Its remote is `https://github.com/vnsparacio/sanctum.git`; preserve the V1 tag and stable `main` history.',
   '- `/Users/tter/.sanctum/vinceai-v1.1` is the external private owner runtime. `/Users/tter/Projects/hybrid-ai` is legacy reference and rollback evidence. Never modify or repin the legacy tree during V1.1 engineering.',
  ),
  'docs/V1.1-LIVE-BASELINE.md': (
