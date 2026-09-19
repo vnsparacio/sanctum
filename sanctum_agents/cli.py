@@ -9,7 +9,11 @@ from pathlib import Path
 
 from .config import ConfigError, load_config, validate_model_catalog
 from .integrations import CodexCatalogClient, ExternalCallError, LinearGraphQLClient
-from .linear_integration import LinearWriter, load_qualified_metadata
+from .linear_integration import (
+    LinearWriter,
+    capture_qualified_metadata,
+    load_qualified_metadata,
+)
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
@@ -36,6 +40,7 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("symphony-preflight")
     subcommands.add_parser("symphony-run")
     subcommands.add_parser("schedule-plan")
+    subcommands.add_parser("linear-metadata-capture")
     linear_check = subcommands.add_parser("linear-metadata-check")
     linear_check.add_argument("--path", type=Path)
     run = subcommands.add_parser("run")
@@ -100,6 +105,25 @@ def main(argv: list[str] | None = None) -> int:
             )
             metadata = load_qualified_metadata(
                 path, config.project["linear_project_slug"]
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "path": str(path),
+                        "project_slug": metadata.project_slug,
+                        "state_count": len(metadata.states),
+                        "label_count": len(metadata.labels),
+                        "template_count": len(metadata.templates),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.command == "linear-metadata-capture":
+            path = config.runtime_prefix() / "state" / "linear-metadata.json"
+            metadata = capture_qualified_metadata(
+                LinearGraphQLClient(), config.project["linear_project_slug"], path
             )
             print(
                 json.dumps(

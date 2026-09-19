@@ -36,6 +36,7 @@ from sanctum_agents.integrations import (
 from sanctum_agents.linear_integration import (
     LinearMetadataError,
     LinearWriter,
+    capture_qualified_metadata,
     engineering_finding_proposal,
     load_qualified_metadata,
     product_discovery_proposal,
@@ -996,6 +997,115 @@ class ReviewerTests(unittest.TestCase):
 
 
 class LinearPayloadTests(unittest.TestCase):
+    @staticmethod
+    def metadata_client(
+        *, missing_state: str | None = None, paginate_states: bool = False
+    ):
+        fixture = json.loads(LINEAR_METADATA_FIXTURE.read_text())
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def query(self, query, variables=None):
+                self.calls.append((query, variables or {}))
+                if "SanctumProjectMetadata" in query:
+                    return {
+                        "project": {
+                            "id": "project-live",
+                            "name": "Sanctum V1.2",
+                            "slugId": "6fe3a63e0c69",
+                            "url": "https://linear.app/team/project/sanctum-v12-6fe3a63e0c69",
+                            "teams": {
+                                "nodes": [{"id": "team-live", "name": "Team"}],
+                                "pageInfo": {"hasNextPage": False},
+                            },
+                        }
+                    }
+                if "SanctumTeamMetadata" in query:
+                    states = [
+                        {"id": identifier, "name": name}
+                        for name, identifier in fixture["states"].items()
+                        if name != missing_state
+                    ]
+                    labels = []
+                    for name, identifier in fixture["labels"].items():
+                        parent = (
+                            {"id": "source-group", "name": "source"}
+                            if name in {"Repo Steward", "Product Scout"}
+                            else None
+                        )
+                        labels.append(
+                            {"id": identifier, "name": name, "parent": parent}
+                        )
+                    templates = [
+                        {"id": identifier, "name": name, "type": "issue"}
+                        for name, identifier in fixture["templates"].items()
+                    ]
+                    return {
+                        "team": {
+                            "id": "team-live",
+                            "name": "Team",
+                            "states": {
+                                "nodes": states,
+                                "pageInfo": {"hasNextPage": paginate_states},
+                            },
+                            "labels": {
+                                "nodes": labels,
+                                "pageInfo": {"hasNextPage": False},
+                            },
+                            "templates": {
+                                "nodes": templates,
+                                "pageInfo": {"hasNextPage": False},
+                            },
+                        }
+                    }
+                raise AssertionError("unexpected query")
+
+        return FakeClient()
+
+    def test_metadata_capture_is_read_only_exact_and_private(self):
+        client = self.metadata_client()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state" / "linear-metadata.json"
+            metadata = capture_qualified_metadata(
+                client, "sanctum-v12-6fe3a63e0c69", path
+            )
+            snapshot = json.loads(path.read_text())
+            fixture = json.loads(LINEAR_METADATA_FIXTURE.read_text())
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(path.parent.stat().st_mode))
+            self.assertEqual("project-live", snapshot["project"]["id"])
+            self.assertEqual("team-live", snapshot["project"]["team_id"])
+            self.assertEqual(fixture["states"], snapshot["states"])
+            self.assertEqual(fixture["labels"], snapshot["labels"])
+            self.assertEqual(fixture["templates"], snapshot["templates"])
+            self.assertEqual("project-live", metadata.project_id)
+        self.assertEqual(2, len(client.calls))
+        self.assertTrue(
+            all("mutation" not in query.lower() for query, _ in client.calls)
+        )
+
+    def test_metadata_capture_stops_before_write_on_contract_mismatch(self):
+        client = self.metadata_client(missing_state="Human Review")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state" / "linear-metadata.json"
+            with self.assertRaisesRegex(
+                LinearMetadataError, "missing required names: Human Review"
+            ):
+                capture_qualified_metadata(client, "sanctum-v12-6fe3a63e0c69", path)
+            self.assertFalse(path.exists())
+
+    def test_metadata_capture_stops_before_write_on_pagination(self):
+        client = self.metadata_client(paginate_states=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state" / "linear-metadata.json"
+            with self.assertRaisesRegex(
+                LinearMetadataError, "states metadata requires pagination"
+            ):
+                capture_qualified_metadata(client, "sanctum-v12-6fe3a63e0c69", path)
+            self.assertFalse(path.exists())
+
     def test_engineering_finding_targets_triage_without_execution_authority(self):
         metadata = load_qualified_metadata(
             LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
