@@ -57,8 +57,18 @@ def collect_evidence(
         names = _git(repository, "ls-files").splitlines()
     else:
         if baseline is None:
-            baseline = _git(repository, "rev-parse", "HEAD^")
-        names = _git(repository, "diff", "--name-only", "--diff-filter=ACMRT", f"{baseline}..{commit}").splitlines()
+            parent = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD^"],
+                cwd=repository,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            baseline = parent.stdout.strip() if parent.returncode == 0 else None
+        if baseline is None:
+            names = _git(repository, "ls-files").splitlines()
+        else:
+            names = _git(repository, "diff", "--name-only", "--diff-filter=ACMRT", f"{baseline}..{commit}").splitlines()
     names = sorted(path for path in names if path and _scoped(path, scopes))[:max_files]
     evidence: list[Evidence] = [Evidence(
         id="scan-range",

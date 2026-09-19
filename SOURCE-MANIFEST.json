@@ -321,7 +321,7 @@
   "sanctum_agents/management.py": "c9adfa1c4284a7242537c5e99f9633a765dc0d9abae8417bfd96a1295d59c216",
   "sanctum_agents/product_scout.py": "1fd3591164e739944ec4e95babc454efab29215d491a9a1987561e9569e15260",
   "sanctum_agents/reasoner.py": "9c96c4913e5eca2cf3e46eafba0140cf26a85258638a9bb810418986f10c84e6",
-  "sanctum_agents/repo_steward.py": "6889612b218eb50e390778a5f1a75ab773fbff0d4601c65f8e1e4c68239e93a6",
+  "sanctum_agents/repo_steward.py": "65501e35c7e0f9a7c787a1fc8becf3c430128739047aca824ee888e632ec47ce",
   "sanctum_agents/reviewer.py": "7caefb5de5f9c3ad04b1db8cc400709f40a9c693891dc5b5231b3070a972aac5",
   "sanctum_agents/runtime.py": "7c4faade85e76f1c2f6a46517a952cfb9a5a2e73ae59ca95fb71cd978ab29c4d",
   "sanctum_agents/scheduler.py": "ada076a6af61f08023443f6df28995ccc578167e38ae288806dd56a59109df6d",
@@ -345,7 +345,7 @@
   "tests/fixtures/linear-metadata.json": "b1d8ee98b66d9801d2757c6be12734819aa484b5f1c741378e381cd588ded19b",
   "tests/fixtures/linear-triage-snapshot.json": "233e21e7879c98fd0c95dd28aca522246aee333d259ab57096f481292824ac22",
   "tests/fixtures/reviewer-packet.json": "8980e3686f943556545c108e3a6b29b7b0d26956d87f9e377acfd039c355d7ea",
-  "tests/test_agent_system.py": "45155cc33aa7e196bc20dcd28725d00f0f25393aa117da4c7cbe10735d8fb124",
+  "tests/test_agent_system.py": "47aa9a5cd6d47dbcc3f0345a3d31aacc1acefcdfd8a5a33c59601041a884e7a7",
   "tests/test_release.py": "2f51030805147a19ec8279c3ffeed7f57df9a6e9836f5ead8a3cd21407da0dbe",
   "docs/V1.1-RELEASE-COMPLETION.md": "9d4f3bb4dbb5525c35c948c61d963aeb964b433e5a02ab16663ee2213f8e3a08",
   "assets/sanctum-logo.png": "62f5c3ef337196201f79c67d39deb46d6a4f7ee7a9d5150a88ebe9d5cc892abc"

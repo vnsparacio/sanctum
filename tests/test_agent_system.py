@@ -317,6 +317,23 @@ class RepoStewardTests(unittest.TestCase):
         self.assertIn("Inspected 2 scoped tracked files", scan.summary)
         self.assertLessEqual(len([item for item in evidence if item.kind == "debt_marker"]), 1)
 
+    def test_first_or_shallow_commit_falls_back_to_bounded_tracked_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Sanctum Test"], cwd=repository, check=True)
+            source = repository / "tests"
+            source.mkdir()
+            (source / "test_one.py").write_text("# TODO bounded fixture\n")
+            subprocess.run(["git", "add", "tests/test_one.py"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repository, check=True)
+            _, evidence = collect_evidence(
+                repository, ("tests",), None, max_files=1, max_markers=1
+            )
+        scan = next(item for item in evidence if item.id == "scan-range")
+        self.assertIn("Inspected 1 scoped tracked files from full tree", scan.summary)
+
     def test_shadow_run_is_read_only_and_suppresses_repeat(self):
         config = load_config(CONFIG)
         before = subprocess.run(
