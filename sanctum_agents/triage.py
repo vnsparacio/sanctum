@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .authority import Role, assert_repository_unchanged, validate_issue_mutation
 from .config import AgentConfig
 from .integrations import repository_status
+from .linear_integration import QualifiedLinearMetadata
 from .management import MalformedModelOutput
 from .reasoner import CodexReasoner
 from .runtime import (
@@ -23,6 +26,27 @@ from .runtime import (
 
 _READ_STATES = {"Triage", "Backlog", "Watch"}
 _ACTIONS = {"Leave", "Backlog", "Watch", "Cancel", "Duplicate"}
+_SOURCE_LABELS = {"Repo Steward", "Product Scout"}
+_HTTPS_URL = re.compile(r"https://[^\s<>()\]]+")
+
+LINEAR_TRIAGE_SNAPSHOT_QUERY = """
+query SanctumTriageSnapshot($projectId: String!) {
+  project(id: $projectId) {
+    issues(first: 100) {
+      pageInfo { hasNextPage }
+      nodes {
+        id
+        identifier
+        title
+        description
+        url
+        state { name }
+        labels { nodes { name } }
+      }
+    }
+  }
+}
+""".strip()
 
 
 @dataclass(frozen=True)
@@ -45,6 +69,89 @@ class TriageDecision:
     duplicate_of: str | None
     related_ids: tuple[str, ...]
     mutation: dict[str, Any] | None
+
+
+def capture_live_snapshot(
+    client: Any,
+    metadata: QualifiedLinearMetadata,
+    path: Path,
+    *,
+    max_items: int,
+) -> dict[str, Any]:
+    """Capture a bounded management-only Linear snapshot for triage."""
+    data = client.query(
+        LINEAR_TRIAGE_SNAPSHOT_QUERY, {"projectId": metadata.project_id}
+    )
+    project = data.get("project")
+    issues = project.get("issues") if isinstance(project, dict) else None
+    nodes = issues.get("nodes") if isinstance(issues, dict) else None
+    page_info = issues.get("pageInfo") if isinstance(issues, dict) else None
+    if (
+        not isinstance(nodes, list)
+        or not isinstance(page_info, dict)
+        or not isinstance(page_info.get("hasNextPage"), bool)
+    ):
+        raise MalformedModelOutput("live triage snapshot response is malformed")
+    if page_info["hasNextPage"]:
+        raise MalformedModelOutput("live triage snapshot requires pagination")
+
+    captured: list[dict[str, Any]] = []
+    for raw in nodes:
+        if not isinstance(raw, dict):
+            raise MalformedModelOutput("live triage issue is malformed")
+        state = raw.get("state")
+        state_name = state.get("name") if isinstance(state, dict) else None
+        if state_name not in _READ_STATES:
+            continue
+        labels_value = raw.get("labels")
+        label_nodes = (
+            labels_value.get("nodes") if isinstance(labels_value, dict) else None
+        )
+        if not isinstance(label_nodes, list):
+            raise MalformedModelOutput("live triage labels are malformed")
+        label_names = [
+            item.get("name")
+            for item in label_nodes
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        ]
+        sources = [item for item in label_names if item in _SOURCE_LABELS]
+        if not sources:
+            continue
+        if len(sources) != 1:
+            raise MalformedModelOutput("live triage issue has ambiguous source labels")
+        required_text = ("id", "identifier", "title", "description", "url")
+        if any(not isinstance(raw.get(key), str) for key in required_text):
+            raise MalformedModelOutput("live triage issue fields are malformed")
+        urls = list(
+            dict.fromkeys([raw["url"], *_HTTPS_URL.findall(raw["description"])])
+        )
+        captured.append(
+            {
+                "id": raw["id"],
+                "identifier": raw["identifier"],
+                "title": raw["title"],
+                "description": raw["description"],
+                "state": state_name,
+                "labels": label_names,
+                "source": sources[0],
+                "evidence_urls": urls,
+            }
+        )
+    if len(captured) > max_items:
+        raise MalformedModelOutput("live triage snapshot exceeded the item limit")
+    captured.sort(key=lambda item: (item["state"] != "Triage", item["identifier"]))
+    payload = {
+        "schema_version": 1,
+        "captured_at": datetime.now(UTC).isoformat(),
+        "issues": captured,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.chmod(0o600)
+    temporary.replace(path)
+    path.chmod(0o600)
+    return payload
 
 
 def load_snapshot(path: Path, *, max_items: int) -> list[TriageIssue]:
@@ -188,7 +295,9 @@ def prompt_for(issues: list[TriageIssue]) -> str:
         "Classify only issues currently in Triage. You may Leave, move to Backlog or Watch, Cancel "
         "deterministic noise, or mark a concrete Duplicate of another supplied issue. When uncertain, "
         "Leave it. Never move work to Ready for Agent, add symphony, authorize implementation, invent "
-        "evidence, or change product requirements. Related IDs must come from the packet. Return a concise "
+        "evidence, or change product requirements. The issue_id, duplicate_of, and related_ids fields must "
+        "use exact opaque values from each packet item's id field, never its human-readable identifier. "
+        "Related IDs must come from the packet. Return a concise "
         "owner briefing. Snapshot:\n" + json.dumps(packet, sort_keys=True)
     )
 

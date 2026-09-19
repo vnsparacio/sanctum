@@ -69,7 +69,12 @@ from sanctum_agents.runtime import (
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
 from sanctum_agents.symphony_supervisor import evaluate_snapshot, supervise
-from sanctum_agents.triage import load_snapshot, parse_decisions, run_triage
+from sanctum_agents.triage import (
+    capture_live_snapshot,
+    load_snapshot,
+    parse_decisions,
+    run_triage,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "agents.json"
@@ -586,6 +591,105 @@ class TriageTests(unittest.TestCase):
         self.assertNotIn("symphony", json.dumps([item.mutation for item in decisions]))
         self.assertIn("owner review", briefing)
 
+    def test_live_snapshot_is_bounded_private_and_source_labeled(self):
+        class FakeClient:
+            def query(self, query, variables):
+                self.query_text = query
+                self.variables = variables
+                return {
+                    "project": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [
+                                {
+                                    "id": "issue-live",
+                                    "identifier": "SAN-7",
+                                    "title": "Review bounded finding",
+                                    "description": "Evidence: https://example.com/source",
+                                    "url": "https://linear.example/SAN-7",
+                                    "state": {"name": "Triage"},
+                                    "labels": {
+                                        "nodes": [
+                                            {"name": "reliability"},
+                                            {"name": "Repo Steward"},
+                                        ]
+                                    },
+                                },
+                                {
+                                    "id": "issue-ignored",
+                                    "identifier": "SAN-8",
+                                    "title": "Implementation item",
+                                    "description": "Not a management queue item.",
+                                    "url": "https://linear.example/SAN-8",
+                                    "state": {"name": "In Progress"},
+                                    "labels": {"nodes": [{"name": "symphony"}]},
+                                },
+                            ],
+                        }
+                    }
+                }
+
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        client = FakeClient()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state" / "linear-triage-snapshot.json"
+            payload = capture_live_snapshot(client, metadata, path, max_items=20)
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+            self.assertEqual(
+                payload["issues"],
+                [
+                    {
+                        "id": "issue-live",
+                        "identifier": "SAN-7",
+                        "title": "Review bounded finding",
+                        "description": "Evidence: https://example.com/source",
+                        "state": "Triage",
+                        "labels": ["reliability", "Repo Steward"],
+                        "source": "Repo Steward",
+                        "evidence_urls": [
+                            "https://linear.example/SAN-7",
+                            "https://example.com/source",
+                        ],
+                    }
+                ],
+            )
+            loaded = load_snapshot(path, max_items=20)
+            self.assertEqual(1, len(loaded))
+            self.assertEqual("issue-live", loaded[0].id)
+            self.assertEqual("Repo Steward", loaded[0].source)
+            self.assertEqual(
+                (
+                    "https://linear.example/SAN-7",
+                    "https://example.com/source",
+                ),
+                loaded[0].evidence_urls,
+            )
+        self.assertIn("SanctumTriageSnapshot", client.query_text)
+        self.assertEqual(metadata.project_id, client.variables["projectId"])
+
+    def test_live_snapshot_fails_closed_if_linear_requires_pagination(self):
+        class PaginatedClient:
+            def query(self, query, variables):
+                return {
+                    "project": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": True},
+                            "nodes": [],
+                        }
+                    }
+                }
+
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "linear-triage-snapshot.json"
+            with self.assertRaisesRegex(MalformedModelOutput, "requires pagination"):
+                capture_live_snapshot(PaginatedClient(), metadata, path, max_items=20)
+            self.assertFalse(path.exists())
+
     def test_unknown_and_non_triage_targets_fail_closed(self):
         issues = load_snapshot(TRIAGE_FIXTURE, max_items=20)
         unknown = json.loads(json.dumps(self.fixture()))
@@ -1013,18 +1117,30 @@ class LinearPayloadTests(unittest.TestCase):
 
 
 class SchedulePlanTests(unittest.TestCase):
-    def test_schedule_plan_is_bounded_disabled_and_matches_role_cadence(self):
+    def test_schedule_plan_activates_only_qualified_management_cadences(self):
         plan = load_schedule_plan(SCHEDULES)
         schedules = plan["schedules"]
-        self.assertTrue(all(not item["enabled"] for item in schedules))
-        self.assertTrue(all(item["blocked_by"] for item in schedules))
+        repo = [item for item in schedules if item["role"] == "repo_steward"]
+        self.assertEqual(2, len(repo))
+        self.assertTrue(all(item["enabled"] for item in repo))
+        self.assertTrue(all(not item["blocked_by"] for item in repo))
+        self.assertTrue(all("live" in item["command"] for item in repo))
         product = next(item for item in schedules if item["role"] == "product_scout")
         self.assertEqual(["Monday", "Wednesday", "Friday"], product["days"])
         self.assertIn("product-scout", product["command"])
+        self.assertTrue(product["enabled"])
+        self.assertFalse(product["blocked_by"])
+        self.assertIn("live", product["command"])
+        triage = next(item for item in schedules if item["role"] == "triage")
+        self.assertTrue(triage["enabled"])
+        self.assertFalse(triage["blocked_by"])
+        self.assertIn("live", triage["command"])
+        self.assertNotIn("--snapshot", triage["command"])
 
     def test_blocked_schedule_cannot_be_enabled(self):
         raw = json.loads(SCHEDULES.read_text())
-        raw["schedules"][0]["enabled"] = True
+        triage = next(item for item in raw["schedules"] if item["role"] == "triage")
+        triage["blocked_by"] = ["synthetic blocker"]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "schedules.json"
             path.write_text(json.dumps(raw))

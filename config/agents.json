@@ -28,11 +28,11 @@
   "roles": {
     "repo_steward": {
       "cadence": "weekdays",
-      "write_enabled": false,
+      "write_enabled": true,
       "wall_clock_seconds": 900,
       "max_items": 8,
       "max_sources": 0,
-      "max_issues_created": 3,
+      "max_issues_created": 1,
       "max_retries": 1,
       "max_turns": 3,
       "max_tokens": 120000,
@@ -40,11 +40,11 @@
     },
     "product_scout": {
       "cadence": "monday_wednesday_friday",
-      "write_enabled": false,
+      "write_enabled": true,
       "wall_clock_seconds": 900,
       "max_items": 5,
       "max_sources": 8,
-      "max_issues_created": 3,
+      "max_issues_created": 1,
       "max_retries": 1,
       "max_turns": 3,
       "max_tokens": 150000,
@@ -52,7 +52,7 @@
     },
     "triage": {
       "cadence": "daily",
-      "write_enabled": false,
+      "write_enabled": true,
       "wall_clock_seconds": 600,
       "max_items": 20,
       "max_sources": 0,

@@ -14,7 +14,7 @@ make format-check  # verify formatting without changes
 make lint          # Ruff checks
 ```
 
-The complete regression suite remains `make test`. Its 557 baseline tests are preserved in seven independently runnable groups:
+The complete regression suite remains `make test`. Its 559 baseline tests are preserved in seven independently runnable groups:
 
 | Local command | Surface | Baseline tests |
 | --- | --- | ---: |
@@ -24,7 +24,7 @@ The complete regression suite remains `make test`. Its 557 baseline tests are pr
 | `make test-mcp` | MCP containment and approval guard | 8 |
 | `make test-plugins` | Owned TypeScript plugin contracts | 11 |
 | `make test-release` | Setup, amendment, rollback and Linux/macOS portability | 28 |
-| `make test-agents` | V1.2 management, budgets, supervision and execution gates | 47 |
+| `make test-agents` | V1.2 management, budgets, supervision and execution gates | 49 |
 
 `make test-gate` combines the two gate groups. No test was removed when the runner was decomposed; the old workflow's duplicate second execution of `tests.test_agent_system` was removed.
 

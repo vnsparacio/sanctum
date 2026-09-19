@@ -21,7 +21,7 @@ from .symphony_supervisor import (
 from .symphony_supervisor import (
     supervise as supervise_symphony,
 )
-from .triage import run_triage
+from .triage import capture_live_snapshot, run_triage
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "agents.json"
@@ -117,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         mode = RunMode(args.mode)
         linear_writer = None
+        linear_client = None
+        metadata = None
         role_key = args.role.replace("-", "_")
         if (
             mode is RunMode.LIVE
@@ -127,7 +129,8 @@ def main(argv: list[str] | None = None) -> int:
                 config.runtime_prefix() / "state" / "linear-metadata.json",
                 config.project["linear_project_slug"],
             )
-            linear_writer = LinearWriter(LinearGraphQLClient(), metadata)
+            linear_client = LinearGraphQLClient()
+            linear_writer = LinearWriter(linear_client, metadata)
         if args.role == "repo-steward":
             result = run_repo_steward(
                 config,
@@ -139,8 +142,22 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.role == "triage":
             if args.snapshot is None:
-                raise ValueError(
-                    "Triage requires --snapshot until live Linear qualification"
+                if (
+                    mode is not RunMode.LIVE
+                    or linear_client is None
+                    or metadata is None
+                ):
+                    raise ValueError(
+                        "Triage requires --snapshot until live Linear qualification"
+                    )
+                args.snapshot = (
+                    config.runtime_prefix() / "state" / "linear-triage-snapshot.json"
+                )
+                capture_live_snapshot(
+                    linear_client,
+                    metadata,
+                    args.snapshot,
+                    max_items=config.roles["triage"].max_items,
                 )
             if args.deterministic:
                 raise ValueError(
