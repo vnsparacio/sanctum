@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -32,6 +33,18 @@ def run(args, cwd=ROOT):
         )
 
 
+def runtime_pins():
+    return json.loads((ROOT / "reliability/runtime-pins.json").read_text())
+
+
+def reviewed_runtime_matches():
+    for name, expected in runtime_pins().items():
+        path = ROOT / name
+        if not path.is_file() or path.is_symlink() or digest(path) != expected:
+            return False
+    return True
+
+
 def build():
     for p in sorted((ROOT / "plugins").iterdir()):
         if "defineToolPlugin" in (p / "src/index.ts").read_text():
@@ -49,9 +62,7 @@ def build():
                 p,
             )
     # The original runtime hashes are reviewed version pins, not newly observed trust.
-    for name, expected in json.loads(
-        (ROOT / "reliability/runtime-pins.json").read_text()
-    ).items():
+    for name, expected in runtime_pins().items():
         if name.startswith("node_modules/") and digest(ROOT / name) != expected:
             raise SystemExit("OpenClaw runtime drift: " + name)
     subprocess.run(
@@ -63,5 +74,17 @@ def build():
     print("Plugin builds/manifests validated; reviewed OpenClaw runtime pins match.")
 
 
-if __name__ == "__main__":
+def ensure_build():
+    if reviewed_runtime_matches():
+        print("Reviewed runtime build outputs already match.")
+        return
     build()
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--if-needed"]:
+        ensure_build()
+    elif sys.argv[1:]:
+        raise SystemExit("usage: build.py [--if-needed]")
+    else:
+        build()

@@ -70,9 +70,17 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: make deps
       - run: make build
+      - name: Upload validated plugin builds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validated-plugin-builds
+          path: plugins/*/dist/
+          if-no-files-found: error
+          retention-days: 1
 
   contracts:
     name: Contracts / ${{ matrix.name }}
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -109,17 +117,38 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: make deps
+      - name: Download validated plugin builds
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: validated-plugin-builds
+          path: plugins
       - run: make ${{ matrix.command }}
 
   audit:
     name: Publication, source integrity, and compose
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12.14"
-      - run: python -m venv .venv
+          cache: pip
+          cache-dependency-path: |
+            gate/runtime/requirements.txt
+            requirements-dev.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: make deps
+      - name: Download validated plugin builds
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: validated-plugin-builds
+          path: plugins
       - run: make audit verify-source
       - run: docker compose config --quiet
