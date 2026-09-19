@@ -17,4 +17,4 @@ Only files listed in SOURCE-MANIFEST.json belong to this candidate. The original
 
 Automated scanning found no candidate credential-pattern, private-artifact or documentation-link findings. Contextual review removed the original owner path, embedded contact aliases and private volume reference. npm lock entries contain no local file dependencies. This is a bounded audit, not proof against every possible secret format.
 
-The public release starts with clean initial history from this allowlisted source. Private development archaeology is not imported. Dependencies retain upstream licenses; Sanctum source now uses Apache-2.0; external runtimes retain separate terms. Review docs/acceptance.md and docs/release.md before publication.
+The public release starts with clean initial history from this allowlisted source. Private development archaeology is not imported. Dependencies retain upstream licenses; Sanctum source now uses Apache-2.0; external runtimes retain separate terms. Review the historical V1 acceptance record and the current release guide before publication.

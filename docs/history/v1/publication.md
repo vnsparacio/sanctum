@@ -4,7 +4,7 @@
 
 ## Rename scope
 
-Public text, package metadata and artifacts use Sanctum. New generated janitor labels use `org.sanctum`; build/test temporary directories also use the new name. No production service was replaced. Qualified runtime environment variables, plugin/tool identities, privacy scopes, worker ownership/model/cache references and legacy credential locations remain unchanged for the [documented compatibility reasons](naming-compatibility.md). Historical citations and captured before-schema fixtures remain truthful.
+Public text, package metadata and artifacts use Sanctum. New generated janitor labels use `org.sanctum`; build/test temporary directories also use the new name. No production service was replaced. Qualified runtime environment variables, plugin/tool identities, privacy scopes, worker ownership/model/cache references and legacy credential locations remain unchanged for the [documented compatibility reasons](../../architecture/naming-compatibility.md). Historical citations and captured before-schema fixtures remain truthful.
 
 The rename changes two reviewed runtime source/build outputs and the matching schema-description snapshot. Their new integrity hashes were reviewed explicitly; other canonical outputs and the pinned OpenClaw runtime remain unchanged. No model, provider or unrelated dependency version was upgraded.
 
@@ -26,4 +26,4 @@ The original live checks are in [acceptance](acceptance.md) and [qualification](
 
 The public destination is [vnsparacio/sanctum](https://github.com/vnsparacio/sanctum), tag `v1.0.0`. Release artifacts contain only allowlisted source, with checksums. No private logs, state, credentials, approval tokens, account bindings, personal payloads, dependencies or model caches are distributed. The source-only initial history does not import the original development workspace.
 
-Security reporting uses GitHub Private Vulnerability Reporting/Security Advisories. Source uses Apache-2.0; upstream licenses remain separate. Publication is not deployment: follow the separately approved [migration and rollback procedure](migration.md).
+Security reporting uses GitHub Private Vulnerability Reporting/Security Advisories. Source uses Apache-2.0; upstream licenses remain separate. Publication is not deployment: follow the separately approved [migration and rollback procedure](../../guides/migration.md).

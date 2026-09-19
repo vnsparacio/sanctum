@@ -2,10 +2,10 @@
 
 Reasoning is replaceable. Authority stays on the Mac.
 
-- `/Users/tter/Projects/sanctum` is the canonical Sanctum source. Its remote is `https://github.com/vnsparacio/sanctum.git`; preserve the V1 tag and stable `main` history.
-- `/Users/tter/.sanctum/vinceai-v1.1` is the external private owner runtime. `/Users/tter/Projects/hybrid-ai` is legacy reference and rollback evidence. Never modify or repin the legacy tree during V1.1 engineering.
+- The checked-out repository root (`$SANCTUM_REPO`) is the canonical Sanctum source. Its remote is `https://github.com/vnsparacio/sanctum.git`; preserve the V1 tag and stable `main` history.
+- `$SANCTUM_PRIVATE_PREFIX` denotes the external private owner runtime. `$SANCTUM_LEGACY_REPO` denotes the legacy reference and rollback evidence. Never modify or repin the legacy tree during V1.1 engineering.
 - Keep owner configuration, secrets, account/contact bindings, model caches, sessions, approvals, receipts and live evidence in an external private prefix. Use synthetic fixtures in source/tests.
-- Read docs/architecture.md, docs/configuration.md, docs/migration.md and docs/V1.1-LIVE-BASELINE.md before deployment changes.
+- Read `docs/architecture/architecture.md`, `docs/guides/configuration.md`, `docs/guides/migration.md` and `docs/history/v1.1/V1.1-LIVE-BASELINE.md` before deployment changes.
 - Validate with make deps, make build, make test, make audit; run make doctor PREFIX=/absolute/private/prefix after setup or supported amendments. An existing dependency venv must be inspected before recreating it.
 - Use scripts/configure.py for supported amendments while the candidate gateway is stopped. Never refresh hashes to hide drift. Intentional source changes require review, tests, an explanation and an explicit new source freeze; runtime pins remain separately reviewed.
 - Reuse cached Qwen weights through cache-only startup. Do not run competing heavy model servers on a memory-constrained Mac.

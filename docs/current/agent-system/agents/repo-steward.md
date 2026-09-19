@@ -38,4 +38,4 @@ backlog or successful duplicate search.
 Acceptance requires zero repository changes, zero Linear writes, a private
 artifact and log, a supported configured model, a completed bounded run, and
 only concrete evidence-linked findings. A checked-in sanitized example lives
-at `docs/shadow/repo-steward.json`; the original artifact stays outside Git.
+at `docs/current/agent-system/shadow/repo-steward.json`; the original artifact stays outside Git.

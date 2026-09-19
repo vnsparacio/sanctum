@@ -7,7 +7,7 @@ Date: 2026-09-16. Project 3 remains experimental and unaccepted.
 Work continued on `v1.1/project-3-private-lead-workmode`, from clean source HEAD
 `e168f864eb5ed74d3437102323cdf79804505f06`, eleven local commits ahead of its
 tracking branch. The canonical source, remote and private-prefix locations are
-recorded in [the baseline](V1.1-LIVE-BASELINE.md). No branch change, commit, push,
+recorded in [the baseline](../V1.1-LIVE-BASELINE.md). No branch change, commit, push,
 PR, installation, gateway start, provider action or model call was performed.
 
 `ffe539f3d097ff2e652acc842438590a3ba117ea` is the **historically reported installed

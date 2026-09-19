@@ -10,7 +10,7 @@
 - Record independent offline review, 10/10 applied canary-plus-suite edits, nine genuine qualification completions, two expected safety stops, and the retained operational limits in the Project 3 structured-editing report.
 - Make the macOS-only amendment fixtures portable to Linux CI while retaining production refusal on non-macOS hosts; all 510 packaged tests and both GitHub Ubuntu checks passed.
 
-See [the V1.1 release-completion record](docs/V1.1-RELEASE-COMPLETION.md) and [structured editing report](docs/PROJECT-3-STRUCTURED-EDITING.md) for evidence, limits and rollback requirements.
+See [the V1.1 release-completion record](docs/history/v1.1/V1.1-RELEASE-COMPLETION.md) and [structured editing report](docs/history/v1.1/project-3/PROJECT-3-STRUCTURED-EDITING.md) for evidence, limits and rollback requirements.
 
 # Sanctum v1.0.0
 
@@ -30,7 +30,7 @@ See [the V1.1 release-completion record](docs/V1.1-RELEASE-COMPLETION.md) and [s
 - Validate isolated janitor restart and the owner-approved private GPU lifecycle through verified deletion.
 - Record fresh Calendar/Gmail, synthetic file/Markdown and existing MCP acceptance.
 
-Bounded personal-source read/generation and candidate Messages broker checks passed; autonomous browser-target selection and broad personal factual accuracy remain limited. No production migration or GitHub publication occurred. See [qualification](docs/qualification.md).
+Bounded personal-source read/generation and candidate Messages broker checks passed; autonomous browser-target selection and broad personal factual accuracy remain limited. No production migration or GitHub publication occurred. See [qualification](docs/history/v1/qualification.md).
 
 - Publish the framework as Sanctum while preserving historical VinceAI provenance and qualified compatibility identifiers.
 - Include the canonical project report and a per-occurrence rename audit.

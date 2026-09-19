@@ -32,4 +32,4 @@ The candidate does not import the owner's credentials, browser profile or servic
 
 ## Reviewed dependency exception
 
-The pinned development test runner retains one moderate advisory represented by two npm entries. Its vulnerable server path is not used by the prescribed Node test workflow. See [dependency review](docs/dependency-review.md); this is an exposure assessment, not a patched-dependency claim.
+The pinned development test runner retains one moderate advisory represented by two npm entries. Its vulnerable server path is not used by the prescribed Node test workflow. See [dependency review](docs/development/dependency-review.md); this is an exposure assessment, not a patched-dependency claim.

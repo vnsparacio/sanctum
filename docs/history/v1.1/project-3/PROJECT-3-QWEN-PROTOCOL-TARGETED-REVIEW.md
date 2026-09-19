@@ -4,7 +4,7 @@ Date: 2026-09-16. **R1–R4 source acceptance passes. Pre-live readiness does no
 
 ## Reviewed state and evidence
 
-Reviewed the canonical checkout identified in [the live baseline](V1.1-LIVE-BASELINE.md), remote `https://github.com/vnsparacio/sanctum.git`, branch `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`. Local tracking comparison was 11 commits ahead, zero behind; no fetch was performed. The index was empty. At entry there were **12 modified tracked files and 14 untracked files**, counted individually with `git status --porcelain=v1 -uall`. The larger repair remains uncommitted. Staged, unstaged and untracked state were all included; HEAD alone was not the target.
+Reviewed the canonical checkout identified in [the live baseline](../V1.1-LIVE-BASELINE.md), remote `https://github.com/vnsparacio/sanctum.git`, branch `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`. Local tracking comparison was 11 commits ahead, zero behind; no fetch was performed. The index was empty. At entry there were **12 modified tracked files and 14 untracked files**, counted individually with `git status --porcelain=v1 -uall`. The larger repair remains uncommitted. Staged, unstaged and untracked state were all included; HEAD alone was not the target.
 
 Read AGENTS.md, the live baseline, the original repair, the independent review and the targeted repair report completely. The earlier review blocked on four bounded findings; this report reviews their repair without reopening the larger design. Historical installed identity `ffe539f3d097ff2e652acc842438590a3ba117ea` was not reverified.
 

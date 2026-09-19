@@ -1,8 +1,8 @@
 # Sanctum naming and compatibility
 
-Sanctum is the public framework. VinceAI is the original personal/reference deployment and historical project name. Read the [canonical project report](SANCTUM-V1-PROJECT-REPORT.md) for design/history; use [qualification](qualification.md) and [acceptance](acceptance.md) for current measured behavior. Historical report counts are the original 174-file, 151-test snapshot. Calendar qualification covered native reads, bounded broker output and local summary generation; it did not independently audit every natural-language answer.
+Sanctum is the public framework. VinceAI is the original personal/reference deployment and historical project name. Read the [canonical project report](../history/v1/SANCTUM-V1-PROJECT-REPORT.md) for design/history; use [qualification](../history/v1/qualification.md) and [acceptance](../history/v1/acceptance.md) for measured V1 behavior. Historical report counts are the original 174-file, 151-test snapshot. Calendar qualification covered native reads, bounded broker output and local summary generation; it did not independently audit every natural-language answer.
 
-The [complete rename audit](../SANCTUM-RENAME-AUDIT.md) records every original source occurrence. The report is included without rewriting its historical filenames, benchmark numbers or original naming note.
+The [complete rename audit](../history/v1/SANCTUM-RENAME-AUDIT.md) records every original source occurrence. The report is included without rewriting its historical filenames, benchmark numbers or original naming note.
 
 ## Retained contracts
 

@@ -4,7 +4,7 @@ Date: 2026-09-16 (local review date). **Phase A BLOCKED.** The ordinary-admissio
 
 ## Review target and boundaries
 
-Reviewed the canonical checkout identified in [the live baseline](V1.1-LIVE-BASELINE.md), branch `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`. Local `v1.1-dev` and its merge base with HEAD are `3c84eac9eccd43a7827965f424ba92c8709070de`. The feature branch's local tracking reference is `ffdf5521beba0b8f49d967045fd1d6a80a402811`; HEAD is eleven ahead and zero behind. No fetch or remote-history mutation occurred.
+Reviewed the canonical checkout identified in [the live baseline](../V1.1-LIVE-BASELINE.md), branch `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`. Local `v1.1-dev` and its merge base with HEAD are `3c84eac9eccd43a7827965f424ba92c8709070de`. The feature branch's local tracking reference is `ffdf5521beba0b8f49d967045fd1d6a80a402811`; HEAD is eleven ahead and zero behind. No fetch or remote-history mutation occurred.
 
 The initial index was empty; the working tree contained 17 modified tracked files and 29 individually counted untracked files. The larger uncommitted Project 3 repair remains present. Review included staged, unstaged and untracked state, not HEAD alone. Read AGENTS.md, the complete live baseline, protocol targeted review, pre-live readiness runbook, previous independent pre-live review and targeted repair report.
 

@@ -8,7 +8,7 @@ was performed. Nothing here claims improved Qwen behavior or authorizes spending
 ## Starting review target
 
 The canonical checkout and external private prefix are identified in the
-[live baseline](V1.1-LIVE-BASELINE.md). Work remained in the existing
+[live baseline](../V1.1-LIVE-BASELINE.md). Work remained in the existing
 `v1.1/project-3-private-lead-workmode` checkout at HEAD
 `e168f864eb5ed74d3437102323cdf79804505f06`, eleven commits ahead of its local
 tracking reference. No fetch or Git index/history operation occurred. Starting
