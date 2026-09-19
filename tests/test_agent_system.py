@@ -20,6 +20,14 @@ from sanctum_agents.authority import (
 )
 from sanctum_agents.config import ConfigError, load_config, validate_model_catalog
 from sanctum_agents.integrations import LinearGraphQLClient, MissingAuth
+from sanctum_agents.implementation import (
+    LifecycleError,
+    PullRequestHandoff,
+    issue_branch,
+    validate_dispatch,
+    validate_handoff,
+    validation_profile,
+)
 from sanctum_agents.management import (
     Evidence,
     MalformedModelOutput,
@@ -39,6 +47,7 @@ from sanctum_agents.runtime import (
     new_run_id,
 )
 from sanctum_agents.supervisor import BoundedProcess
+from sanctum_agents.symphony_supervisor import evaluate_snapshot, supervise
 from sanctum_agents.triage import load_snapshot, parse_decisions, run_triage
 
 
@@ -474,6 +483,126 @@ class TriageTests(unittest.TestCase):
             check=True, capture_output=True, text=True,
         ).stdout
         self.assertEqual(before, after)
+
+
+class ImplementationLifecycleTests(unittest.TestCase):
+    def test_branch_name_dispatch_gate_and_human_review_stop(self):
+        self.assertEqual("symphony/san-123", issue_branch("SAN-123"))
+        validate_dispatch("Ready for Agent", ["security", "symphony"])
+        with self.assertRaises(LifecycleError):
+            validate_dispatch("Backlog", ["symphony"])
+        valid = PullRequestHandoff("v1.2-dev", "symphony/san-123", False, "Human Review")
+        validate_handoff(valid, "SAN-123")
+        for invalid in (
+            PullRequestHandoff("main", "symphony/san-123", False, "Human Review"),
+            PullRequestHandoff("v1.2-dev", "feature/loose", False, "Human Review"),
+            PullRequestHandoff("v1.2-dev", "symphony/san-123", True, "Human Review"),
+            PullRequestHandoff("v1.2-dev", "symphony/san-123", False, "Done"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(LifecycleError):
+                validate_handoff(invalid, "SAN-123")
+
+    def test_proportional_validation_profiles(self):
+        self.assertEqual("docs-config", validation_profile(["docs/runbook.md", "config/example.json"]))
+        self.assertEqual("normal-code", validation_profile(["router/decision.py"]))
+        self.assertEqual("architecture-security", validation_profile(["WORKFLOW.md"]))
+        self.assertEqual("architecture-security", validation_profile(["tests/security_contract.py"]))
+
+    def test_workflow_pins_model_limits_and_never_merges(self):
+        workflow = (ROOT / "WORKFLOW.md").read_text()
+        self.assertIn("model=\"gpt-5.6-sol\"", workflow)
+        self.assertIn("max_turns: 8", workflow)
+        self.assertIn("stall_timeout_ms: 300000", workflow)
+        self.assertIn("Human Review` is a hard stopping point", workflow)
+        self.assertNotIn("gh pr merge", workflow)
+
+
+class SymphonySupervisorTests(unittest.TestCase):
+    def running(self, session: str, turns: int, tokens: int) -> dict[str, object]:
+        return {
+            "issue_identifier": "SAN-7",
+            "session_id": session,
+            "turn_count": turns,
+            "tokens": {"total_tokens": tokens},
+            "started_at": "1970-01-01T00:01:40Z",
+            "last_event_at": "1970-01-01T00:03:15Z",
+        }
+
+    def evaluate(self, snapshot, ledger, now=200):
+        return evaluate_snapshot(
+            snapshot, ledger, now=now, wall_clock_seconds=100, stall_seconds=10,
+            max_turns=8, max_tokens=500, max_retries=2,
+        )
+
+    def test_total_turn_and_token_caps_span_continuation_sessions(self):
+        ledger: dict[str, object] = {"issues": {}}
+        first = self.evaluate({"running": [self.running("one", 4, 300)], "retrying": []}, ledger)
+        self.assertEqual([], first)
+        second = self.evaluate({"running": [self.running("two", 5, 300)], "retrying": []}, ledger)
+        self.assertEqual({"turns_budget", "tokens_budget"}, {item.reason for item in second})
+
+    def test_wall_stall_and_retry_caps_are_independent(self):
+        ledger = {"issues": {"SAN-7": {
+            "first_seen": 50, "last_seen": 50, "sessions": {}, "max_retry": 0,
+        }}}
+        running = self.evaluate({"running": [self.running("one", 1, 10)], "retrying": []}, ledger)
+        self.assertEqual({"wall_clock_budget"}, {item.reason for item in running})
+        stalled_entry = self.running("one", 1, 10)
+        stalled_entry["last_event_at"] = "1970-01-01T00:02:00Z"
+        stalled = self.evaluate({"running": [stalled_entry], "retrying": []}, {"issues": {}}, now=200)
+        self.assertIn("stall_budget", {item.reason for item in stalled})
+        retry = self.evaluate({
+            "running": [],
+            "retrying": [{"issue_identifier": "SAN-8", "attempt": 3}],
+        }, {"issues": {}}, now=200)
+        self.assertEqual({"retries_budget"}, {item.reason for item in retry})
+
+    def test_completed_issue_ledger_is_eventually_removed(self):
+        ledger = {"issues": {"SAN-7": {
+            "first_seen": 1, "last_seen": 100, "sessions": {}, "max_retry": 0,
+        }}}
+        self.evaluate({"running": [], "retrying": []}, ledger, now=161)
+        self.assertEqual({}, ledger["issues"])
+
+    def test_supervisor_kills_fake_service_and_writes_incident(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "fake-symphony"
+            binary.write_text("""#!/usr/bin/env python3
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port = int(sys.argv[sys.argv.index('--port') + 1])
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({'running': [{'issue_identifier': 'SAN-SMOKE', 'session_id': 'one', 'turn_count': 99, 'tokens': {'total_tokens': 10}, 'started_at': '2026-09-19T00:00:00Z', 'last_event_at': '2099-01-01T00:00:00Z'}], 'retrying': []}).encode()
+        self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, format, *args):
+        pass
+HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+""")
+            binary.chmod(0o700)
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["default_binary"] = str(binary)
+            raw["symphony"]["state_port"] = 17788
+            raw["symphony"]["poll_seconds"] = 1
+            config_path = root / "source" / "config" / "agents.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            prefix = root / "private-agents"
+            workspace = root / "workspaces"
+            result = supervise(config, ROOT, {
+                "PATH": __import__("os").environ["PATH"],
+                "LINEAR_API_KEY": "synthetic-test-token",
+                "SYMPHONY_WORKSPACE_ROOT": str(workspace),
+                "SANCTUM_AGENT_PREFIX": str(prefix),
+            })
+            self.assertEqual(75, result)
+            incidents = list((prefix / "incidents").glob("*.json"))
+            self.assertEqual(1, len(incidents))
+            incident = json.loads(incidents[0].read_text())
+            self.assertEqual("turns_budget", incident["violations"][0]["reason"])
+            self.assertFalse(incident["linear_state_changed"])
 
 
 if __name__ == "__main__":

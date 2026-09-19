@@ -12,6 +12,7 @@ from .integrations import CodexCatalogClient, ExternalCallError
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .runtime import RunMode
+from .symphony_supervisor import preflight as symphony_preflight, supervise as supervise_symphony
 from .triage import run_triage
 
 
@@ -25,6 +26,8 @@ def parser() -> argparse.ArgumentParser:
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("validate-config")
     subcommands.add_parser("models-check")
+    subcommands.add_parser("symphony-preflight")
+    subcommands.add_parser("symphony-run")
     run = subcommands.add_parser("run")
     run.add_argument("role", choices=["repo-steward", "product-scout", "triage"])
     run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
@@ -53,6 +56,11 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }, sort_keys=True))
             return 0
+        if args.command == "symphony-preflight":
+            print(json.dumps(symphony_preflight(config, ROOT), sort_keys=True))
+            return 0
+        if args.command == "symphony-run":
+            return supervise_symphony(config, ROOT)
         if args.role == "repo-steward":
             result = run_repo_steward(
                 config,

@@ -17,7 +17,6 @@ tracker:
     - Done
     - Canceled
     - Cancelled
-    - Duplicate
 
 polling:
   interval_ms: 30000
@@ -31,12 +30,15 @@ hooks:
 
 agent:
   max_concurrent_agents: 1
-  max_turns: 10
+  max_turns: 8
+  max_retry_backoff_ms: 120000
 
 codex:
-  command: codex app-server
+  command: codex -c 'model="gpt-5.6-sol"' -c 'model_reasoning_effort="medium"' app-server
   approval_policy: never
   thread_sandbox: workspace-write
+  turn_timeout_ms: 600000
+  stall_timeout_ms: 300000
   turn_sandbox_policy:
     type: workspaceWrite
     networkAccess: true
@@ -202,6 +204,21 @@ During implementation:
 
 # Validation
 
+Select the smallest validation profile that covers the changed risk, and record
+the selection in the workpad:
+
+- `docs-config`: documentation or declarative configuration only; run focused
+  format/schema/reference checks, `git diff --check`, the source-freeze check
+  when applicable, and `make audit`.
+- `normal-code`: run focused tests plus `make build`, `make test`, and
+  `make audit`.
+- `architecture-security`: run `make deps`, `make build`, `make test`, and
+  `make audit`, plus any focused security or contract tests.
+
+These are minimums. A stricter requirement in `AGENTS.md` or the issue always
+wins. A tiny documentation task must not trigger unrelated repository
+archaeology, but it still must satisfy all applicable frozen-source checks.
+
 Before committing:
 
 1. Run the validation required by `AGENTS.md`.
@@ -282,6 +299,13 @@ Do not move the issue to Done.
 Do not continue implementation unless the issue later enters `Rework`.
 
 # Completion rule
+
+The outer Sanctum supervisor may terminate the complete Symphony process group
+for wall-clock, token, turn, retry, stall, or output budgets. `max_turns` and the
+silence timeout are defense in depth, not the total-runtime control. If a
+budget stop occurs, leave the issue in its current active state. The private
+supervisor incident receipt is the operator-visible stop record; on the next
+authorized run, copy its reason into the persistent workpad before resuming.
 
 The implementation run is complete only when either:
 

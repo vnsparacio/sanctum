@@ -134,6 +134,17 @@ def load_config(path: str | Path) -> AgentConfig:
         raise ConfigError("integration_branch must remain v1.2-dev")
     if raw["symphony"].get("max_concurrency") != 1:
         raise ConfigError("initial Symphony concurrency must remain 1")
+    symphony = raw["symphony"]
+    if symphony.get("engineering_preview_acknowledged") is not True:
+        raise ConfigError("Symphony engineering preview must be explicitly acknowledged")
+    for key in ("binary_env", "default_binary", "workflow"):
+        if not isinstance(symphony.get(key), str) or not symphony[key]:
+            raise ConfigError(f"symphony.{key} must be non-empty")
+    for key in (
+        "shutdown_grace_seconds", "state_port", "poll_seconds",
+        "state_timeout_seconds", "output_limit_bytes",
+    ):
+        _positive(symphony, key)
     runtime = raw["runtime"]
     if not isinstance(runtime.get("prefix_env"), str) or not runtime["prefix_env"]:
         raise ConfigError("runtime.prefix_env must be non-empty")

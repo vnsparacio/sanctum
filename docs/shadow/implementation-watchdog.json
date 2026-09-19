@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "role": "implementation",
+  "mode": "controlled-local-smoke",
+  "linear_writes": 0,
+  "synthetic_issue": "SAN-SMOKE",
+  "observed": {
+    "turns": 99,
+    "turn_limit": 8
+  },
+  "result": {
+    "exit_code": 75,
+    "reason": "turns_budget",
+    "process_group_terminated": true,
+    "incident_receipt_written": true,
+    "linear_state_changed": false
+  },
+  "live_smoke": {
+    "status": "blocked",
+    "reason": "LINEAR_API_KEY and linear_graphql are unavailable in the current environment"
+  }
+}
