@@ -11,6 +11,7 @@ from typing import Any
 from .authority import Role, assert_repository_unchanged
 from .config import AgentConfig
 from .integrations import repository_status
+from .linear_integration import engineering_finding_proposal
 from .management import Evidence, Finding, RoleState, parse_findings, shadow_document, suppress_duplicates
 from .reasoner import CodexReasoner
 from .runtime import Budget, ExclusiveRoleLock, JsonlRunLog, RunMode, ensure_private_prefix, new_run_id
@@ -156,6 +157,7 @@ def run_repo_steward(
     use_model: bool = True,
     deep: bool = False,
     reasoner: CodexReasoner | None = None,
+    linear_writer: Any | None = None,
 ) -> dict[str, Any]:
     role_name = Role.REPO_STEWARD.value
     role = config.roles[role_name]
@@ -204,15 +206,26 @@ def run_repo_steward(
             raw = deterministic_findings(evidence)
         findings = parse_findings(raw, evidence, source="Repo Steward", max_items=role.max_items)
         findings, suppressed = suppress_duplicates(findings, state.get("fingerprints", []))
+        writes: list[dict[str, Any]] = []
         if mode is RunMode.LIVE:
-            raise RuntimeError("Repo Steward Linear writes require live metadata qualification")
+            if linear_writer is None:
+                raise RuntimeError("Repo Steward Linear writer is unavailable")
+            evidence_by_id = {item.id: item.summary for item in evidence}
+            proposals = [
+                engineering_finding_proposal(linear_writer.metadata, item, evidence_by_id)
+                for item in findings
+            ]
+            writes = linear_writer.create_proposals(proposals, role.max_issues_created)
         after = repository_status(repository)
         assert_repository_unchanged(before, after, Role.REPO_STEWARD)
         artifact = shadow_document(
             run_id, role_name, commit, findings, evidence, mode=mode.value
         )
+        artifact["linear_writes"] = sum(item["status"] == "created" for item in writes)
+        artifact["linear_outcomes"] = writes
         artifact["duplicates_suppressed"] = len(suppressed)
-        output = prefix / "shadow" / f"{run_id}.json"
+        output = prefix / ("shadow" if mode is not RunMode.LIVE else "runs") / f"{run_id}.json"
+        output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
         output.chmod(0o600)
         known = list(state.get("fingerprints", [])) + [item.fingerprint() for item in findings]

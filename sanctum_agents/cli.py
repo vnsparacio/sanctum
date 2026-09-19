@@ -8,10 +8,12 @@ from pathlib import Path
 import sys
 
 from .config import ConfigError, load_config, validate_model_catalog
-from .integrations import CodexCatalogClient, ExternalCallError
+from .integrations import CodexCatalogClient, ExternalCallError, LinearGraphQLClient
+from .linear_integration import LinearWriter, load_qualified_metadata
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
+from .scheduler import load_schedule_plan
 from .runtime import RunMode
 from .symphony_supervisor import preflight as symphony_preflight, supervise as supervise_symphony
 from .triage import run_triage
@@ -29,6 +31,9 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("models-check")
     subcommands.add_parser("symphony-preflight")
     subcommands.add_parser("symphony-run")
+    subcommands.add_parser("schedule-plan")
+    linear_check = subcommands.add_parser("linear-metadata-check")
+    linear_check.add_argument("--path", type=Path)
     run = subcommands.add_parser("run")
     run.add_argument("role", choices=["repo-steward", "product-scout", "triage", "reviewer"])
     run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
@@ -63,13 +68,42 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "symphony-run":
             return supervise_symphony(config, ROOT)
+        if args.command == "schedule-plan":
+            print(json.dumps(load_schedule_plan(ROOT / "config" / "schedules.json"), sort_keys=True))
+            return 0
+        if args.command == "linear-metadata-check":
+            path = args.path or (config.runtime_prefix() / "state" / "linear-metadata.json")
+            metadata = load_qualified_metadata(path, config.project["linear_project_slug"])
+            print(json.dumps({
+                "ok": True,
+                "path": str(path),
+                "project_slug": metadata.project_slug,
+                "state_count": len(metadata.states),
+                "label_count": len(metadata.labels),
+                "template_count": len(metadata.templates),
+            }, sort_keys=True))
+            return 0
+        mode = RunMode(args.mode)
+        linear_writer = None
+        role_key = args.role.replace("-", "_")
+        if (
+            mode is RunMode.LIVE
+            and role_key in {"repo_steward", "product_scout", "triage"}
+            and config.roles[role_key].write_enabled
+        ):
+            metadata = load_qualified_metadata(
+                config.runtime_prefix() / "state" / "linear-metadata.json",
+                config.project["linear_project_slug"],
+            )
+            linear_writer = LinearWriter(LinearGraphQLClient(), metadata)
         if args.role == "repo-steward":
             result = run_repo_steward(
                 config,
                 ROOT,
-                RunMode(args.mode),
+                mode,
                 use_model=not args.deterministic,
                 deep=args.deep,
+                linear_writer=linear_writer,
             )
         elif args.role == "triage":
             if args.snapshot is None:
@@ -77,18 +111,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.deterministic:
                 raise ValueError("Triage deterministic runs require an explicit test fixture")
             result = run_triage(
-                config, ROOT, args.snapshot.resolve(), RunMode(args.mode), escalate=args.escalate
+                config, ROOT, args.snapshot.resolve(), mode, escalate=args.escalate,
+                linear_writer=linear_writer,
             )
         elif args.role == "reviewer":
             if args.packet is None:
                 raise ValueError("Reviewer requires --packet until live GitHub/Linear qualification")
             if args.deterministic:
                 raise ValueError("Reviewer deterministic runs require an explicit test fixture")
-            result = run_reviewer(config, ROOT, args.packet.resolve(), RunMode(args.mode))
+            result = run_reviewer(config, ROOT, args.packet.resolve(), mode)
         elif args.deterministic:
             raise ValueError("Product Scout deterministic runs require an explicit test fixture")
         else:
-            result = run_product_scout(config, ROOT, RunMode(args.mode))
+            result = run_product_scout(config, ROOT, mode, linear_writer=linear_writer)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConfigError, ExternalCallError, RuntimeError, ValueError) as exc:

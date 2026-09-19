@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from .authority import Role, assert_repository_unchanged
 from .config import AgentConfig
 from .integrations import repository_status
+from .linear_integration import product_discovery_proposal
 from .management import MalformedModelOutput, RoleState
 from .reasoner import CodexReasoner
 from .runtime import Budget, ExclusiveRoleLock, JsonlRunLog, RunMode, ensure_private_prefix, new_run_id
@@ -171,6 +172,7 @@ def run_product_scout(
     *,
     reasoner: CodexReasoner | None = None,
     fixture_payload: dict[str, Any] | None = None,
+    linear_writer: Any | None = None,
 ) -> dict[str, Any]:
     role_name = Role.PRODUCT_SCOUT.value
     role = config.roles[role_name]
@@ -211,8 +213,15 @@ def run_product_scout(
         by_id = {item.id: item for item in sources}
         accepted = [item for item in findings if item.fingerprint(by_id) not in prior]
         suppressed = len(findings) - len(accepted)
+        writes: list[dict[str, Any]] = []
         if mode is RunMode.LIVE:
-            raise RuntimeError("Product Scout Linear writes require live metadata qualification")
+            if linear_writer is None:
+                raise RuntimeError("Product Scout Linear writer is unavailable")
+            proposals = [
+                product_discovery_proposal(linear_writer.metadata, item, by_id)
+                for item in accepted
+            ]
+            writes = linear_writer.create_proposals(proposals, role.max_issues_created)
         after = repository_status(repository)
         assert_repository_unchanged(before, after, Role.PRODUCT_SCOUT)
         artifact = {
@@ -220,12 +229,14 @@ def run_product_scout(
             "run_id": run_id,
             "role": role_name,
             "mode": mode.value,
-            "linear_writes": 0,
+            "linear_writes": sum(item["status"] == "created" for item in writes),
+            "linear_outcomes": writes,
             "sources": [asdict(item) for item in sources],
             "findings": [{**asdict(item), "fingerprint": item.fingerprint(by_id)} for item in accepted],
             "duplicates_suppressed": suppressed,
         }
-        output = prefix / "shadow" / f"{run_id}.json"
+        output = prefix / ("shadow" if mode is not RunMode.LIVE else "runs") / f"{run_id}.json"
+        output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
         output.chmod(0o600)
         state_store.save(

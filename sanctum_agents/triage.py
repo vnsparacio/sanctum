@@ -146,6 +146,7 @@ def run_triage(
     escalate: bool = False,
     reasoner: CodexReasoner | None = None,
     decision_fixture: dict[str, Any] | None = None,
+    linear_writer: Any | None = None,
 ) -> dict[str, Any]:
     role_name = Role.TRIAGE.value
     role = config.roles[role_name]
@@ -176,8 +177,15 @@ def run_triage(
             raw = decision_fixture
         decisions, briefing = parse_decisions(raw, issues, max_items=role.max_items)
         budget.consume("items", len(decisions))
+        writes: list[dict[str, Any]] = []
         if mode is RunMode.LIVE:
-            raise RuntimeError("Triage Linear writes require live metadata qualification")
+            if linear_writer is None:
+                raise RuntimeError("Triage Linear writer is unavailable")
+            for item in decisions:
+                if item.mutation is not None:
+                    writes.extend(linear_writer.apply_triage(
+                        item.issue_id, item.mutation["state"], item.duplicate_of
+                    ))
         after = repository_status(repository)
         assert_repository_unchanged(before, after, Role.TRIAGE)
         artifact = {
@@ -185,14 +193,16 @@ def run_triage(
             "run_id": run_id,
             "role": role_name,
             "mode": mode.value,
-            "linear_writes": 0,
+            "linear_writes": len(writes),
+            "linear_outcomes": writes,
             "snapshot": str(snapshot_path),
             "model": model.model,
             "reasoning": model.reasoning,
             "decisions": [asdict(item) for item in decisions],
             "owner_briefing": briefing,
         }
-        output = prefix / "shadow" / f"{run_id}.json"
+        output = prefix / ("shadow" if mode is not RunMode.LIVE else "runs") / f"{run_id}.json"
+        output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
         output.chmod(0o600)
         log.emit("completed", decision_count=len(decisions), artifact=str(output))

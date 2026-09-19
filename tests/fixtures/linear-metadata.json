@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "project-sanctum-v12",
+    "slug": "sanctum-v12-6fe3a63e0c69",
+    "team_id": "team-sanctum"
+  },
+  "states": {
+    "Triage": "state-triage",
+    "Backlog": "state-backlog",
+    "Watch": "state-watch",
+    "Ready for Agent": "state-ready",
+    "In Progress": "state-progress",
+    "Human Review": "state-human-review",
+    "Rework": "state-rework",
+    "Done": "state-done",
+    "Canceled": "state-canceled"
+  },
+  "labels": {
+    "tech-debt": "label-tech-debt",
+    "product-discovery": "label-product-discovery",
+    "architecture": "label-architecture",
+    "security": "label-security",
+    "reliability": "label-reliability",
+    "agent-quality": "label-agent-quality",
+    "research": "label-research",
+    "documentation": "label-documentation",
+    "symphony": "label-symphony",
+    "Repo Steward": "label-source-repo",
+    "Product Scout": "label-source-product"
+  },
+  "templates": {
+    "Engineering Finding": "template-engineering",
+    "Product Discovery": "template-product",
+    "Agent Quality Finding": "template-agent-quality"
+  }
+}

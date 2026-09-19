@@ -16,5 +16,6 @@ jobs:
           python-version: '3.12.14'
       - run: npm ci --ignore-scripts
       - run: python -m venv .venv && .venv/bin/pip install -r gate/runtime/requirements.txt
+      - run: .venv/bin/python -m unittest tests.test_agent_system
       - run: make build test audit
       - run: docker compose config --quiet

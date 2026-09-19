@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib import error
 
 from sanctum_agents.authority import (
     Action,
@@ -19,7 +20,7 @@ from sanctum_agents.authority import (
     validate_issue_mutation,
 )
 from sanctum_agents.config import ConfigError, load_config, validate_model_catalog
-from sanctum_agents.integrations import LinearGraphQLClient, MissingAuth
+from sanctum_agents.integrations import ExternalCallError, LinearGraphQLClient, MissingAuth
 from sanctum_agents.implementation import (
     LifecycleError,
     PullRequestHandoff,
@@ -30,12 +31,21 @@ from sanctum_agents.implementation import (
 )
 from sanctum_agents.management import (
     Evidence,
+    Finding,
     MalformedModelOutput,
     parse_findings,
     suppress_duplicates,
 )
+from sanctum_agents.linear_integration import (
+    LinearWriter,
+    LinearMetadataError,
+    engineering_finding_proposal,
+    load_qualified_metadata,
+    product_discovery_proposal,
+    triage_update_variables,
+)
 from sanctum_agents.reasoner import CodexReasoner
-from sanctum_agents.product_scout import parse_research, run_product_scout
+from sanctum_agents.product_scout import ProductDiscovery, ResearchSource, parse_research, run_product_scout
 from sanctum_agents.repo_steward import collect_evidence, run_repo_steward
 from sanctum_agents.reviewer import load_packet, parse_review, run_reviewer
 from sanctum_agents.runtime import (
@@ -47,6 +57,7 @@ from sanctum_agents.runtime import (
     ensure_private_prefix,
     new_run_id,
 )
+from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
 from sanctum_agents.symphony_supervisor import evaluate_snapshot, supervise
 from sanctum_agents.triage import load_snapshot, parse_decisions, run_triage
@@ -56,6 +67,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "agents.json"
 TRIAGE_FIXTURE = ROOT / "tests" / "fixtures" / "linear-triage-snapshot.json"
 REVIEW_FIXTURE = ROOT / "tests" / "fixtures" / "reviewer-packet.json"
+LINEAR_METADATA_FIXTURE = ROOT / "tests" / "fixtures" / "linear-metadata.json"
+SCHEDULES = ROOT / "config" / "schedules.json"
 
 
 def catalog() -> list[dict[str, object]]:
@@ -181,6 +194,17 @@ class RuntimeTests(unittest.TestCase):
     def test_missing_linear_auth_is_explicit(self):
         with self.assertRaises(MissingAuth):
             LinearGraphQLClient(environ={}).query("query { viewer { id } }")
+
+    def test_failed_linear_transport_is_explicit_and_not_retried(self):
+        with patch(
+            "sanctum_agents.integrations.request.urlopen",
+            side_effect=error.URLError("offline"),
+        ) as opened:
+            with self.assertRaisesRegex(ExternalCallError, "Linear request failed"):
+                LinearGraphQLClient(environ={"LINEAR_API_KEY": "synthetic"}).query(
+                    "query { viewer { id } }"
+                )
+        opened.assert_called_once()
 
 
 class SupervisorTests(unittest.TestCase):
@@ -671,6 +695,111 @@ class ReviewerTests(unittest.TestCase):
             check=True, capture_output=True, text=True,
         ).stdout
         self.assertEqual(before, after)
+
+
+class LinearPayloadTests(unittest.TestCase):
+    def test_engineering_finding_targets_triage_without_execution_authority(self):
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        finding = Finding(
+            "Bound continuation runtime",
+            "Continuation retries can outlive per-turn limits and require an independent hard deadline.",
+            "high", "Investigate", ("e-1",), ("tech-debt", "reliability"), "Repo Steward",
+        )
+        proposal = engineering_finding_proposal(metadata, finding, {"e-1": "Observed workflow gap."})
+        issue_input = proposal.variables["input"]
+        self.assertEqual("state-triage", issue_input["stateId"])
+        self.assertIn("label-source-repo", issue_input["labelIds"])
+        self.assertNotIn("label-symphony", issue_input["labelIds"])
+        self.assertIn(proposal.fingerprint, issue_input["description"])
+
+    def test_product_discovery_uses_qualified_sources_and_triage(self):
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        source = ResearchSource(
+            "release", "https://github.com/example/project/releases", "Project release",
+            "2026-09-19", "release_notes", "The release adds bounded execution leases.",
+        )
+        finding = ProductDiscovery(
+            "Compare bounded execution leases",
+            "The project provides a concrete bounded worker lease implementation.",
+            "Sanctum can compare cleanup receipts without changing owner authorization.",
+            "Investigate", ("release",), ("product-discovery", "research"),
+        )
+        proposal = product_discovery_proposal(metadata, finding, {"release": source})
+        issue_input = proposal.variables["input"]
+        self.assertEqual("state-triage", issue_input["stateId"])
+        self.assertIn("label-source-product", issue_input["labelIds"])
+        self.assertNotIn("label-symphony", issue_input["labelIds"])
+
+    def test_metadata_and_triage_transitions_fail_closed(self):
+        with self.assertRaisesRegex(LinearMetadataError, "slug"):
+            load_qualified_metadata(LINEAR_METADATA_FIXTURE, "wrong-project")
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        self.assertEqual(
+            {"id": "issue-a", "input": {"stateId": "state-backlog"}},
+            triage_update_variables(metadata, "issue-a", "Backlog"),
+        )
+        with self.assertRaises(AuthorityError):
+            triage_update_variables(metadata, "issue-a", "Ready for Agent")
+
+    def test_writer_searches_duplicates_caps_creation_and_links_triage(self):
+        metadata = load_qualified_metadata(
+            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+        )
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeClient:
+            def query(self, query, variables=None):
+                calls.append((query, variables or {}))
+                if "DuplicateCandidates" in query:
+                    return {"project": {"issues": {"nodes": []}}}
+                if "IssueCreate" in query:
+                    return {"issueCreate": {"success": True, "issue": {
+                        "id": "created-1", "identifier": "SAN-301", "url": "https://linear.app/x",
+                    }}}
+                if "IssueUpdate" in query:
+                    return {"issueUpdate": {"success": True, "issue": {"id": "issue-a"}}}
+                if "IssueRelationCreate" in query:
+                    return {"issueRelationCreate": {"success": True, "issueRelation": {"id": "relation-1"}}}
+                raise AssertionError("unexpected query")
+
+        finding = Finding(
+            "Bound continuation runtime",
+            "Continuation retries require an independent total runtime deadline.",
+            "high", "Investigate", ("e-1",), ("reliability",), "Repo Steward",
+        )
+        proposal = engineering_finding_proposal(metadata, finding, {"e-1": "Observed gap."})
+        writer = LinearWriter(FakeClient(), metadata)
+        outcomes = writer.create_proposals([proposal, proposal], max_created=1)
+        self.assertEqual(["created", "duplicate"], [item["status"] for item in outcomes])
+        linked = writer.apply_triage("issue-a", "Canceled", "issue-c")
+        self.assertEqual(["updated", "linked_duplicate"], [item["status"] for item in linked])
+        self.assertEqual(1, sum("IssueCreate" in query for query, _ in calls))
+
+
+class SchedulePlanTests(unittest.TestCase):
+    def test_schedule_plan_is_bounded_disabled_and_matches_role_cadence(self):
+        plan = load_schedule_plan(SCHEDULES)
+        schedules = plan["schedules"]
+        self.assertTrue(all(not item["enabled"] for item in schedules))
+        self.assertTrue(all(item["blocked_by"] for item in schedules))
+        product = next(item for item in schedules if item["role"] == "product_scout")
+        self.assertEqual(["Monday", "Wednesday", "Friday"], product["days"])
+        self.assertIn("product-scout", product["command"])
+
+    def test_blocked_schedule_cannot_be_enabled(self):
+        raw = json.loads(SCHEDULES.read_text())
+        raw["schedules"][0]["enabled"] = True
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "schedules.json"
+            path.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(ScheduleError, "blocked"):
+                load_schedule_plan(path)
 
 
 if __name__ == "__main__":
