@@ -37,6 +37,7 @@ from sanctum_agents.management import (
 from sanctum_agents.reasoner import CodexReasoner
 from sanctum_agents.product_scout import parse_research, run_product_scout
 from sanctum_agents.repo_steward import collect_evidence, run_repo_steward
+from sanctum_agents.reviewer import load_packet, parse_review, run_reviewer
 from sanctum_agents.runtime import (
     Budget,
     BudgetExceeded,
@@ -54,6 +55,7 @@ from sanctum_agents.triage import load_snapshot, parse_decisions, run_triage
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "agents.json"
 TRIAGE_FIXTURE = ROOT / "tests" / "fixtures" / "linear-triage-snapshot.json"
+REVIEW_FIXTURE = ROOT / "tests" / "fixtures" / "reviewer-packet.json"
 
 
 def catalog() -> list[dict[str, object]]:
@@ -603,6 +605,72 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             incident = json.loads(incidents[0].read_text())
             self.assertEqual("turns_budget", incident["violations"][0]["reason"])
             self.assertFalse(incident["linear_state_changed"])
+
+
+class ReviewerTests(unittest.TestCase):
+    def fixture(self) -> dict[str, object]:
+        return {
+            "verdict": "Approve",
+            "summary": "The bounded documentation-only change satisfies both supplied acceptance criteria.",
+            "blocking": [],
+            "nonblocking": [],
+        }
+
+    def test_packet_requires_unmerged_issue_scoped_pr_in_human_review(self):
+        packet = load_packet(REVIEW_FIXTURE)
+        self.assertEqual("Human Review", packet["issue"]["state"])
+        for key, value in (("base_branch", "main"), ("head_branch", "feature/loose"), ("merged", True)):
+            changed = json.loads(REVIEW_FIXTURE.read_text())
+            changed["pull_request"][key] = value
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "packet.json"
+                path.write_text(json.dumps(changed))
+                with self.subTest(key=key), self.assertRaises(LifecycleError):
+                    load_packet(path)
+
+    def test_review_findings_must_bind_to_known_evidence(self):
+        packet = load_packet(REVIEW_FIXTURE)
+        invalid = {
+            "verdict": "Request changes",
+            "summary": "A blocking finding references content outside the supplied review packet.",
+            "blocking": [{
+                "title": "Unknown file reference",
+                "category": "failure",
+                "criterion_ids": ["AC-1"],
+                "file": "invented.py",
+                "line": 1,
+                "evidence": "The reviewer claimed evidence from a file that was not supplied in context.",
+                "recommendation": "Supply concrete packet evidence before treating this as a blocking issue.",
+            }],
+            "nonblocking": [],
+        }
+        with self.assertRaisesRegex(MalformedModelOutput, "unknown file"):
+            parse_review(invalid, packet)
+        invalid["blocking"][0]["file"] = "docs/operations.md"
+        invalid["blocking"][0]["criterion_ids"] = ["AC-404"]
+        with self.assertRaisesRegex(MalformedModelOutput, "criteria"):
+            parse_review(invalid, packet)
+
+    def test_shadow_review_is_independent_read_only_and_has_no_posts(self):
+        config = load_config(CONFIG)
+        before = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"SANCTUM_AGENT_PREFIX": str(Path(directory) / "agents")}
+        ):
+            result = run_reviewer(
+                config, ROOT, REVIEW_FIXTURE, RunMode.SHADOW, review_fixture=self.fixture()
+            )
+        self.assertEqual("Approve", result["review"]["verdict"])
+        self.assertEqual(0, result["github_writes"])
+        self.assertEqual(0, result["linear_writes"])
+        after = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

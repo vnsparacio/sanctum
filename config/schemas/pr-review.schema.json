@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "blocking", "nonblocking"],
+  "properties": {
+    "verdict": {"enum": ["Approve", "Request changes", "Needs owner decision"]},
+    "summary": {"type": "string", "minLength": 20, "maxLength": 2000},
+    "blocking": {"$ref": "#/definitions/findings"},
+    "nonblocking": {"$ref": "#/definitions/findings"}
+  },
+  "definitions": {
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "category", "criterion_ids", "file", "line", "evidence", "recommendation"],
+        "properties": {
+          "title": {"type": "string", "minLength": 8, "maxLength": 180},
+          "category": {"enum": ["acceptance", "scope", "security", "privacy", "authority", "tests", "failure", "complexity", "documentation"]},
+          "criterion_ids": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {"type": "string", "minLength": 1, "maxLength": 80}
+          },
+          "file": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"]},
+          "evidence": {"type": "string", "minLength": 20, "maxLength": 1600},
+          "recommendation": {"type": "string", "minLength": 20, "maxLength": 1200}
+        }
+      }
+    }
+  }
+}

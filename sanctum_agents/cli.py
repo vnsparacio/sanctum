@@ -11,6 +11,7 @@ from .config import ConfigError, load_config, validate_model_catalog
 from .integrations import CodexCatalogClient, ExternalCallError
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
+from .reviewer import run_reviewer
 from .runtime import RunMode
 from .symphony_supervisor import preflight as symphony_preflight, supervise as supervise_symphony
 from .triage import run_triage
@@ -29,10 +30,11 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("symphony-preflight")
     subcommands.add_parser("symphony-run")
     run = subcommands.add_parser("run")
-    run.add_argument("role", choices=["repo-steward", "product-scout", "triage"])
+    run.add_argument("role", choices=["repo-steward", "product-scout", "triage", "reviewer"])
     run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
     run.add_argument("--deep", action="store_true")
     run.add_argument("--snapshot", type=Path)
+    run.add_argument("--packet", type=Path)
     run.add_argument("--escalate", action="store_true")
     run.add_argument("--deterministic", action="store_true", help="skip model invocation for tests")
     return result
@@ -77,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
             result = run_triage(
                 config, ROOT, args.snapshot.resolve(), RunMode(args.mode), escalate=args.escalate
             )
+        elif args.role == "reviewer":
+            if args.packet is None:
+                raise ValueError("Reviewer requires --packet until live GitHub/Linear qualification")
+            if args.deterministic:
+                raise ValueError("Reviewer deterministic runs require an explicit test fixture")
+            result = run_reviewer(config, ROOT, args.packet.resolve(), RunMode(args.mode))
         elif args.deterministic:
             raise ValueError("Product Scout deterministic runs require an explicit test fixture")
         else:
