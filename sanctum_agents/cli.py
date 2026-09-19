@@ -12,6 +12,7 @@ from .integrations import CodexCatalogClient, ExternalCallError
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .runtime import RunMode
+from .triage import run_triage
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,9 +26,11 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("validate-config")
     subcommands.add_parser("models-check")
     run = subcommands.add_parser("run")
-    run.add_argument("role", choices=["repo-steward", "product-scout"])
+    run.add_argument("role", choices=["repo-steward", "product-scout", "triage"])
     run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
     run.add_argument("--deep", action="store_true")
+    run.add_argument("--snapshot", type=Path)
+    run.add_argument("--escalate", action="store_true")
     run.add_argument("--deterministic", action="store_true", help="skip model invocation for tests")
     return result
 
@@ -57,6 +60,14 @@ def main(argv: list[str] | None = None) -> int:
                 RunMode(args.mode),
                 use_model=not args.deterministic,
                 deep=args.deep,
+            )
+        elif args.role == "triage":
+            if args.snapshot is None:
+                raise ValueError("Triage requires --snapshot until live Linear qualification")
+            if args.deterministic:
+                raise ValueError("Triage deterministic runs require an explicit test fixture")
+            result = run_triage(
+                config, ROOT, args.snapshot.resolve(), RunMode(args.mode), escalate=args.escalate
             )
         elif args.deterministic:
             raise ValueError("Product Scout deterministic runs require an explicit test fixture")

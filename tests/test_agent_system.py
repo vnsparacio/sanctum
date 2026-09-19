@@ -39,10 +39,12 @@ from sanctum_agents.runtime import (
     new_run_id,
 )
 from sanctum_agents.supervisor import BoundedProcess
+from sanctum_agents.triage import load_snapshot, parse_decisions, run_triage
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "agents.json"
+TRIAGE_FIXTURE = ROOT / "tests" / "fixtures" / "linear-triage-snapshot.json"
 
 
 def catalog() -> list[dict[str, object]]:
@@ -63,6 +65,7 @@ class ConfigurationTests(unittest.TestCase):
         config = load_config(CONFIG)
         self.assertEqual("gpt-5.6-terra", config.model_for("repo_steward").model)
         self.assertEqual("gpt-5.6-luna", config.model_for("triage").model)
+        self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
         self.assertEqual(1, config.symphony["max_concurrency"])
         validate_model_catalog(config, catalog())
 
@@ -402,6 +405,75 @@ class ProductScoutTests(unittest.TestCase):
             )
         self.assertEqual("dry-run", result["mode"])
         self.assertEqual(0, result["linear_writes"])
+
+
+class TriageTests(unittest.TestCase):
+    def fixture(self) -> dict[str, object]:
+        return {
+            "decisions": [
+                {
+                    "issue_id": "issue-a",
+                    "action": "Duplicate",
+                    "reason": "The existing backlog issue has the same hard runtime watchdog scope and evidence.",
+                    "duplicate_of": "issue-c",
+                    "related_ids": ["issue-b", "issue-c"],
+                },
+                {
+                    "issue_id": "issue-b",
+                    "action": "Leave",
+                    "reason": "A human should confirm whether this is also fully covered by the backlog item.",
+                    "duplicate_of": None,
+                    "related_ids": ["issue-a", "issue-c"],
+                },
+            ],
+            "owner_briefing": "One concrete duplicate can be canceled and linked; one uncertain overlap remains for owner review.",
+        }
+
+    def test_duplicate_maps_to_canceled_and_never_execution_gate(self):
+        issues = load_snapshot(TRIAGE_FIXTURE, max_items=20)
+        decisions, briefing = parse_decisions(self.fixture(), issues, max_items=20)
+        self.assertEqual({"state": "Canceled", "duplicate_of": "issue-c"}, decisions[0].mutation)
+        self.assertIsNone(decisions[1].mutation)
+        self.assertNotIn("Ready for Agent", json.dumps([item.mutation for item in decisions]))
+        self.assertNotIn("symphony", json.dumps([item.mutation for item in decisions]))
+        self.assertIn("owner review", briefing)
+
+    def test_unknown_and_non_triage_targets_fail_closed(self):
+        issues = load_snapshot(TRIAGE_FIXTURE, max_items=20)
+        unknown = json.loads(json.dumps(self.fixture()))
+        unknown["decisions"][0]["issue_id"] = "fabricated"
+        with self.assertRaisesRegex(MalformedModelOutput, "target"):
+            parse_decisions(unknown, issues, max_items=20)
+        backlog = json.loads(json.dumps(self.fixture()))
+        backlog["decisions"][0]["issue_id"] = "issue-c"
+        with self.assertRaisesRegex(MalformedModelOutput, "target"):
+            parse_decisions(backlog, issues, max_items=20)
+
+    def test_shadow_fixture_is_read_only_and_terra_escalation_is_explicit(self):
+        config = load_config(CONFIG)
+        before = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"SANCTUM_AGENT_PREFIX": str(Path(directory) / "agents")}
+        ):
+            luna = run_triage(
+                config, ROOT, TRIAGE_FIXTURE, RunMode.SHADOW, decision_fixture=self.fixture()
+            )
+            terra = run_triage(
+                config, ROOT, TRIAGE_FIXTURE, RunMode.DRY_RUN, escalate=True,
+                decision_fixture=self.fixture(),
+            )
+        self.assertEqual("gpt-5.6-luna", luna["model"])
+        self.assertEqual("gpt-5.6-terra", terra["model"])
+        self.assertEqual("dry-run", terra["mode"])
+        self.assertEqual(0, luna["linear_writes"])
+        after = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

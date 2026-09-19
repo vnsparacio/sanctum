@@ -78,7 +78,7 @@ def validate_issue_mutation(role: Role | str, mutation: dict[str, Any]) -> None:
         if state and state.strip().lower() != "triage":
             raise AuthorityError("finding agents may write only to Triage")
     if selected_role is Role.TRIAGE and state:
-        permitted = {"triage", "backlog", "watch", "canceled", "cancelled", "duplicate"}
+        permitted = {"triage", "backlog", "watch", "canceled", "cancelled"}
         if state.strip().lower() not in permitted:
             raise AuthorityError("triage may move work only within management queues")
     if selected_role is Role.IMPLEMENTATION:

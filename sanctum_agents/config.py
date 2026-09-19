@@ -113,7 +113,7 @@ def load_config(path: str | Path) -> AgentConfig:
             raise ConfigError(f"agent config {key} must be an object")
     if set(raw["roles"]) != _ROLES:
         raise ConfigError(f"roles must be exactly {sorted(_ROLES)}")
-    required_models = _ROLES | {"platform_build"}
+    required_models = _ROLES | {"platform_build", "triage_escalation"}
     if set(raw["models"]) != required_models:
         raise ConfigError(f"models must be exactly {sorted(required_models)}")
     models: dict[str, ModelConfig] = {}
