@@ -27,6 +27,7 @@ from sanctum_agents.management import (
     suppress_duplicates,
 )
 from sanctum_agents.reasoner import CodexReasoner
+from sanctum_agents.product_scout import parse_research, run_product_scout
 from sanctum_agents.repo_steward import collect_evidence, run_repo_steward
 from sanctum_agents.runtime import (
     Budget,
@@ -305,6 +306,102 @@ class RepoStewardTests(unittest.TestCase):
             text=True,
         ).stdout
         self.assertEqual(before, after)
+
+
+class ProductScoutTests(unittest.TestCase):
+    def fixture(self) -> dict[str, object]:
+        return {
+            "sources": [
+                {
+                    "id": "primary-1",
+                    "url": "https://github.com/example/private-agent/releases/tag/v1.2.3",
+                    "title": "Private agent runtime 1.2.3",
+                    "published_at": "2026-09-18",
+                    "kind": "release_notes",
+                    "summary": "The release adds bounded worker leases and deterministic cleanup receipts.",
+                },
+                {
+                    "id": "community-1",
+                    "url": "https://news.ycombinator.com/item?id=123456",
+                    "title": "Operator discussion of runaway agents",
+                    "published_at": "2026-09-18",
+                    "kind": "community",
+                    "summary": "Operators describe repeated failures caused by workers without total runtime caps.",
+                },
+            ],
+            "findings": [{
+                "title": "Compare bounded worker lease receipts",
+                "summary": "The release provides a concrete implementation of bounded leases with cleanup evidence.",
+                "sanctum_connection": "Sanctum can compare the receipt design with its implementation-worker watchdog without changing authority boundaries.",
+                "recommendation": "Investigate",
+                "source_ids": ["primary-1", "community-1"],
+                "labels": ["product-discovery", "research", "agent-quality"],
+            }],
+        }
+
+    def test_research_requires_public_sources_and_credible_evidence(self):
+        sources, findings = parse_research(self.fixture(), max_sources=3, max_items=2)
+        self.assertEqual(2, len(sources))
+        self.assertEqual("Investigate", findings[0].recommendation)
+        private = json.loads(json.dumps(self.fixture()))
+        private["sources"][0]["url"] = "https://127.0.0.1/private"
+        with self.assertRaisesRegex(MalformedModelOutput, "public HTTPS"):
+            parse_research(private, max_sources=3, max_items=2)
+        community_only = json.loads(json.dumps(self.fixture()))
+        community_only["findings"][0]["source_ids"] = ["community-1"]
+        with self.assertRaisesRegex(MalformedModelOutput, "credible"):
+            parse_research(community_only, max_sources=3, max_items=2)
+
+    def test_research_caps_and_authority_labels_fail_closed(self):
+        payload = self.fixture()
+        with self.assertRaisesRegex(MalformedModelOutput, "source limit"):
+            parse_research(payload, max_sources=1, max_items=2)
+        forbidden = json.loads(json.dumps(payload))
+        forbidden["findings"][0]["labels"] = ["product-discovery", "symphony"]
+        with self.assertRaisesRegex(MalformedModelOutput, "labels"):
+            parse_research(forbidden, max_sources=3, max_items=2)
+
+    def test_shadow_fixture_is_read_only_and_deduplicated(self):
+        config = load_config(CONFIG)
+        before = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"SANCTUM_AGENT_PREFIX": str(Path(directory) / "agents")}
+        ):
+            first = run_product_scout(
+                config, ROOT, RunMode.SHADOW, fixture_payload=self.fixture()
+            )
+            second = run_product_scout(
+                config, ROOT, RunMode.SHADOW, fixture_payload=self.fixture()
+            )
+            self.assertEqual(0, first["linear_writes"])
+            self.assertEqual(1, len(first["findings"]))
+            self.assertEqual(1, second["duplicates_suppressed"])
+            self.assertEqual([], second["findings"])
+        after = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertEqual(before, after)
+
+    def test_dry_run_is_labeled_and_never_writes_linear(self):
+        config = load_config(CONFIG)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"SANCTUM_AGENT_PREFIX": str(Path(directory) / "agents")}
+        ):
+            result = run_product_scout(
+                config, ROOT, RunMode.DRY_RUN, fixture_payload=self.fixture()
+            )
+        self.assertEqual("dry-run", result["mode"])
+        self.assertEqual(0, result["linear_writes"])
 
 
 if __name__ == "__main__":

@@ -149,12 +149,20 @@ def suppress_duplicates(findings: list[Finding], prior: list[str]) -> tuple[list
     return accepted, suppressed
 
 
-def shadow_document(run_id: str, role: str, commit: str | None, findings: list[Finding], evidence: list[Evidence]) -> dict[str, Any]:
+def shadow_document(
+    run_id: str,
+    role: str,
+    commit: str | None,
+    findings: list[Finding],
+    evidence: list[Evidence],
+    *,
+    mode: str = "shadow",
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "run_id": run_id,
         "role": role,
-        "mode": "shadow",
+        "mode": mode,
         "repository_commit": commit,
         "linear_writes": 0,
         "findings": [{**asdict(item), "fingerprint": item.fingerprint()} for item in findings],

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "role": "product_scout",
+  "mode": "shadow",
+  "model": "gpt-5.6-terra",
+  "reasoning": "medium",
+  "linear_writes": 0,
+  "runtime_seconds": 43.76,
+  "usage": {
+    "turns": 1,
+    "tokens": 68457
+  },
+  "source_count": 4,
+  "finding_count": 4,
+  "sample_finding": {
+    "title": "Treat a local vLLM server as a privileged internal service, not as an authenticated public API",
+    "recommendation": "Investigate",
+    "sanctum_connection": "Keep Sanctum policy and owner approval in front of the local inference service rather than treating an inference API key as an authorization boundary.",
+    "source_urls": [
+      "https://github.com/vllm-project/vllm/blob/main/docs/usage/security.md"
+    ],
+    "labels": [
+      "product-discovery",
+      "security",
+      "architecture"
+    ]
+  },
+  "acceptance": {
+    "bounded_process_completed": true,
+    "repository_unchanged": true,
+    "credible_source_required": true,
+    "duplicate_suppression_enabled": true,
+    "private_runtime_permissions": "0700 directories, 0600 files"
+  }
+}

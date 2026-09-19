@@ -9,6 +9,7 @@ import sys
 
 from .config import ConfigError, load_config, validate_model_catalog
 from .integrations import CodexCatalogClient, ExternalCallError
+from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .runtime import RunMode
 
@@ -24,7 +25,7 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("validate-config")
     subcommands.add_parser("models-check")
     run = subcommands.add_parser("run")
-    run.add_argument("role", choices=["repo-steward"])
+    run.add_argument("role", choices=["repo-steward", "product-scout"])
     run.add_argument("--mode", choices=[item.value for item in RunMode], default="shadow")
     run.add_argument("--deep", action="store_true")
     run.add_argument("--deterministic", action="store_true", help="skip model invocation for tests")
@@ -49,13 +50,18 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }, sort_keys=True))
             return 0
-        result = run_repo_steward(
-            config,
-            ROOT,
-            RunMode(args.mode),
-            use_model=not args.deterministic,
-            deep=args.deep,
-        )
+        if args.role == "repo-steward":
+            result = run_repo_steward(
+                config,
+                ROOT,
+                RunMode(args.mode),
+                use_model=not args.deterministic,
+                deep=args.deep,
+            )
+        elif args.deterministic:
+            raise ValueError("Product Scout deterministic runs require an explicit test fixture")
+        else:
+            result = run_product_scout(config, ROOT, RunMode(args.mode))
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConfigError, ExternalCallError, RuntimeError, ValueError) as exc:

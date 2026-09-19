@@ -48,9 +48,13 @@ class CodexReasoner:
         cwd: Path,
         budget: Budget,
         output_limit_bytes: int,
+        *,
+        enable_search: bool = False,
     ) -> tuple[dict[str, Any], ProcessResult]:
-        command = [
-            self.command,
+        command = [self.command]
+        if enable_search:
+            command.append("--search")
+        command.extend([
             "exec",
             "--json",
             "--ephemeral",
@@ -68,7 +72,7 @@ class CodexReasoner:
             "--output-schema",
             str(schema),
             prompt,
-        ]
+        ])
         result = self.supervisor.run(
             command,
             cwd,

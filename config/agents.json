@@ -41,12 +41,12 @@
       "cadence": "monday_wednesday_friday",
       "write_enabled": false,
       "wall_clock_seconds": 900,
-      "max_items": 8,
-      "max_sources": 12,
+      "max_items": 5,
+      "max_sources": 8,
       "max_issues_created": 3,
       "max_retries": 1,
       "max_turns": 3,
-      "max_tokens": 120000,
+      "max_tokens": 150000,
       "repository_scope": []
     },
     "triage": {

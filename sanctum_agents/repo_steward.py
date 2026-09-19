@@ -208,7 +208,9 @@ def run_repo_steward(
             raise RuntimeError("Repo Steward Linear writes require live metadata qualification")
         after = repository_status(repository)
         assert_repository_unchanged(before, after, Role.REPO_STEWARD)
-        artifact = shadow_document(run_id, role_name, commit, findings, evidence)
+        artifact = shadow_document(
+            run_id, role_name, commit, findings, evidence, mode=mode.value
+        )
         artifact["duplicates_suppressed"] = len(suppressed)
         output = prefix / "shadow" / f"{run_id}.json"
         output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
