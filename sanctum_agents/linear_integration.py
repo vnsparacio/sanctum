@@ -62,6 +62,176 @@ _REQUIRED_TEMPLATES = {
     "Agent Quality Finding",
 }
 
+LINEAR_PROJECT_METADATA_QUERY = """
+query SanctumProjectMetadata($slug: String!) {
+  project(id: $slug) {
+    id
+    name
+    slugId
+    url
+    teams {
+      nodes { id name }
+      pageInfo { hasNextPage }
+    }
+  }
+}
+""".strip()
+
+LINEAR_TEAM_METADATA_QUERY = """
+query SanctumTeamMetadata($id: String!) {
+  team(id: $id) {
+    id
+    name
+    states {
+      nodes { id name }
+      pageInfo { hasNextPage }
+    }
+    labels {
+      nodes { id name parent { id name } }
+      pageInfo { hasNextPage }
+    }
+    templates {
+      nodes { id name type }
+      pageInfo { hasNextPage }
+    }
+  }
+}
+""".strip()
+
+
+def _connection_nodes(parent: Any, key: str) -> list[dict[str, Any]]:
+    connection = parent.get(key) if isinstance(parent, dict) else None
+    nodes = connection.get("nodes") if isinstance(connection, dict) else None
+    page_info = connection.get("pageInfo") if isinstance(connection, dict) else None
+    if (
+        not isinstance(nodes, list)
+        or any(not isinstance(item, dict) for item in nodes)
+        or not isinstance(page_info, dict)
+        or not isinstance(page_info.get("hasNextPage"), bool)
+    ):
+        raise LinearMetadataError(f"Linear {key} response is malformed")
+    if page_info["hasNextPage"]:
+        raise LinearMetadataError(f"Linear {key} metadata requires pagination")
+    return nodes
+
+
+def _required_mapping(
+    nodes: list[dict[str, Any]], required: set[str], kind: str
+) -> dict[str, str]:
+    matches: dict[str, list[str]] = {name: [] for name in required}
+    for item in nodes:
+        name = item.get("name")
+        identifier = item.get("id")
+        if (
+            not isinstance(name, str)
+            or not isinstance(identifier, str)
+            or not identifier
+        ):
+            raise LinearMetadataError(f"Linear {kind} response is malformed")
+        if name in matches:
+            matches[name].append(identifier)
+    missing = sorted(name for name, identifiers in matches.items() if not identifiers)
+    duplicates = sorted(
+        name for name, identifiers in matches.items() if len(identifiers) > 1
+    )
+    if missing:
+        raise LinearMetadataError(
+            f"Linear {kind} missing required names: {', '.join(missing)}"
+        )
+    if duplicates:
+        raise LinearMetadataError(
+            f"Linear {kind} contain duplicate required names: {', '.join(duplicates)}"
+        )
+    return {name: matches[name][0] for name in sorted(required)}
+
+
+def capture_qualified_metadata(
+    client: Any, project_slug: str, path: Path
+) -> QualifiedLinearMetadata:
+    """Capture and validate the exact read-only Linear metadata contract."""
+    project_data = client.query(LINEAR_PROJECT_METADATA_QUERY, {"slug": project_slug})
+    project = project_data.get("project")
+    slug_id = project.get("slugId") if isinstance(project, dict) else None
+    project_url = project.get("url") if isinstance(project, dict) else None
+    if (
+        not isinstance(project, dict)
+        or not isinstance(project.get("id"), str)
+        or not project["id"]
+        or not isinstance(project.get("name"), str)
+        or not project["name"]
+        or not isinstance(slug_id, str)
+        or not slug_id
+        or not project_slug.endswith(f"-{slug_id}")
+        or not isinstance(project_url, str)
+        or not project_url.startswith("https://linear.app/")
+        or not project_url.rstrip("/").endswith(f"/project/{project_slug}")
+    ):
+        raise LinearMetadataError("Linear project metadata is invalid")
+    teams = _connection_nodes(project, "teams")
+    if len(teams) != 1:
+        raise LinearMetadataError("Linear project must have exactly one owning team")
+    team_id = teams[0].get("id")
+    if not isinstance(team_id, str) or not team_id:
+        raise LinearMetadataError("Linear owning team metadata is invalid")
+
+    team_data = client.query(LINEAR_TEAM_METADATA_QUERY, {"id": team_id})
+    team = team_data.get("team")
+    if (
+        not isinstance(team, dict)
+        or team.get("id") != team_id
+        or not isinstance(team.get("name"), str)
+        or not team["name"]
+    ):
+        raise LinearMetadataError("Linear owning team metadata is invalid")
+    states = _connection_nodes(team, "states")
+    labels = _connection_nodes(team, "labels")
+    templates = _connection_nodes(team, "templates")
+
+    state_mapping = _required_mapping(states, _REQUIRED_STATES, "states")
+    label_mapping = _required_mapping(labels, _REQUIRED_LABELS, "labels")
+    template_mapping = _required_mapping(templates, _REQUIRED_TEMPLATES, "templates")
+
+    source_parents: list[str] = []
+    for item in labels:
+        if item.get("name") not in {"Repo Steward", "Product Scout"}:
+            continue
+        parent = item.get("parent")
+        if (
+            not isinstance(parent, dict)
+            or parent.get("name") != "source"
+            or not isinstance(parent.get("id"), str)
+            or not parent["id"]
+        ):
+            raise LinearMetadataError(
+                "Linear management labels must belong to the source group"
+            )
+        source_parents.append(parent["id"])
+    if len(set(source_parents)) != 1:
+        raise LinearMetadataError(
+            "Linear management labels use different source groups"
+        )
+    for item in templates:
+        if item.get("name") in _REQUIRED_TEMPLATES and item.get("type") != "issue":
+            raise LinearMetadataError(
+                "Linear required templates must be issue templates"
+            )
+
+    payload = {
+        "schema_version": 1,
+        "project": {"id": project["id"], "slug": project_slug, "team_id": team_id},
+        "states": state_mapping,
+        "labels": label_mapping,
+        "templates": template_mapping,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.chmod(0o600)
+    temporary.replace(path)
+    path.chmod(0o600)
+    return load_qualified_metadata(path, project_slug)
+
 
 def load_qualified_metadata(path: Path, expected_slug: str) -> QualifiedLinearMetadata:
     try:

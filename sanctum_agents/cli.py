@@ -9,7 +9,11 @@ from pathlib import Path
 
 from .config import ConfigError, load_config, validate_model_catalog
 from .integrations import CodexCatalogClient, ExternalCallError, LinearGraphQLClient
-from .linear_integration import LinearWriter, load_qualified_metadata
+from .linear_integration import (
+    LinearWriter,
+    capture_qualified_metadata,
+    load_qualified_metadata,
+)
 from .product_scout import run_product_scout
 from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
@@ -21,7 +25,7 @@ from .symphony_supervisor import (
 from .symphony_supervisor import (
     supervise as supervise_symphony,
 )
-from .triage import run_triage
+from .triage import capture_live_snapshot, run_triage
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "agents.json"
@@ -36,6 +40,7 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("symphony-preflight")
     subcommands.add_parser("symphony-run")
     subcommands.add_parser("schedule-plan")
+    subcommands.add_parser("linear-metadata-capture")
     linear_check = subcommands.add_parser("linear-metadata-check")
     linear_check.add_argument("--path", type=Path)
     run = subcommands.add_parser("run")
@@ -115,8 +120,29 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command == "linear-metadata-capture":
+            path = config.runtime_prefix() / "state" / "linear-metadata.json"
+            metadata = capture_qualified_metadata(
+                LinearGraphQLClient(), config.project["linear_project_slug"], path
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "path": str(path),
+                        "project_slug": metadata.project_slug,
+                        "state_count": len(metadata.states),
+                        "label_count": len(metadata.labels),
+                        "template_count": len(metadata.templates),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
         mode = RunMode(args.mode)
         linear_writer = None
+        linear_client = None
+        metadata = None
         role_key = args.role.replace("-", "_")
         if (
             mode is RunMode.LIVE
@@ -127,7 +153,8 @@ def main(argv: list[str] | None = None) -> int:
                 config.runtime_prefix() / "state" / "linear-metadata.json",
                 config.project["linear_project_slug"],
             )
-            linear_writer = LinearWriter(LinearGraphQLClient(), metadata)
+            linear_client = LinearGraphQLClient()
+            linear_writer = LinearWriter(linear_client, metadata)
         if args.role == "repo-steward":
             result = run_repo_steward(
                 config,
@@ -139,8 +166,22 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.role == "triage":
             if args.snapshot is None:
-                raise ValueError(
-                    "Triage requires --snapshot until live Linear qualification"
+                if (
+                    mode is not RunMode.LIVE
+                    or linear_client is None
+                    or metadata is None
+                ):
+                    raise ValueError(
+                        "Triage requires --snapshot until live Linear qualification"
+                    )
+                args.snapshot = (
+                    config.runtime_prefix() / "state" / "linear-triage-snapshot.json"
+                )
+                capture_live_snapshot(
+                    linear_client,
+                    metadata,
+                    args.snapshot,
+                    max_items=config.roles["triage"].max_items,
                 )
             if args.deterministic:
                 raise ValueError(

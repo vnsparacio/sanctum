@@ -7,36 +7,36 @@
       "role": "repo_steward",
       "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
       "local_time": "08:15",
-      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "repo-steward", "--mode", "shadow"],
-      "enabled": false,
-      "blocked_by": ["Linear metadata qualification"]
+      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "repo-steward", "--mode", "live"],
+      "enabled": true,
+      "blocked_by": []
     },
     {
       "name": "Sanctum Repo Steward weekly deep review",
       "role": "repo_steward",
       "days": ["Saturday"],
       "local_time": "09:00",
-      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "repo-steward", "--mode", "shadow", "--deep"],
-      "enabled": false,
-      "blocked_by": ["Linear metadata qualification"]
+      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "repo-steward", "--mode", "live", "--deep"],
+      "enabled": true,
+      "blocked_by": []
     },
     {
       "name": "Sanctum Product Scout",
       "role": "product_scout",
       "days": ["Monday", "Wednesday", "Friday"],
       "local_time": "08:45",
-      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "product-scout", "--mode", "shadow"],
-      "enabled": false,
-      "blocked_by": ["Linear metadata qualification"]
+      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "product-scout", "--mode", "live"],
+      "enabled": true,
+      "blocked_by": []
     },
     {
       "name": "Sanctum Triage",
       "role": "triage",
       "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
       "local_time": "09:30",
-      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "triage", "--mode", "shadow", "--snapshot", "$SANCTUM_TRIAGE_SNAPSHOT"],
-      "enabled": false,
-      "blocked_by": ["authenticated read-only Linear snapshot provider"]
+      "command": [".venv/bin/python", "-m", "sanctum_agents.cli", "run", "triage", "--mode", "live"],
+      "enabled": true,
+      "blocked_by": []
     }
   ]
 }
