@@ -4,7 +4,7 @@
 
 V1.1.0 is a completed minor-release candidate. Its source version is `1.1.0`; the immutable V1.0.0 tag and release are not recreated or moved. The release-completion PR must merge into `v1.1-dev` before an owner creates the `v1.1.0` tag and GitHub release. Production migration remains separate.
 
-Review [the V1.1 release record](V1.1-RELEASE-COMPLETION.md), [structured-editing evidence](PROJECT-3-STRUCTURED-EDITING.md), documented limitations, source audit and CI before tagging. Do not treat the completion PR itself as authorization to move `main`, delete private evidence, change a private runtime, or launch compute.
+Review [the V1.1 release record](../history/v1.1/V1.1-RELEASE-COMPLETION.md), [structured-editing evidence](../history/v1.1/project-3/PROJECT-3-STRUCTURED-EDITING.md), documented limitations, source audit and CI before tagging. Do not treat the completion PR itself as authorization to move `main`, delete private evidence, change a private runtime, or launch compute.
 
 After the PR is merged and the intended release commit is verified, use an approved public Git identity and run:
 

@@ -5,7 +5,7 @@ This is the original live-qualification record, retained as evidence. The public
 
 | Gate | Disposition | Evidence / remaining work |
 |---|---|---|
-| 1 — advisory | Reviewed exception | Vitest/mocker 3.2.7 development-only advisory; prescribed tests do not use the vulnerable browser/dev-server path. No broad upgrade. [Review](dependency-review.md) |
+| 1 — advisory | Reviewed exception | Vitest/mocker 3.2.7 development-only advisory; prescribed tests do not use the vulnerable browser/dev-server path. No broad upgrade. [Review](../../development/dependency-review.md) |
 | 2 — local model | Passed on owner’s Mac | Fresh prefix-owned MLX, cached weights, authenticated gateway arithmetic, unauthenticated denial, restart and clean stop |
 | 3 — WebUI | Passed application and interactive local scope | Actual sign-in, help/new, tier exclusion, exact audit disclosure, correct local arithmetic, status, cancel and end passed. Earlier attachment rejection and no-fallback application checks retained. The browser-only implicit-tool defect was narrowly fixed and regression-tested |
 | 4 — personal sources | Passed bounded read/generation scope after explicit authorization | Calendar today/tomorrow/seven-day window, keyword search and one detail; at most three Gmail messages; local-only summary/draft generation. Calendar HTTP broker output cap and write denial passed. Owner-run native and candidate broker/wrapper reads passed within three raw records, with local summary/structured unsent draft, exact supporting-source quote and mutation rejection. Broader personal-answer factual quality was not independently reviewed |
@@ -28,7 +28,7 @@ MCP live checks applied the candidate guard to the existing tool arguments, then
 
 ## Remaining owner steps
 
-The bounded candidate Messages broker/wrapper check passed in the owner-authorized Terminal. The release recommendation is READY WITH DOCUMENTED EXCEPTIONS for the functional V1 scope: the observed local-model browser-target error, draft-format deviation and retained development-only advisory are explicit limitations. Personal-source tests establish bounded reads, generation and a source-quote check; they do not claim a general factual-accuracy audit. Do not silently mark these required checks optional. Production migration remains a separately approved maintenance procedure; see [migration/rollback](migration.md) and [later publication commands](release.md).
+The bounded candidate Messages broker/wrapper check passed in the owner-authorized Terminal. The release recommendation is READY WITH DOCUMENTED EXCEPTIONS for the functional V1 scope: the observed local-model browser-target error, draft-format deviation and retained development-only advisory are explicit limitations. Personal-source tests establish bounded reads, generation and a source-quote check; they do not claim a general factual-accuracy audit. Do not silently mark these required checks optional. Production migration remains a separately approved maintenance procedure; see [migration/rollback](../../guides/migration.md) and [later publication commands](../../guides/release.md).
 
 ## Interactive WebUI continuation
 

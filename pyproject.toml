@@ -1,0 +1,50 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | node_modules
+  | dist
+  | \.local
+)/
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = [".local", "dist", "node_modules"]
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
+ignore = [
+  # These entry points deliberately amend sys.path before importing packaged modules.
+  "E402",
+  # Existing bounded exception translation intentionally preserves terse public errors.
+  "B904",
+  # This immutable policy-state default is part of the qualified routing contract.
+  "B008",
+  # The qualification extractor intentionally handles arbitrary non-JSON text.
+  "E722",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"gate/tests/**" = [
+  # Security tests intentionally exercise broad failures and immediate loop closures.
+  "B017",
+  "B023",
+]
+"gate/tests/fixtures/**" = [
+  # The harness substitutes these package-root sentinels before execution.
+  "F821",
+]
+"reliability/tests/**" = [
+  # Contract tests assert rejection across the complete exception boundary.
+  "B017",
+]
+"sanctum_agents/repo_steward.py" = [
+  # Percent formatting keeps the reviewed prompt bytes unchanged.
+  "UP031",
+]

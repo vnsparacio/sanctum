@@ -20,7 +20,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,14 +35,13 @@ SESSION_RE = re.compile(r"^[A-Za-z0-9._:@+-]{1,200}$")
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def validate_session_id(session_id: str) -> str:
     if not SESSION_RE.fullmatch(session_id):
         raise ValueError(
-            "session id must be 1-200 chars using only "
-            "letters, numbers, . _ : @ + -"
+            "session id must be 1-200 chars using only " "letters, numbers, . _ : @ + -"
         )
     return session_id
 
@@ -59,10 +58,12 @@ class SessionStore:
         os.chmod(self.state_dir, 0o700)
 
         if not self.state_file.exists():
-            self._atomic_write({
-                "schema": "hybrid-ai-session-state/v1",
-                "sessions": {},
-            })
+            self._atomic_write(
+                {
+                    "schema": "hybrid-ai-session-state/v1",
+                    "sessions": {},
+                }
+            )
         else:
             os.chmod(self.state_file, 0o600)
 
@@ -182,15 +183,17 @@ class SessionStore:
             }
             data["sessions"][session_id] = rec
             self._atomic_write(data)
-            self._append_audit({
-                "ts": now,
-                "session_id": session_id,
-                "event": "START",
-                "before": "UNKNOWN",
-                "after": "CLEAN",
-                "reason": "trusted local session start",
-                "generation": 1,
-            })
+            self._append_audit(
+                {
+                    "ts": now,
+                    "session_id": session_id,
+                    "event": "START",
+                    "before": "UNKNOWN",
+                    "after": "CLEAN",
+                    "reason": "trusted local session start",
+                    "generation": 1,
+                }
+            )
             return {"session_id": session_id, **rec}
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
@@ -230,15 +233,17 @@ class SessionStore:
             rec["last_reason"] = reason
             data["sessions"][session_id] = rec
             self._atomic_write(data)
-            self._append_audit({
-                "ts": now,
-                "session_id": session_id,
-                "event": "OBSERVE",
-                "before": before,
-                "after": after,
-                "reason": reason,
-                "generation": rec["generation"],
-            })
+            self._append_audit(
+                {
+                    "ts": now,
+                    "session_id": session_id,
+                    "event": "OBSERVE",
+                    "before": before,
+                    "after": after,
+                    "reason": reason,
+                    "generation": rec["generation"],
+                }
+            )
             return {
                 "session_id": session_id,
                 **rec,
@@ -262,9 +267,7 @@ class SessionStore:
             data = self._load()
             rec = data["sessions"].get(session_id)
             if rec is None:
-                raise RuntimeError(
-                    "cannot reset unknown session; start it instead"
-                )
+                raise RuntimeError("cannot reset unknown session; start it instead")
 
             before = rec["privacy"]
             now = utc_now()
@@ -278,15 +281,17 @@ class SessionStore:
             }
             data["sessions"][session_id] = new_rec
             self._atomic_write(data)
-            self._append_audit({
-                "ts": now,
-                "session_id": session_id,
-                "event": "RESET",
-                "before": before,
-                "after": "CLEAN",
-                "reason": "new-context",
-                "generation": generation,
-            })
+            self._append_audit(
+                {
+                    "ts": now,
+                    "session_id": session_id,
+                    "event": "RESET",
+                    "before": before,
+                    "after": "CLEAN",
+                    "reason": "new-context",
+                    "generation": generation,
+                }
+            )
             return {"session_id": session_id, **new_rec}
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
@@ -296,8 +301,7 @@ class SessionStore:
         self.ensure_storage()
         data = self._load()
         return [
-            {"session_id": sid, **rec}
-            for sid, rec in sorted(data["sessions"].items())
+            {"session_id": sid, **rec} for sid, rec in sorted(data["sessions"].items())
         ]
 
 
@@ -306,17 +310,21 @@ def default_state_dir() -> Path:
 
 
 def human(rec: dict[str, Any]) -> str:
-    return "\n".join([
-        f"Session:    {rec['session_id']}",
-        f"Privacy:    {rec['privacy']}",
-        f"Generation: {rec.get('generation') if rec.get('generation') is not None else '-'}",
-        f"Updated:    {rec.get('updated_at') or '-'}",
-        f"Reason:     {rec.get('last_reason') or rec.get('reason') or '-'}",
-    ])
+    return "\n".join(
+        [
+            f"Session:    {rec['session_id']}",
+            f"Privacy:    {rec['privacy']}",
+            f"Generation: {rec.get('generation') if rec.get('generation') is not None else '-'}",
+            f"Updated:    {rec.get('updated_at') or '-'}",
+            f"Reason:     {rec.get('last_reason') or rec.get('reason') or '-'}",
+        ]
+    )
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Manage local privacy state for one AI session.")
+    p = argparse.ArgumentParser(
+        description="Manage local privacy state for one AI session."
+    )
     p.add_argument("--state-dir", default=str(default_state_dir()))
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -377,4 +385,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     raise SystemExit(main())

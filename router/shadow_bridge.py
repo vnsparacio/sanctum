@@ -31,29 +31,57 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from request_classifier import load_rules, classify_request
-from router import load_policy
-from provenance import load_registry, build_envelope, route_envelope, tool_to_source
-from session_state import SessionStore
+from provenance import build_envelope, load_registry, route_envelope, tool_to_source
+from request_classifier import classify_request, load_rules
 from session_decision import (
-    state_to_classifier_context,
     decision_privacy_to_session_state,
+    state_to_classifier_context,
 )
+from session_state import SessionStore
+
+from router import load_policy
 
 DEFAULT_STATE_DIR = HERE / "state"
 DEFAULT_SHADOW_DIR = HERE / "shadow"
 DEFAULT_LOG = DEFAULT_SHADOW_DIR / "shadow-events.jsonl"
 
 SAFE_EVENT_KEYS = {
-    "schema", "ts", "event", "session_id", "run_hash", "call_hash",
-    "resumed", "reason", "provider", "model", "api", "transport",
-    "duration_ms", "outcome", "success",
-    "session_before", "session_after",
-    "privacy_hint", "task", "quality", "auto_declassified", "tags",
-    "privacy", "difficulty", "preferred_route", "action",
-    "reasoning_tier", "hosted_egress_allowed", "authority",
-    "tool_name", "source", "tool_privacy", "mapping_reason",
-    "prior_shadow_route", "prior_shadow_tier", "boundary_alert",
+    "schema",
+    "ts",
+    "event",
+    "session_id",
+    "run_hash",
+    "call_hash",
+    "resumed",
+    "reason",
+    "provider",
+    "model",
+    "api",
+    "transport",
+    "duration_ms",
+    "outcome",
+    "success",
+    "session_before",
+    "session_after",
+    "privacy_hint",
+    "task",
+    "quality",
+    "auto_declassified",
+    "tags",
+    "privacy",
+    "difficulty",
+    "preferred_route",
+    "action",
+    "reasoning_tier",
+    "hosted_egress_allowed",
+    "authority",
+    "tool_name",
+    "source",
+    "tool_privacy",
+    "mapping_reason",
+    "prior_shadow_route",
+    "prior_shadow_tier",
+    "boundary_alert",
     "error_code",
 }
 
@@ -96,7 +124,9 @@ def load_recent(log_path: Path, limit: int = 2000) -> list[dict[str, Any]]:
     return out
 
 
-def find_prior_route(log_path: Path, run_hash: str | None) -> tuple[str | None, str | None]:
+def find_prior_route(
+    log_path: Path, run_hash: str | None
+) -> tuple[str | None, str | None]:
     if not run_hash:
         return None, None
     for e in reversed(load_recent(log_path)):
@@ -159,14 +189,17 @@ def observe_turn_start(payload: dict[str, Any], log_path: Path) -> dict[str, Any
         missing_start_is_personal=True,
     )
 
-    append_event(log_path, {
-        "schema": "hybrid-ai-shadow-event/v1",
-        "ts": payload.get("ts"),
-        "event": "turn_start",
-        "session_id": session_id,
-        "run_hash": run_hash,
-        "session_before": before["privacy"],
-    })
+    append_event(
+        log_path,
+        {
+            "schema": "hybrid-ai-shadow-event/v1",
+            "ts": payload.get("ts"),
+            "event": "turn_start",
+            "session_id": session_id,
+            "run_hash": run_hash,
+            "session_before": before["privacy"],
+        },
+    )
     return {
         "ok": True,
         "session_before": before["privacy"],
@@ -181,7 +214,8 @@ def run_tools_for_privacy(
     if not run_hash:
         return []
     return [
-        e for e in load_recent(log_path)
+        e
+        for e in load_recent(log_path)
         if e.get("event") == "tool_provenance" and e.get("run_hash") == run_hash
     ]
 
@@ -260,12 +294,10 @@ def route_user_turn(payload: dict[str, Any], log_path: Path) -> dict[str, Any]:
 
     tool_events = run_tools_for_privacy(log_path, run_hash)
     private_tools = [
-        e for e in tool_events
-        if e.get("tool_privacy") in ("PERSONAL", "RESTRICTED")
+        e for e in tool_events if e.get("tool_privacy") in ("PERSONAL", "RESTRICTED")
     ]
     boundary_alert = (
-        decision["preferred_route"] == "HOSTED_REMOTE"
-        and len(private_tools) > 0
+        decision["preferred_route"] == "HOSTED_REMOTE" and len(private_tools) > 0
     )
 
     event = {
@@ -304,6 +336,7 @@ def route_user_turn(payload: dict[str, Any], log_path: Path) -> dict[str, Any]:
         "session_after": after["privacy"],
         "boundary_alert": boundary_alert,
     }
+
 
 def observe_tool(payload: dict[str, Any], log_path: Path) -> dict[str, Any]:
     session_id = payload["session_id"]
@@ -389,37 +422,45 @@ def observe_simple(payload: dict[str, Any], log_path: Path) -> dict[str, Any]:
             payload["session_id"],
             resumed=bool(payload.get("resumed")),
         )
-        event.update({
-            "resumed": bool(payload.get("resumed")),
-            "session_after": rec["privacy"],
-        })
+        event.update(
+            {
+                "resumed": bool(payload.get("resumed")),
+                "session_after": rec["privacy"],
+            }
+        )
 
     elif event_type == "session_end":
         event["reason"] = payload.get("reason")
 
     elif event_type == "model_call_started":
-        event.update({
-            "call_hash": payload.get("call_hash"),
-            "provider": payload.get("provider"),
-            "model": payload.get("model"),
-            "api": payload.get("api"),
-            "transport": payload.get("transport"),
-        })
+        event.update(
+            {
+                "call_hash": payload.get("call_hash"),
+                "provider": payload.get("provider"),
+                "model": payload.get("model"),
+                "api": payload.get("api"),
+                "transport": payload.get("transport"),
+            }
+        )
 
     elif event_type == "model_call_ended":
-        event.update({
-            "call_hash": payload.get("call_hash"),
-            "provider": payload.get("provider"),
-            "model": payload.get("model"),
-            "duration_ms": payload.get("duration_ms"),
-            "outcome": payload.get("outcome"),
-        })
+        event.update(
+            {
+                "call_hash": payload.get("call_hash"),
+                "provider": payload.get("provider"),
+                "model": payload.get("model"),
+                "duration_ms": payload.get("duration_ms"),
+                "outcome": payload.get("outcome"),
+            }
+        )
 
     elif event_type == "agent_end":
-        event.update({
-            "duration_ms": payload.get("duration_ms"),
-            "success": payload.get("success"),
-        })
+        event.update(
+            {
+                "duration_ms": payload.get("duration_ms"),
+                "success": payload.get("success"),
+            }
+        )
 
     else:
         raise ValueError(f"unsupported simple event: {event_type}")
@@ -454,12 +495,16 @@ def print_report(log_path: Path, last: int | None) -> int:
     if inputs:
         print()
         print("Shadow routes:")
-        for key, count in Counter(e.get("preferred_route") for e in inputs).most_common():
+        for key, count in Counter(
+            e.get("preferred_route") for e in inputs
+        ).most_common():
             print(f"  {key}: {count}")
 
         print()
         print("Reasoning tiers:")
-        for key, count in Counter(e.get("reasoning_tier") for e in inputs).most_common():
+        for key, count in Counter(
+            e.get("reasoning_tier") for e in inputs
+        ).most_common():
             print(f"  {key}: {count}")
 
         print()

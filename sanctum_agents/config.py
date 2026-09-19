@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +56,9 @@ class AgentConfig:
         resolved = result.resolve(strict=False)
         repository = self.path.parents[1].resolve()
         if resolved == repository or resolved.is_relative_to(repository):
-            raise ConfigError("agent runtime prefix must remain outside the source repository")
+            raise ConfigError(
+                "agent runtime prefix must remain outside the source repository"
+            )
         return resolved
 
     def model_for(self, role: str) -> ModelConfig:
@@ -81,8 +83,12 @@ def _role(name: str, raw: Any) -> RoleConfig:
     if type(raw.get("write_enabled")) is not bool:
         raise ConfigError(f"role {name} write_enabled must be boolean")
     scope = raw.get("repository_scope")
-    if not isinstance(scope, list) or any(not isinstance(item, str) or not item for item in scope):
-        raise ConfigError(f"role {name} repository_scope must be a list of non-empty strings")
+    if not isinstance(scope, list) or any(
+        not isinstance(item, str) or not item for item in scope
+    ):
+        raise ConfigError(
+            f"role {name} repository_scope must be a list of non-empty strings"
+        )
     cadence = raw.get("cadence")
     if not isinstance(cadence, str) or not cadence:
         raise ConfigError(f"role {name} cadence must be non-empty")
@@ -136,13 +142,18 @@ def load_config(path: str | Path) -> AgentConfig:
         raise ConfigError("initial Symphony concurrency must remain 1")
     symphony = raw["symphony"]
     if symphony.get("engineering_preview_acknowledged") is not True:
-        raise ConfigError("Symphony engineering preview must be explicitly acknowledged")
+        raise ConfigError(
+            "Symphony engineering preview must be explicitly acknowledged"
+        )
     for key in ("binary_env", "default_binary", "workflow"):
         if not isinstance(symphony.get(key), str) or not symphony[key]:
             raise ConfigError(f"symphony.{key} must be non-empty")
     for key in (
-        "shutdown_grace_seconds", "state_port", "poll_seconds",
-        "state_timeout_seconds", "output_limit_bytes",
+        "shutdown_grace_seconds",
+        "state_port",
+        "poll_seconds",
+        "state_timeout_seconds",
+        "output_limit_bytes",
     ):
         _positive(symphony, key)
     runtime = raw["runtime"]
@@ -173,7 +184,9 @@ def validate_model_catalog(config: AgentConfig, catalog: list[dict[str, Any]]) -
         }
     for role, selected in config.models.items():
         if selected.model not in available:
-            raise ConfigError(f"configured model unavailable for {role}: {selected.model}")
+            raise ConfigError(
+                f"configured model unavailable for {role}: {selected.model}"
+            )
         if selected.reasoning not in available[selected.model]:
             raise ConfigError(
                 f"configured reasoning unavailable for {role}: "

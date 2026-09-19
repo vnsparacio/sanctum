@@ -1,6 +1,6 @@
 # Release limitations
 
-The current recommendation is **READY WITH DOCUMENTED EXCEPTIONS**. See [qualification](qualification.md) for exact gates.
+The V1 recommendation was **READY WITH DOCUMENTED EXCEPTIONS**. See the historical [qualification](../history/v1/qualification.md) for exact gates.
 
 - Host operations target macOS; MLX requires Apple Silicon. Linux CI has not run here.
 - Fresh source-only build and host-runtime installation used package caches/downloads. MLX reused existing cached weights; no new multi-GB model download was performed.

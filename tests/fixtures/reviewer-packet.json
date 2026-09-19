@@ -15,7 +15,7 @@
         "text": "No implementation or runtime behavior is changed."
       }
     ],
-    "workpad": "Changed only docs/operations.md and verified git diff --check plus make audit."
+    "workpad": "Changed only docs/guides/operations.md and verified git diff --check plus make audit."
   },
   "pull_request": {
     "number": 999,
@@ -23,8 +23,8 @@
     "base_branch": "v1.2-dev",
     "head_branch": "symphony/san-200",
     "merged": false,
-    "changed_files": ["docs/operations.md"],
-    "diff": "diff --git a/docs/operations.md b/docs/operations.md\n+Budget stops exit with code 75 and leave Linear state unchanged.\n",
+    "changed_files": ["docs/guides/operations.md"],
+    "diff": "diff --git a/docs/guides/operations.md b/docs/guides/operations.md\n+Budget stops exit with code 75 and leave Linear state unchanged.\n",
     "ci": [
       {"name": "Offline contracts", "status": "completed", "conclusion": "success"}
     ],
@@ -32,7 +32,7 @@
   },
   "relevant_context": [
     {
-      "path": "docs/agents/implementation-worker.md",
+      "path": "docs/current/agent-system/agents/implementation-worker.md",
       "content": "A violation exits with code 75 and leaves Linear state untouched."
     }
   ]

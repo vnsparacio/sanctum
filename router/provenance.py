@@ -66,45 +66,51 @@ def build_envelope(
 
     if user_class == "public":
         sources.append("user_public")
-        provenance.append({
-            "kind": "user_input",
-            "source": "user_public",
-            "trust": "trusted-local-classification",
-            "note": "explicitly declassified public by trusted local caller"
-        })
+        provenance.append(
+            {
+                "kind": "user_input",
+                "source": "user_public",
+                "trust": "trusted-local-classification",
+                "note": "explicitly declassified public by trusted local caller",
+            }
+        )
     elif user_class == "personal":
         sources.append("user_input")
-        provenance.append({
-            "kind": "user_input",
-            "source": "user_input",
-            "trust": "default-fail-closed",
-            "note": "user input defaults PERSONAL"
-        })
+        provenance.append(
+            {
+                "kind": "user_input",
+                "source": "user_input",
+                "trust": "default-fail-closed",
+                "note": "user input defaults PERSONAL",
+            }
+        )
     elif user_class != "none":
         raise ValueError(f"unsupported user_class: {user_class}")
 
     for tool in tools:
-        source, mapping_reason = tool_to_source(
-            registry, tool, browser_visibility
-        )
+        source, mapping_reason = tool_to_source(registry, tool, browser_visibility)
         sources.append(source)
-        provenance.append({
-            "kind": "tool_result",
-            "tool": tool,
-            "source": source,
-            "trust": "local-tool-registry",
-            "mapping_reason": mapping_reason,
-        })
+        provenance.append(
+            {
+                "kind": "tool_result",
+                "tool": tool,
+                "source": source,
+                "trust": "local-tool-registry",
+                "mapping_reason": mapping_reason,
+            }
+        )
 
     # If absolutely no metadata is present, router must still fail closed.
     if not sources:
         sources = ["unknown"]
-        provenance.append({
-            "kind": "implicit",
-            "source": "unknown",
-            "trust": "fail-closed",
-            "note": "no user/tool provenance supplied"
-        })
+        provenance.append(
+            {
+                "kind": "implicit",
+                "source": "unknown",
+                "trust": "fail-closed",
+                "note": "no user/tool provenance supplied",
+            }
+        )
 
     # De-duplicate route inputs while preserving first-seen order.
     unique_sources = list(dict.fromkeys(sources))
@@ -162,8 +168,7 @@ def human_output(combined):
     for p in env["provenance"]:
         if p["kind"] == "tool_result":
             lines.append(
-                f"  - tool {p['tool']} => {p['source']} "
-                f"({p['mapping_reason']})"
+                f"  - tool {p['tool']} => {p['source']} " f"({p['mapping_reason']})"
             )
         else:
             lines.append(f"  - {p['kind']} => {p['source']}")

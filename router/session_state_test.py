@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import os
 import stat
 import sys
 import tempfile
@@ -9,11 +8,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+from provenance import build_envelope, load_registry, route_envelope
+from request_classifier import classify_request, load_rules
+from session_decision import (
+    decision_privacy_to_session_state,
+    state_to_classifier_context,
+)
 from session_state import SessionStore
-from session_decision import state_to_classifier_context, decision_privacy_to_session_state
-from request_classifier import load_rules, classify_request
+
 from router import load_policy
-from provenance import load_registry, build_envelope, route_envelope
 
 tmp = Path(tempfile.mkdtemp(prefix="phase9a4-test-"))
 state_dir = tmp / "state"
@@ -22,6 +25,7 @@ store = SessionStore(state_dir)
 passed = 0
 total = 0
 
+
 def check(name, cond):
     global passed, total
     total += 1
@@ -29,12 +33,19 @@ def check(name, cond):
         raise AssertionError(name)
     passed += 1
 
+
 # 1-4: storage + unknown
 u = store.get("sess-test")
 check("unknown before start", u["privacy"] == "UNKNOWN")
 check("state dir mode 700", stat.S_IMODE(state_dir.stat().st_mode) == 0o700)
-check("state file mode 600", stat.S_IMODE((state_dir/"sessions.json").stat().st_mode) == 0o600)
-check("audit file mode 600", stat.S_IMODE((state_dir/"audit.jsonl").stat().st_mode) == 0o600)
+check(
+    "state file mode 600",
+    stat.S_IMODE((state_dir / "sessions.json").stat().st_mode) == 0o600,
+)
+check(
+    "audit file mode 600",
+    stat.S_IMODE((state_dir / "audit.jsonl").stat().st_mode) == 0o600,
+)
 
 # 5-8: start
 s = store.start("sess-test")
@@ -91,11 +102,11 @@ check("invalid session id refused", invalid_id_refused)
 # 20-23: audit is metadata only
 audit_lines = [
     json.loads(line)
-    for line in (state_dir/"audit.jsonl").read_text(encoding="utf-8").splitlines()
+    for line in (state_dir / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]
 check("audit exists", len(audit_lines) >= 1)
-allowed = {"ts","session_id","event","before","after","reason","generation"}
+allowed = {"ts", "session_id", "event", "before", "after", "reason", "generation"}
 check("audit keys constrained", all(set(x.keys()) <= allowed for x in audit_lines))
 check("audit no content field", all("content" not in x for x in audit_lines))
 check("audit no prompt field", all("prompt" not in x for x in audit_lines))
@@ -103,11 +114,23 @@ check("audit no prompt field", all("prompt" not in x for x in audit_lines))
 # 24-27: mapping
 check("clean maps clean", state_to_classifier_context("CLEAN") == "clean")
 check("personal maps personal", state_to_classifier_context("PERSONAL") == "personal")
-check("restricted maps restricted", state_to_classifier_context("RESTRICTED") == "restricted")
+check(
+    "restricted maps restricted",
+    state_to_classifier_context("RESTRICTED") == "restricted",
+)
 check("unknown maps unknown", state_to_classifier_context("UNKNOWN") == "unknown")
-check("public decision maps clean state", decision_privacy_to_session_state("PUBLIC") == "CLEAN")
-check("personal decision maps personal state", decision_privacy_to_session_state("PERSONAL") == "PERSONAL")
-check("restricted decision maps restricted state", decision_privacy_to_session_state("RESTRICTED") == "RESTRICTED")
+check(
+    "public decision maps clean state",
+    decision_privacy_to_session_state("PUBLIC") == "CLEAN",
+)
+check(
+    "personal decision maps personal state",
+    decision_privacy_to_session_state("PERSONAL") == "PERSONAL",
+)
+check(
+    "restricted decision maps restricted state",
+    decision_privacy_to_session_state("RESTRICTED") == "RESTRICTED",
+)
 
 # 31-38: end-to-end decision semantics without invoking CLI
 policy = load_policy(HERE / "policy.json")
@@ -118,36 +141,68 @@ rules = load_rules(HERE / "classifier_rules.json")
 fresh = store.start("sess-public")
 c = classify_request(rules, "Explain Kubernetes taints.", session_context="clean")
 env = build_envelope(
-    registry, tools=[], user_class=c["user_class"], browser_visibility="private",
-    task=c["task"], context_tokens=0, tags=c["tags"], quality=c["quality"],
-    aws_state="stopped", hosted_state="available"
+    registry,
+    tools=[],
+    user_class=c["user_class"],
+    browser_visibility="private",
+    task=c["task"],
+    context_tokens=0,
+    tags=c["tags"],
+    quality=c["quality"],
+    aws_state="stopped",
+    hosted_state="available",
 )
 d = route_envelope(policy, env)["decision"]
-store.observe("sess-public", decision_privacy_to_session_state(d["privacy"]), reason=f"routing decision => {d['privacy']}")
+store.observe(
+    "sess-public",
+    decision_privacy_to_session_state(d["privacy"]),
+    reason=f"routing decision => {d['privacy']}",
+)
 check("generic clean decision public", d["privacy"] == "PUBLIC")
-check("public observation leaves session clean", store.get("sess-public")["privacy"] == "CLEAN")
+check(
+    "public observation leaves session clean",
+    store.get("sess-public")["privacy"] == "CLEAN",
+)
 
 # Gmail taints same session PERSONAL.
 c = classify_request(rules, "Summarize my email.", session_context="clean")
 env = build_envelope(
-    registry, tools=["gmail_read"], user_class=c["user_class"], browser_visibility="private",
-    task=c["task"], context_tokens=0, tags=c["tags"], quality=c["quality"],
-    aws_state="running", hosted_state="available"
+    registry,
+    tools=["gmail_read"],
+    user_class=c["user_class"],
+    browser_visibility="private",
+    task=c["task"],
+    context_tokens=0,
+    tags=c["tags"],
+    quality=c["quality"],
+    aws_state="running",
+    hosted_state="available",
 )
 d = route_envelope(policy, env)["decision"]
-store.observe("sess-public", decision_privacy_to_session_state(d["privacy"]), reason=f"routing decision => {d['privacy']}")
+store.observe(
+    "sess-public",
+    decision_privacy_to_session_state(d["privacy"]),
+    reason=f"routing decision => {d['privacy']}",
+)
 check("gmail decision personal", d["privacy"] == "PERSONAL")
-check("gmail taints session personal", store.get("sess-public")["privacy"] == "PERSONAL")
+check(
+    "gmail taints session personal", store.get("sess-public")["privacy"] == "PERSONAL"
+)
 
 # Generic next request cannot auto-declassify because session is PERSONAL.
 c2 = classify_request(rules, "Explain Kubernetes taints.", session_context="personal")
-check("generic followup in personal session stays personal", c2["privacy_hint"] == "PERSONAL")
+check(
+    "generic followup in personal session stays personal",
+    c2["privacy_hint"] == "PERSONAL",
+)
 check("generic followup not auto public", c2["auto_declassified"] is False)
 
 # Explicit public ignored while session personal.
 c3 = classify_request(
-    rules, "Explain Kubernetes taints.",
-    session_context="personal", explicit_public=True
+    rules,
+    "Explain Kubernetes taints.",
+    session_context="personal",
+    explicit_public=True,
 )
 check("explicit public ignored in tainted session", c3["privacy_hint"] == "PERSONAL")
 
@@ -161,17 +216,28 @@ store.start("sess-restricted")
 store.observe("sess-restricted", "RESTRICTED", reason="credential tag")
 check("restricted persisted", store.get("sess-restricted")["privacy"] == "RESTRICTED")
 cr = classify_request(rules, "Explain Kubernetes.", session_context="restricted")
-check("restricted classifier context remains restricted", cr["privacy_hint"] == "RESTRICTED")
+check(
+    "restricted classifier context remains restricted",
+    cr["privacy_hint"] == "RESTRICTED",
+)
 check("restricted session tags marker", "session_restricted" in cr["tags"])
 store.observe("sess-restricted", "CLEAN", reason="later clean text")
-check("restricted cannot clean itself", store.get("sess-restricted")["privacy"] == "RESTRICTED")
+check(
+    "restricted cannot clean itself",
+    store.get("sess-restricted")["privacy"] == "RESTRICTED",
+)
 
 # 40-42 listing/state schema
 sessions = store.list_sessions()
 check("list returns sessions", len(sessions) >= 3)
-raw = json.loads((state_dir/"sessions.json").read_text(encoding="utf-8"))
+raw = json.loads((state_dir / "sessions.json").read_text(encoding="utf-8"))
 check("state schema correct", raw["schema"] == "hybrid-ai-session-state/v1")
-check("state stores no request content", all("content" not in rec and "prompt" not in rec for rec in raw["sessions"].values()))
+check(
+    "state stores no request content",
+    all(
+        "content" not in rec and "prompt" not in rec for rec in raw["sessions"].values()
+    ),
+)
 
 print(f"Phase 9A.4 session-state tests: {passed}/{total} PASS")
 print("PASS: monotonic metadata-only session privacy regression suite")

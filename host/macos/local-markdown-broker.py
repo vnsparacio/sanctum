@@ -26,7 +26,9 @@ MAX_TITLE_CHARS = 120
 
 
 def send_json(handler, code, payload):
-    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
@@ -55,7 +57,7 @@ def slugify(title: str) -> str:
     normalized = unicodedata.normalize("NFKD", title)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_text).strip("-").lower()
-    return (slug[:60].strip("-") or "untitled")
+    return slug[:60].strip("-") or "untitled"
 
 
 def create_markdown(kind: str, title: str, content: str):
@@ -103,7 +105,6 @@ def create_markdown(kind: str, title: str, content: str):
             pass
         raise
 
-    relative = path.relative_to(NOTES_ROOT)
     return {
         "ok": True,
         "kind": kind,
@@ -120,11 +121,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            return send_json(self, 200, {
-                "ok": True,
-                "mode": "create-only",
-                "root": str(NOTES_ROOT),
-            })
+            return send_json(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "mode": "create-only",
+                    "root": str(NOTES_ROOT),
+                },
+            )
         return send_json(self, 404, {"error": "not found"})
 
     def do_POST(self):
@@ -145,7 +150,11 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return send_json(self, 400, {"error": "invalid json"})
 
-        if not isinstance(payload, dict) or set(payload.keys()) != {"kind", "title", "content"}:
+        if not isinstance(payload, dict) or set(payload.keys()) != {
+            "kind",
+            "title",
+            "content",
+        }:
             return send_json(self, 400, {"error": "invalid request shape"})
 
         try:

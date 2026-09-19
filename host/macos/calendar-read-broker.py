@@ -27,7 +27,10 @@ from urllib.parse import parse_qs, urlparse
 
 HOME = Path.home()
 WRAPPER = Path(__file__).with_name("ai-calendar-read")
-SOCKET_PATH = Path(os.environ.get("VINCEAI_CACHE_DIR", HOME / ".cache/vinceai")) / "calendar-read.sock"
+SOCKET_PATH = (
+    Path(os.environ.get("VINCEAI_CACHE_DIR", HOME / ".cache/vinceai"))
+    / "calendar-read.sock"
+)
 
 MAX_RESPONSE_BYTES = 96 * 1024
 SUBPROCESS_TIMEOUT = 20
@@ -71,14 +74,15 @@ def run_wrapper(args: list[str]) -> Any:
     proc = subprocess.run(
         [str(WRAPPER), *args],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         timeout=SUBPROCESS_TIMEOUT,
         check=False,
         env={
             **os.environ,
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
+            "PATH": os.environ.get(
+                "PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+            ),
         },
     )
     if proc.returncode != 0:
@@ -232,7 +236,9 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def send_json(self, status: int, value: Any) -> None:
-        raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
         if len(raw) > MAX_RESPONSE_BYTES:
             status = 500
             raw = b'{"ok":false,"error":"broker response exceeded cap"}'
@@ -342,7 +348,9 @@ class Handler(BaseHTTPRequestHandler):
                 f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
                 f"calendar-read-broker internal_error={type(exc).__name__}\n"
             )
-            self.send_json(502, {"ok": False, "error": "calendar read backend unavailable"})
+            self.send_json(
+                502, {"ok": False, "error": "calendar read backend unavailable"}
+            )
 
     def do_POST(self) -> None:
         self.send_json(405, {"ok": False, "error": "read-only broker"})
@@ -363,7 +371,10 @@ def main() -> int:
 
     # Lifecycle helper is responsible for proving a socket stale before startup.
     if SOCKET_PATH.exists():
-        print("refusing to unlink existing socket; use calendar-read-control", file=sys.stderr)
+        print(
+            "refusing to unlink existing socket; use calendar-read-control",
+            file=sys.stderr,
+        )
         return 2
 
     server = UnixHTTPServer(str(SOCKET_PATH), Handler)

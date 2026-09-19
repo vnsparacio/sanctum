@@ -13,15 +13,14 @@ import json
 import sys
 from pathlib import Path
 
-from request_classifier import load_rules, classify_request
+from provenance import build_envelope, load_registry, route_envelope
+from request_classifier import classify_request, load_rules
+
 from router import load_policy
-from provenance import load_registry, build_envelope, route_envelope
 
 
 def main():
-    p = argparse.ArgumentParser(
-        description="Classify + route a request locally."
-    )
+    p = argparse.ArgumentParser(description="Classify + route a request locally.")
     here = Path(__file__).resolve().parent
 
     p.add_argument("--policy", default=str(here / "policy.json"))

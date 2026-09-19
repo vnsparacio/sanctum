@@ -1,21 +1,154 @@
-name: Offline contracts
-on: [push, pull_request]
+name: Repository checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - v1.2-dev
+  workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
-  test:
+  format:
+    name: Python format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install -r requirements-dev.txt
+      - run: make format-check
+
+  lint:
+    name: Python lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install -r requirements-dev.txt
+      - run: make lint
+
+  build:
+    name: Plugin build and manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '26.8.1'
+          node-version: "26.8.1"
           cache: npm
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12.14'
-      - run: npm ci --ignore-scripts
-      - run: python -m venv .venv && .venv/bin/pip install -r gate/runtime/requirements.txt
-      - run: .venv/bin/python -m unittest tests.test_agent_system
-      - run: make build test audit
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: |
+            gate/runtime/requirements.txt
+            requirements-dev.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: make deps
+      - run: make build
+      - name: Upload validated plugin builds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validated-plugin-builds
+          path: plugins/*/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  contracts:
+    name: Contracts / ${{ matrix.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Gate JavaScript
+            command: test-gate-js
+          - name: Gate Python
+            command: test-gate-python
+          - name: Reliability
+            command: test-reliability
+          - name: MCP containment
+            command: test-mcp
+          - name: Owned plugins
+            command: test-plugins
+          - name: Release and portability
+            command: test-release
+          - name: Agent management
+            command: test-agents
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: |
+            gate/runtime/requirements.txt
+            requirements-dev.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: make deps
+      - name: Download validated plugin builds
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: validated-plugin-builds
+          path: plugins
+      - run: make ${{ matrix.command }}
+
+  audit:
+    name: Publication, source integrity, and compose
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: |
+            gate/runtime/requirements.txt
+            requirements-dev.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: make deps
+      - name: Download validated plugin builds
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: validated-plugin-builds
+          path: plugins
+      - run: make audit verify-source
       - run: docker compose config --quiet

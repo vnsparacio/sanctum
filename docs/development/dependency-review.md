@@ -8,4 +8,4 @@ All six candidate configurations use the Node environment. The runner executes `
 
 Disposition: retain the V1 pin and document a development-only exception. There is no upstream patch-level or same-major remediation. Forcing a newer mocker under Vitest 3 would break its exact internal dependency contract without establishing safety. A major runner migration solely to clear this advisory is outside V1 scope. Do not expose a Vitest/Vite test server or introduce browser/mock-server use with this pin. Review a supported major in post-V1 maintenance.
 
-No dependency versions were changed for this disposition. Final test results are in [acceptance](acceptance.md). An audit report with two moderate entries must not be described as vulnerability-free.
+No dependency versions were changed for this disposition. Final V1 test results are in [acceptance](../history/v1/acceptance.md). An audit report with two moderate entries must not be described as vulnerability-free.

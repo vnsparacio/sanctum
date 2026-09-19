@@ -4,7 +4,7 @@ Implementation and targeted self-review, not independent acceptance. Project 3 r
 
 ## Starting source and decision
 
-The canonical checkout is the location in [the baseline](V1.1-LIVE-BASELINE.md), on `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`, eleven commits ahead of its local tracking reference, with an empty index. Starting inventory: 279 files, including untracked source. Starting SOURCE-MANIFEST SHA-256: `8b0026b6dd706c829d262cc2ceb86556caa87c5b5f2c35ea78cfcf96b0a34f22`. Synthetic inventories, authenticated pre-edit copies, and exact command logs are retained in `/tmp/sanctum-80b-retirement-20260917`.
+The canonical checkout is the location in [the baseline](../V1.1-LIVE-BASELINE.md), on `v1.1/project-3-private-lead-workmode`, HEAD `e168f864eb5ed74d3437102323cdf79804505f06`, eleven commits ahead of its local tracking reference, with an empty index. Starting inventory: 279 files, including untracked source. Starting SOURCE-MANIFEST SHA-256: `8b0026b6dd706c829d262cc2ceb86556caa87c5b5f2c35ea78cfcf96b0a34f22`. Synthetic inventories, authenticated pre-edit copies, and exact command logs are retained in `/tmp/sanctum-80b-retirement-20260917`.
 
 All requested baseline/protocol/pre-live reports and architecture/configuration/migration instructions were read. Prior review dispositions remain historical evidence. No branch/index/history operation, legacy-tree edit, model/profile repin, hosted planner, semantic normalization, extra correction, authority/egress/evaluator/containment relaxation or qualification fixture change belongs to this delta.
 

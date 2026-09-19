@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
 import json
 import os
-import socket
 import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from socketserver import UnixStreamServer
 
-SOCKET_PATH = str(Path(os.environ.get("VINCEAI_CACHE_DIR", Path.home()/".cache/vinceai"))/"messages-read.sock")
+SOCKET_PATH = str(
+    Path(os.environ.get("VINCEAI_CACHE_DIR", Path.home() / ".cache/vinceai"))
+    / "messages-read.sock"
+)
 
 BROKER = str(Path(__file__).with_name("ai-imsg-read"))
 
@@ -25,8 +27,7 @@ def run_broker(args):
 
     if result.returncode != 0:
         raise RuntimeError(
-            result.stderr.strip() or
-            f"ai-imsg-read exited {result.returncode}"
+            result.stderr.strip() or f"ai-imsg-read exited {result.returncode}"
         )
 
     # imsg JSON output is JSON Lines: one object per line.
@@ -44,11 +45,7 @@ def run_broker(args):
 
 
 def keep_fields(record, fields):
-    return {
-        field: record[field]
-        for field in fields
-        if field in record
-    }
+    return {field: record[field] for field in fields if field in record}
 
 
 def sanitize_chats(records):
@@ -157,9 +154,7 @@ class Handler(BaseHTTPRequestHandler):
                     10,
                 )
 
-                records = sanitize_chats(
-                    run_broker(["chats", str(limit)])
-                )
+                records = sanitize_chats(run_broker(["chats", str(limit)]))
 
                 self.reply(
                     200,
@@ -171,9 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                 chat_id = params.get("chat_id", [""])[0]
 
                 if not chat_id.isdigit():
-                    raise ValueError(
-                        "chat_id must be numeric"
-                    )
+                    raise ValueError("chat_id must be numeric")
 
                 limit = integer(
                     params.get("limit", ["6"])[0],
@@ -196,14 +189,10 @@ class Handler(BaseHTTPRequestHandler):
                 query = params.get("q", [""])[0]
 
                 if not query:
-                    raise ValueError(
-                        "search query required"
-                    )
+                    raise ValueError("search query required")
 
                 if len(query) > 200:
-                    raise ValueError(
-                        "search query too long"
-                    )
+                    raise ValueError("search query too long")
 
                 limit = integer(
                     params.get("limit", ["5"])[0],
@@ -212,9 +201,7 @@ class Handler(BaseHTTPRequestHandler):
                     8,
                 )
 
-                records = sanitize_messages(
-                    run_broker(["search", query, str(limit)])
-                )
+                records = sanitize_messages(run_broker(["search", query, str(limit)]))
 
                 self.reply(
                     200,
@@ -250,23 +237,24 @@ def main():
     Path(SOCKET_PATH).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.path.lexists(SOCKET_PATH):
         raise SystemExit("Socket already exists; inspect ownership before restart")
-    
+
     server = Server(SOCKET_PATH, Handler)
-    
+
     # User only.
     os.chmod(SOCKET_PATH, 0o600)
-    
-    print(f"Messages read broker listening on:")
+
+    print("Messages read broker listening on:")
     print(SOCKET_PATH)
     print("Mode: READ ONLY")
-    
+
     try:
         server.serve_forever()
     finally:
         server.server_close()
-    
+
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
+
 
 if __name__ == "__main__":
     main()

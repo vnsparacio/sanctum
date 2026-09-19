@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import selectors
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
@@ -40,12 +40,20 @@ class CodexCatalogClient:
             raise ExternalCallError("codex app-server is unavailable") from exc
         assert process.stdin is not None and process.stdout is not None
         messages = (
-            {"id": 1, "method": "initialize", "params": {
-                "clientInfo": {"name": "sanctum-agents", "version": "1"},
-                "capabilities": {"experimentalApi": True},
-            }},
+            {
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {"name": "sanctum-agents", "version": "1"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            },
             {"method": "initialized", "params": {}},
-            {"id": 2, "method": "model/list", "params": {"includeHidden": True, "limit": 100}},
+            {
+                "id": 2,
+                "method": "model/list",
+                "params": {"includeHidden": True, "limit": 100},
+            },
         )
         for message in messages:
             process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
@@ -70,7 +78,9 @@ class CodexCatalogClient:
                         raise ExternalCallError("Codex model catalog request failed")
                     data = payload.get("result", {}).get("data")
                     if not isinstance(data, list):
-                        raise ExternalCallError("Codex model catalog response was malformed")
+                        raise ExternalCallError(
+                            "Codex model catalog response was malformed"
+                        )
                     return data
             raise ExternalCallError("Codex model catalog request timed out")
         finally:
@@ -100,10 +110,14 @@ class LinearGraphQLClient:
         self.endpoint = endpoint
         self.environ = os.environ if environ is None else environ
 
-    def query(self, query: str, variables: dict[str, Any] | None = None, timeout: float = 15) -> dict[str, Any]:
+    def query(
+        self, query: str, variables: dict[str, Any] | None = None, timeout: float = 15
+    ) -> dict[str, Any]:
         token = self.environ.get(self.token_env)
         if not token:
-            raise MissingAuth(f"Linear authentication is unavailable in {self.token_env}")
+            raise MissingAuth(
+                f"Linear authentication is unavailable in {self.token_env}"
+            )
         if not isinstance(query, str) or not query.strip():
             raise ValueError("Linear query must be non-empty")
         body = json.dumps({"query": query, "variables": variables or {}}).encode()
@@ -158,10 +172,15 @@ class GitHubClient:
     def pull_request(self, number: int) -> dict[str, Any]:
         if type(number) is not int or number <= 0:
             raise ValueError("pull request number must be positive")
-        result = self.run_json([
-            "pr", "view", str(number),
-            "--json", "number,title,state,baseRefName,headRefName,url,mergeable,statusCheckRollup",
-        ])
+        result = self.run_json(
+            [
+                "pr",
+                "view",
+                str(number),
+                "--json",
+                "number,title,state,baseRefName,headRefName,url,mergeable,statusCheckRollup",
+            ]
+        )
         if not isinstance(result, dict):
             raise ExternalCallError("GitHub PR response was malformed")
         return result

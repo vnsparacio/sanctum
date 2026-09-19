@@ -15,4 +15,4 @@ After setup, optional host runtimes have explicit isolated installers:
 .venv/bin/python scripts/bootstrap.py webui --prefix "$PWD/.local"
 ```
 
-Then use the component commands in [installation](installation.md). Runtime directories are not overwritten. A source-only build does not install model weights or prove live personal/GPU integration. See the current **READY WITH DOCUMENTED EXCEPTIONS** [qualification](qualification.md) before deployment.
+Then use the component commands in [installation](installation.md). Runtime directories are not overwritten. A source-only build does not install model weights or prove live personal/GPU integration. See the historical **READY WITH DOCUMENTED EXCEPTIONS** [qualification](../history/v1/qualification.md) before deployment.
