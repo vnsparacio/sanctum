@@ -2,7 +2,7 @@
 
 The PR Reviewer is an independent, read-only review role using Sol-high in a
 fresh ephemeral Codex context. It may review only an unmerged,
-issue-deterministic branch targeting `v1.2-dev` whose Linear issue is already in
+issue-deterministic branch targeting `v1.3-dev` whose Linear issue is already in
 `Human Review`. It receives a bounded packet containing acceptance criteria,
 the implementation workpad, diff, changed-file list, CI, validation evidence,
 and selected relevant context.

@@ -59,8 +59,8 @@ def validate_dispatch(state: str, labels: list[str]) -> None:
 
 
 def validate_handoff(value: PullRequestHandoff, identifier: str) -> None:
-    if value.base_branch != "v1.2-dev":
-        raise LifecycleError("pull request must target v1.2-dev")
+    if value.base_branch != "v1.3-dev":
+        raise LifecycleError("pull request must target v1.3-dev")
     if value.head_branch != issue_branch(identifier):
         raise LifecycleError(
             "pull request branch is not deterministic and issue-scoped"

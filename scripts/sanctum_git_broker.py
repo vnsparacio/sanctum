@@ -102,7 +102,7 @@ TOOLS = [
     },
     {
         "name": "github_ensure_issue_pull_request",
-        "description": "Create or update the unmerged issue PR targeting v1.2-dev.",
+        "description": "Create or update the unmerged issue PR targeting v1.3-dev.",
         "inputSchema": {
             "type": "object",
             "properties": {

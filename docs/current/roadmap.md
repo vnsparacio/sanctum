@@ -1,8 +1,8 @@
 # Roadmap
 
-Sanctum V1.2.0 release scope is frozen. Release completion, review, promotion to `main`, immutable tagging and GitHub publication are administrative gates; they do not authorize new features, private-runtime migration or deployment changes.
+Sanctum V1.2.0 is the immutable stable release. V1.3 development starts from that exact release on `v1.3-dev`; each project uses its own reviewed `v1.3/project-*` branch and returns only by pull request.
 
-After release, operate the bounded V1.2 agent-management system at implementation concurrency one and collect content-free evidence from actual failures. Preserve owner-only `Ready for Agent` plus `symphony` authorization, Human Review, merge and Done transitions. Any broader implementation concurrency, new management authority or automated merge path requires a separate reviewed design.
+Operate the bounded agent-management system against the `Sanctum V1.3` Linear project at implementation concurrency one and collect content-free evidence from actual failures. Preserve owner-only `Ready for Agent` plus `symphony` authorization, Human Review, merge and Done transitions. Project membership or the `v1.3.0` milestone never authorizes execution. Any broader implementation concurrency, new management authority or automated merge path requires a separate reviewed design.
 
 Continue the existing metadata-only Core event path and the gateway-only Splunk APM/custom-metric slice. Runpod/vLLM/GPU/host monitoring, collectors, dashboards, detectors, profiling, RUM, agent observability and an Observability Steward remain deferred. Observability may not become an authority, routing, egress, capability, evaluator, verifier or completion input.
 

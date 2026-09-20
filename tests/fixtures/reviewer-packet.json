@@ -20,7 +20,7 @@
   "pull_request": {
     "number": 999,
     "url": "https://github.com/vnsparacio/sanctum/pull/999",
-    "base_branch": "v1.2-dev",
+    "base_branch": "v1.3-dev",
     "head_branch": "symphony/san-200",
     "merged": false,
     "changed_files": ["docs/guides/operations.md"],

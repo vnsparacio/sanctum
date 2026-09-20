@@ -32,6 +32,6 @@ GitHub Actions exposes independent `Python format`, `Python lint`, `Plugin build
 
 `make build` compiles and validates owned plugins, checks the reviewed OpenClaw runtime pins, and verifies the capability manifest. Test groups and source verification that consume those generated outputs rebuild them only when they are missing or drifted. CI builds them once and passes the validated artifact to dependent jobs. `make audit` scans source for selected credential/private-artifact patterns and validates repository Markdown links without printing matched values. `make verify-source` validates the explicit `SOURCE-MANIFEST.json` freeze and runtime pins. `docker compose config --quiet` checks the optional container definition.
 
-Dependabot checks the committed root and optional-web npm lockfiles, root/runtime/host pip requirements, and GitHub Actions each week. Updates target `v1.2-dev`; compatible non-major updates are grouped only where that keeps review diagnostic, and automatic merge is not enabled.
+Dependabot checks the committed root and optional-web npm lockfiles, root/runtime/host pip requirements, and GitHub Actions each week. Updates target `v1.3-dev`; compatible non-major updates are grouped only where that keeps review diagnostic, and automatic merge is not enabled.
 
 Live UI enrollment, MLX inference, personal-source semantics, provider policy, GPU cleanup and answer-quality qualification remain manual/macOS/private-runtime checks. Passing offline CI does not establish live-provider acceptance or grant authority.
