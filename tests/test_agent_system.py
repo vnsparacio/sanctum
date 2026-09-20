@@ -58,7 +58,11 @@ from sanctum_agents.product_scout import (
     run_product_scout,
 )
 from sanctum_agents.reasoner import CodexReasoner
-from sanctum_agents.repo_steward import collect_evidence, run_repo_steward
+from sanctum_agents.repo_steward import (
+    _hard_runtime_control_gaps,
+    collect_evidence,
+    run_repo_steward,
+)
 from sanctum_agents.reviewer import load_packet, parse_review, run_reviewer
 from sanctum_agents.runtime import (
     Budget,
@@ -454,6 +458,40 @@ class ManagementFindingTests(unittest.TestCase):
 
 
 class RepoStewardTests(unittest.TestCase):
+    def test_hard_runtime_control_is_verified_across_effective_sources(self):
+        self.assertEqual([], _hard_runtime_control_gaps(ROOT))
+
+    def test_hard_runtime_control_fails_closed_without_retry_enforcement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            (repository / "config").mkdir()
+            (repository / "sanctum_agents").mkdir()
+            (repository / "WORKFLOW.md").write_text(
+                "The outer Sanctum supervisor provides the hard total-runtime "
+                "wall-clock boundary.\n"
+            )
+            (repository / "config" / "agents.json").write_text(
+                json.dumps({"roles": {"implementation": {"wall_clock_seconds": 3600}}})
+            )
+            (repository / "sanctum_agents" / "symphony_supervisor.py").write_text(
+                'ledger_path = prefix / "state" / "symphony-ledger.json"\n'
+                "ledger_path.read_text()\n"
+                "_save_json(ledger_path, ledger)\n"
+                'elapsed = now - record["first_seen"]\n'
+                "if elapsed > wall_clock_seconds:\n"
+                "    stop_running_work()\n"
+            )
+            gaps = _hard_runtime_control_gaps(repository)
+        self.assertEqual(
+            [
+                (
+                    "sanctum_agents/symphony_supervisor.py",
+                    "the supervisor does not enforce the wall-clock limit for both running and retrying work",
+                )
+            ],
+            gaps,
+        )
+
     def test_evidence_scan_is_scoped_and_bounded(self):
         commit, evidence = collect_evidence(
             ROOT,
@@ -469,6 +507,37 @@ class RepoStewardTests(unittest.TestCase):
         self.assertLessEqual(
             len([item for item in evidence if item.kind == "debt_marker"]), 1
         )
+
+    def test_python_marker_scan_ignores_literals_but_keeps_comments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Sanctum Test"],
+                cwd=repository,
+                check=True,
+            )
+            source = repository / "tests"
+            source.mkdir()
+            (source / "test_one.py").write_text(
+                'fixture = "# TODO fixture data\\n"\n# TODO actual debt\n'
+            )
+            subprocess.run(
+                ["git", "add", "tests/test_one.py"], cwd=repository, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "fixture"], cwd=repository, check=True
+            )
+            _, evidence = collect_evidence(
+                repository, ("tests",), None, deep=True, max_markers=5
+            )
+        markers = [item for item in evidence if item.kind == "debt_marker"]
+        self.assertEqual(["tests/test_one.py:2"], [item.location for item in markers])
 
     def test_first_or_shallow_commit_falls_back_to_bounded_tracked_scan(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -519,7 +588,7 @@ class RepoStewardTests(unittest.TestCase):
             self.assertEqual("shadow", first["mode"])
             self.assertEqual(0, first["linear_writes"])
             self.assertTrue(Path(first["artifact_path"]).is_file())
-            self.assertGreaterEqual(second["duplicates_suppressed"], 1)
+            self.assertEqual(0, second["duplicates_suppressed"])
             self.assertEqual([], second["findings"])
         after = subprocess.run(
             ["git", "status", "--porcelain=v1", "--untracked-files=all"],

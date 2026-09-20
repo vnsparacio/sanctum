@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import subprocess
+import tokenize
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,98 @@ from .runtime import (
 
 _SOURCE_SUFFIXES = {".py", ".mjs", ".js", ".ts", ".json", ".yml", ".yaml", ".md"}
 _MARKER = re.compile(r"\b(TODO|FIXME|HACK)\b", re.IGNORECASE)
+
+
+def _marker_candidates(path: Path, text: str) -> list[tuple[int, re.Match[str]]]:
+    """Return debt markers, excluding Python strings that only contain fixtures."""
+    if path.suffix.lower() != ".py":
+        return [
+            (line_number, match)
+            for line_number, line in enumerate(text.splitlines(), 1)
+            if (match := _MARKER.search(line))
+        ]
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        return [
+            (token.start[0], match)
+            for token in tokens
+            if token.type == tokenize.COMMENT
+            and (match := _MARKER.search(token.string))
+        ]
+    except (IndentationError, tokenize.TokenError):
+        return [
+            (line_number, match)
+            for line_number, line in enumerate(text.splitlines(), 1)
+            if (match := _MARKER.search(line))
+        ]
+
+
+def _hard_runtime_control_gaps(repository: Path) -> list[tuple[str, str]]:
+    """Return missing pieces of the cross-file Symphony runtime boundary."""
+    gaps: list[tuple[str, str]] = []
+    workflow_path = repository / "WORKFLOW.md"
+    try:
+        workflow = workflow_path.read_text(errors="replace").lower()
+    except OSError:
+        workflow = ""
+    if not all(
+        phrase in workflow
+        for phrase in ("outer sanctum supervisor", "wall-clock", "total-runtime")
+    ):
+        gaps.append(
+            (
+                "WORKFLOW.md",
+                "the workflow does not declare the outer supervisor's hard total-runtime boundary",
+            )
+        )
+
+    config_path = repository / "config" / "agents.json"
+    try:
+        raw_config = json.loads(config_path.read_text())
+        wall_clock = raw_config["roles"]["implementation"]["wall_clock_seconds"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        wall_clock = None
+    if type(wall_clock) is not int or wall_clock <= 0:
+        gaps.append(
+            (
+                "config/agents.json",
+                "the implementation role has no positive wall_clock_seconds limit",
+            )
+        )
+
+    supervisor_path = repository / "sanctum_agents" / "symphony_supervisor.py"
+    try:
+        supervisor = supervisor_path.read_text(errors="replace")
+    except OSError:
+        supervisor = ""
+    if 'prefix / "state" / "symphony-ledger.json"' not in supervisor or not all(
+        phrase in supervisor
+        for phrase in (
+            "ledger_path.read_text()",
+            "_save_json(ledger_path, ledger)",
+            'record["first_seen"]',
+        )
+    ):
+        gaps.append(
+            (
+                "sanctum_agents/symphony_supervisor.py",
+                "the supervisor does not persist the first-seen runtime ledger",
+            )
+        )
+    if not all(
+        phrase in supervisor
+        for phrase in (
+            '("wall_clock_budget", elapsed, wall_clock_seconds)',
+            "elapsed > wall_clock_seconds",
+        )
+    ):
+        gaps.append(
+            (
+                "sanctum_agents/symphony_supervisor.py",
+                "the supervisor does not enforce the wall-clock limit for both running and retrying work",
+            )
+        )
+    return gaps
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -106,18 +200,20 @@ def collect_evidence(
             location=None,
         )
     ]
-    workflow = repository / "WORKFLOW.md"
-    if workflow.exists():
-        text = workflow.read_text(errors="replace")
-        if "wall_clock" not in text.lower() and "hard deadline" not in text.lower():
-            evidence.append(
-                Evidence(
-                    id="workflow-hard-runtime",
-                    kind="reliability",
-                    summary="WORKFLOW.md has no explicit hard total-runtime governor; max_turns and activity timeouts do not bound continuation retries.",
-                    location="WORKFLOW.md",
-                )
+    runtime_gaps = _hard_runtime_control_gaps(repository)
+    if runtime_gaps:
+        evidence.append(
+            Evidence(
+                id="workflow-hard-runtime",
+                kind="reliability",
+                summary=(
+                    "The effective Symphony hard total-runtime control is incomplete: "
+                    + "; ".join(summary for _, summary in runtime_gaps)
+                    + "."
+                ),
+                location=runtime_gaps[0][0],
             )
+        )
     marker_count = 0
     changed_code = []
     changed_tests = []
@@ -138,15 +234,12 @@ def collect_evidence(
         elif path.suffix.lower() in {".py", ".mjs", ".js", ".ts"}:
             changed_code.append(name)
         try:
-            lines = path.read_text(errors="replace").splitlines()
+            text = path.read_text(errors="replace")
         except OSError:
             continue
-        for line_number, line in enumerate(lines, 1):
+        for line_number, match in _marker_candidates(path, text):
             if marker_count >= max_markers:
                 break
-            match = _MARKER.search(line)
-            if not match:
-                continue
             marker_count += 1
             evidence.append(
                 Evidence(
@@ -174,8 +267,8 @@ def deterministic_findings(evidence: list[Evidence]) -> dict[str, Any]:
     if "workflow-hard-runtime" in by_id:
         findings.append(
             {
-                "title": "Bound Symphony execution with a hard total-runtime watchdog",
-                "summary": "The implementation workflow has turn and activity controls but no independent total-runtime stop across continuation retries, leaving active runaway sessions possible.",
+                "title": "Restore Symphony's hard total-runtime boundary",
+                "summary": "The workflow declaration, implementation timeout, or persistent supervisor enforcement needed to bound running and retrying work is incomplete.",
                 "severity": "high",
                 "recommendation": "Investigate",
                 "evidence_ids": ["workflow-hard-runtime"],
