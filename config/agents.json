@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "project": {
-    "linear_project_slug": "sanctum-v12-6fe3a63e0c69",
+    "linear_project_slug": "sanctum-v13-aafdb6e2bb76",
     "github_repository": "vnsparacio/sanctum",
-    "integration_branch": "v1.2-dev",
+    "integration_branch": "v1.3-dev",
     "implementation_gate": {
       "status": "Ready for Agent",
       "label": "symphony"
@@ -12,7 +12,7 @@
   },
   "runtime": {
     "prefix_env": "SANCTUM_AGENT_PREFIX",
-    "default_prefix": "~/.sanctum/agents-v1.2",
+    "default_prefix": "~/.sanctum/agents-v1.3",
     "lock_stale_seconds": 7200,
     "log_output_limit_bytes": 262144
   },

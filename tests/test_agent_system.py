@@ -709,7 +709,7 @@ class TriageTests(unittest.TestCase):
                 }
 
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         client = FakeClient()
         with tempfile.TemporaryDirectory() as directory:
@@ -761,7 +761,7 @@ class TriageTests(unittest.TestCase):
                 }
 
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "linear-triage-snapshot.json"
@@ -831,14 +831,14 @@ class ImplementationLifecycleTests(unittest.TestCase):
         with self.assertRaises(LifecycleError):
             validate_dispatch("Backlog", ["symphony"])
         valid = PullRequestHandoff(
-            "v1.2-dev", "symphony/san-123", False, "Human Review"
+            "v1.3-dev", "symphony/san-123", False, "Human Review"
         )
         validate_handoff(valid, "SAN-123")
         for invalid in (
             PullRequestHandoff("main", "symphony/san-123", False, "Human Review"),
-            PullRequestHandoff("v1.2-dev", "feature/loose", False, "Human Review"),
-            PullRequestHandoff("v1.2-dev", "symphony/san-123", True, "Human Review"),
-            PullRequestHandoff("v1.2-dev", "symphony/san-123", False, "Done"),
+            PullRequestHandoff("v1.3-dev", "feature/loose", False, "Human Review"),
+            PullRequestHandoff("v1.3-dev", "symphony/san-123", True, "Human Review"),
+            PullRequestHandoff("v1.3-dev", "symphony/san-123", False, "Done"),
         ):
             with self.subTest(invalid=invalid), self.assertRaises(LifecycleError):
                 validate_handoff(invalid, "SAN-123")
@@ -1144,9 +1144,9 @@ class LinearPayloadTests(unittest.TestCase):
                     return {
                         "project": {
                             "id": "project-live",
-                            "name": "Sanctum V1.2",
-                            "slugId": "6fe3a63e0c69",
-                            "url": "https://linear.app/team/project/sanctum-v12-6fe3a63e0c69",
+                            "name": "Sanctum V1.3",
+                            "slugId": "aafdb6e2bb76",
+                            "url": "https://linear.app/team/project/sanctum-v13-aafdb6e2bb76",
                             "teams": {
                                 "nodes": [{"id": "team-live", "name": "Team"}],
                                 "pageInfo": {"hasNextPage": False},
@@ -1200,7 +1200,7 @@ class LinearPayloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state" / "linear-metadata.json"
             metadata = capture_qualified_metadata(
-                client, "sanctum-v12-6fe3a63e0c69", path
+                client, "sanctum-v13-aafdb6e2bb76", path
             )
             snapshot = json.loads(path.read_text())
             fixture = json.loads(LINEAR_METADATA_FIXTURE.read_text())
@@ -1224,7 +1224,7 @@ class LinearPayloadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LinearMetadataError, "missing required names: Human Review"
             ):
-                capture_qualified_metadata(client, "sanctum-v12-6fe3a63e0c69", path)
+                capture_qualified_metadata(client, "sanctum-v13-aafdb6e2bb76", path)
             self.assertFalse(path.exists())
 
     def test_metadata_capture_stops_before_write_on_pagination(self):
@@ -1234,12 +1234,12 @@ class LinearPayloadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LinearMetadataError, "states metadata requires pagination"
             ):
-                capture_qualified_metadata(client, "sanctum-v12-6fe3a63e0c69", path)
+                capture_qualified_metadata(client, "sanctum-v13-aafdb6e2bb76", path)
             self.assertFalse(path.exists())
 
     def test_engineering_finding_targets_triage_without_execution_authority(self):
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         finding = Finding(
             "Bound continuation runtime",
@@ -1261,7 +1261,7 @@ class LinearPayloadTests(unittest.TestCase):
 
     def test_product_discovery_uses_qualified_sources_and_triage(self):
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         source = ResearchSource(
             "release",
@@ -1289,7 +1289,7 @@ class LinearPayloadTests(unittest.TestCase):
         with self.assertRaisesRegex(LinearMetadataError, "slug"):
             load_qualified_metadata(LINEAR_METADATA_FIXTURE, "wrong-project")
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         self.assertEqual(
             {"id": "issue-a", "input": {"stateId": "state-backlog"}},
@@ -1300,7 +1300,7 @@ class LinearPayloadTests(unittest.TestCase):
 
     def test_writer_searches_duplicates_caps_creation_and_links_triage(self):
         metadata = load_qualified_metadata(
-            LINEAR_METADATA_FIXTURE, "sanctum-v12-6fe3a63e0c69"
+            LINEAR_METADATA_FIXTURE, "sanctum-v13-aafdb6e2bb76"
         )
         calls: list[tuple[str, dict[str, object]]] = []
 

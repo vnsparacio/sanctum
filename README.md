@@ -12,7 +12,16 @@ Sanctum keeps credentials, tools, approvals and privacy policy on your machine w
 
 **Reasoning is replaceable. Authority stays local.**
 
-## V1.2 status
+## V1.3 development
+
+V1.3 development starts from the immutable V1.2.0 release on `v1.3-dev`.
+Linear project `Sanctum V1.3` is the work and decision record; implementation
+still requires the owner to set both `Ready for Agent` and `symphony`, runs at
+concurrency one, opens an unmerged PR to `v1.3-dev`, and stops at `Human
+Review`. Project membership and the `v1.3.0` milestone do not authorize work.
+See the [V1.3 development bootstrap](docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md).
+
+## V1.2 release
 
 Sanctum V1.2.0 is **complete with documented limitations**. This backward-compatible release retains the V1.1 shared-capability, Source-First and private Qwen Work Mode boundaries while adding bounded agent management, qualified Linear workflows, feedback-aware Symphony execution, a narrow host-owned Git control plane, stronger repository/CI integrity and gateway-only Splunk observability. The original V1.0.0 and V1.1.0 releases and tags remain immutable. The original deployment was called **VinceAI** and remains the reference installation; publication does not migrate or redeploy it. Source and documentation use [Apache-2.0](LICENSE), with [external licenses retained](THIRD-PARTY-NOTICES.md).
 
@@ -67,7 +76,7 @@ V1.2 does not promise full autonomy, universal factual accuracy, full Linux prod
 
 - [Documentation map](docs/README.md), [architecture](docs/architecture/architecture.md), [security](SECURITY.md), [privacy](docs/architecture/privacy.md)
 - [Canonical Sanctum V1 project report](docs/history/v1/SANCTUM-V1-PROJECT-REPORT.md): failed experiments, routing research, design evolution, benchmarks, lessons and operator guidance
-- [V1.2 release completion](docs/history/v1.2/V1.2-RELEASE-COMPLETION.md), [agent-system runbook](docs/current/agent-system/V1.2-AGENT-SYSTEM-RUNBOOK.md), [Linear integration](docs/guides/linear-agent-integration.md), [Splunk Observability](docs/observability/SPLUNK-O11Y-CLOUD.md)
+- [V1.3 development bootstrap](docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md), [V1.2 release completion](docs/history/v1.2/V1.2-RELEASE-COMPLETION.md), [agent-system runbook](docs/current/agent-system/V1.2-AGENT-SYSTEM-RUNBOOK.md), [Linear integration](docs/guides/linear-agent-integration.md), [Splunk Observability](docs/observability/SPLUNK-O11Y-CLOUD.md)
 - [Naming and retained compatibility identifiers](docs/architecture/naming-compatibility.md), [rename audit](docs/history/v1/SANCTUM-RENAME-AUDIT.md)
 - [Configuration](docs/guides/configuration.md), [operations](docs/guides/operations.md), [troubleshooting](docs/guides/troubleshooting.md)
 - [Capabilities](docs/architecture/capabilities.md), [limitations](docs/current/limitations.md), [container boundary](docs/architecture/containerization.md)

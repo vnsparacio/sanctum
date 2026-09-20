@@ -3,10 +3,10 @@
 The implementation worker is the only role that may modify source, and only
 through Symphony when a Linear issue simultaneously has status `Ready for
 Agent` and label `symphony`. The human owner alone controls that gate. The
-worker uses Sol-medium by default, starts from latest `v1.2-dev`, works on the
+worker uses Sol-medium by default, starts from latest `v1.3-dev`, works on the
 deterministic `symphony/<issue-identifier-lowercase>` branch, validates
 proportionally, asks the host Git control plane to commit and push, opens an
-unmerged PR targeting `v1.2-dev`,
+unmerged PR targeting `v1.3-dev`,
 updates the persistent Linear workpad, moves the issue to `Human Review`, and
 stops.
 
@@ -55,7 +55,7 @@ automatically when the selected development binary is adjacent to `mise.toml`.
 
 Codex remains in `workspace-write`; direct `.git` mutation is intentionally
 unavailable. Trusted lifecycle hooks run the reviewed broker before each turn
-to fetch only `origin/v1.2-dev` and establish or validate the deterministic
+to fetch only `origin/v1.3-dev` and establish or validate the deterministic
 issue branch. The worker receives only `git_workspace_status`,
 `git_commit_issue_changes`, `git_push_issue_branch`, and
 `git_reconcile_operation`, plus the distinct bounded

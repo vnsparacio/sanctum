@@ -54,7 +54,7 @@ class ReworkWorkflowTests(unittest.TestCase):
         ]
         self.assertIn("preserve historical evidence", compact(section))
         self.assertIn(
-            "fresh issue branch from the accepted `origin/v1.2-dev`", compact(section)
+            "fresh issue branch from the accepted `origin/v1.3-dev`", compact(section)
         )
         self.assertIn("closed/merged PR", section)
 

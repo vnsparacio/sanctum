@@ -15,7 +15,7 @@ from typing import Any
 CANONICAL_REMOTE = "https://github.com/vnsparacio/sanctum.git"
 CANONICAL_GITHUB_REPOSITORY = "vnsparacio/sanctum"
 CANONICAL_GITHUB_OWNER = "vnsparacio"
-INTEGRATION_BASE = "v1.2-dev"
+INTEGRATION_BASE = "v1.3-dev"
 ISSUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*-[1-9][0-9]*$")
 OPERATION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 PROTECTED_PARTS = {".git", ".agents", ".codex"}
@@ -405,7 +405,7 @@ class GitControlPlane:
 
     def prepare(self, requested_base: str = INTEGRATION_BASE) -> dict[str, Any]:
         if requested_base != INTEGRATION_BASE:
-            raise GitControlError("base_rejected", "only origin/v1.2-dev is permitted")
+            raise GitControlError("base_rejected", "only origin/v1.3-dev is permitted")
         identity = self.identity()
         lease_exists = self._lease_path(identity).exists()
         if lease_exists:
@@ -428,7 +428,7 @@ class GitControlPlane:
             ).stdout.strip()
             if self._head() != base_head:
                 raise GitControlError(
-                    "base_stale", "local base does not equal accepted origin/v1.2-dev"
+                    "base_stale", "local base does not equal accepted origin/v1.3-dev"
                 )
             self._git(
                 "switch",
@@ -451,7 +451,7 @@ class GitControlPlane:
             if ancestry.returncode:
                 raise GitControlError(
                     "branch_base_rejected",
-                    "unleased issue branch does not descend from accepted origin/v1.2-dev",
+                    "unleased issue branch does not descend from accepted origin/v1.3-dev",
                 )
         if not lease_exists:
             self._write_lease(identity)

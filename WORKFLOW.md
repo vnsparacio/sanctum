@@ -3,7 +3,7 @@ tracker:
   kind: linear
   provider:
     api_key: $LINEAR_API_KEY
-    project_slug: "sanctum-v12-6fe3a63e0c69"
+    project_slug: "sanctum-v13-aafdb6e2bb76"
 
   required_labels:
     - symphony
@@ -26,7 +26,7 @@ workspace:
 
 hooks:
   after_create: |
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.2-dev" https://github.com/vnsparacio/sanctum.git .
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.3-dev" https://github.com/vnsparacio/sanctum.git .
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
   before_run: |
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
@@ -104,7 +104,7 @@ Do not implement adjacent improvements simply because you discover them.
 Never:
 - merge a pull request;
 - commit directly to `main`;
-- commit directly to `v1.2-dev`;
+- commit directly to `v1.3-dev`;
 - move an issue to Done;
 - add unrelated refactors or cleanup;
 - weaken security, privacy, authority, validation, or egress controls;
@@ -287,7 +287,7 @@ evidence in the old workpad: the feedback IDs, classification, why continued
 work was unsafe, old branch/PR, and validation history. Then close the
 obsolete PR only when appropriate, archive/remove the prior active workpad as
 the existing tracker convention permits, create a fresh issue branch from the
-accepted `origin/v1.2-dev` base, create a fresh workpad, and document what is
+accepted `origin/v1.3-dev` base, create a fresh workpad, and document what is
 different in the new approach. Restart implementation without erasing the
 old evidence. A stale/closed/merged PR must use this fresh-start behavior.
 
@@ -328,7 +328,7 @@ Agent` and the `symphony` label through the established control plane.
 
 The integration base branch is:
 
-`v1.2-dev`
+`v1.3-dev`
 
 Before modifying files:
 
@@ -342,7 +342,7 @@ Before modifying files:
    `git status --short`
 
 7. Confirm `git_workspace_status` reports the deterministic issue branch that
-   the host prepared from accepted `origin/v1.2-dev`.
+   the host prepared from accepted `origin/v1.3-dev`.
 
 8. Never ask shell Git to mutate metadata. The host hook owns base fetch and
    issue-branch bootstrap; the Git control plane owns commit and push.
@@ -449,7 +449,7 @@ When the implementation and validation are complete:
    summary line, and a stable operation ID recorded in the workpad.
 3. Confirm the returned commit and clean/expected workspace state.
 
-Do not commit to `main` or `v1.2-dev`.
+Do not commit to `main` or `v1.3-dev`.
 
 # Push and pull request
 
@@ -459,11 +459,11 @@ After a valid commit exists:
    workpad. It can only normally push the deterministic issue branch to origin.
 
 2. Call `github_ensure_issue_pull_request`. It reconciles an existing open PR
-   for the exact issue head or creates one targeting `v1.2-dev`.
+   for the exact issue head or creates one targeting `v1.3-dev`.
 
 The PR must:
 
-- target `v1.2-dev`;
+- target `v1.3-dev`;
 - have a concise outcome-oriented title;
 - reference the Linear issue;
 - summarize the change;

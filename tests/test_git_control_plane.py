@@ -25,7 +25,7 @@ class GitControlPlaneTests(unittest.TestCase):
         self.workspace = self.workspaces / "TTE-9"
         self.state = self.root / "private-state"
         self._run(["git", "init", "--bare", str(self.remote)], cwd=self.root)
-        self._run(["git", "init", "-b", "v1.2-dev", str(self.seed)], cwd=self.root)
+        self._run(["git", "init", "-b", "v1.3-dev", str(self.seed)], cwd=self.root)
         (self.seed / "README.md").write_text("accepted base\n")
         self._run(["git", "add", "README.md"], cwd=self.seed)
         self._run(
@@ -42,14 +42,14 @@ class GitControlPlaneTests(unittest.TestCase):
             cwd=self.seed,
         )
         self._run(["git", "remote", "add", "origin", str(self.remote)], cwd=self.seed)
-        self._run(["git", "push", "origin", "v1.2-dev"], cwd=self.seed)
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
         self.workspaces.mkdir()
         self._run(
             [
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 "--single-branch",
                 str(self.remote),
                 str(self.workspace),
@@ -78,14 +78,14 @@ class GitControlPlaneTests(unittest.TestCase):
     def test_authorized_bootstrap_uses_only_accepted_base(self):
         value = self.broker().prepare()
         self.assertEqual("symphony/tte-9", value["branch"])
-        self.assertEqual("origin/v1.2-dev", value["base"])
+        self.assertEqual("origin/v1.3-dev", value["base"])
         self.assertEqual(
             "symphony/tte-9",
             self._run(
                 ["git", "branch", "--show-current"], cwd=self.workspace
             ).stdout.strip(),
         )
-        with self.assertRaisesRegex(GitControlError, "only origin/v1.2-dev"):
+        with self.assertRaisesRegex(GitControlError, "only origin/v1.3-dev"):
             self.broker().prepare("main")
 
     def test_wrong_branch_and_remote_are_rejected(self):
@@ -103,7 +103,7 @@ class GitControlPlaneTests(unittest.TestCase):
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 str(self.remote),
                 str(replacement),
             ],
@@ -133,7 +133,7 @@ class GitControlPlaneTests(unittest.TestCase):
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 str(self.remote),
                 str(pointer_workspace),
             ],
@@ -353,7 +353,7 @@ class GitControlPlaneTests(unittest.TestCase):
         response = {
             "number": 41,
             "url": "https://github.example/pr/41",
-            "baseRefName": "v1.2-dev",
+            "baseRefName": "v1.3-dev",
             "headRefName": "symphony/tte-9",
             "headRefOid": broker._head(),
             "headRepository": {"nameWithOwner": "vnsparacio/sanctum"},
@@ -380,7 +380,7 @@ class GitControlPlaneTests(unittest.TestCase):
         self.assertEqual("symphony/tte-9", lookup[lookup.index("--head") + 1])
         create = next(call for call in calls if call[:2] == ("pr", "create"))
         self.assertIn("vnsparacio/sanctum", create)
-        self.assertIn("v1.2-dev", create)
+        self.assertIn("v1.3-dev", create)
         self.assertIn("symphony/tte-9", create)
         self.assertNotIn("merge", create)
         self.assertNotIn("--force", create)
@@ -393,7 +393,7 @@ class GitControlPlaneTests(unittest.TestCase):
             {
                 "number": 42,
                 "url": "https://github.example/pr/42",
-                "baseRefName": "v1.2-dev",
+                "baseRefName": "v1.3-dev",
                 "headRefName": "symphony/tte-9",
                 "headRefOid": broker._head(),
                 "headRepository": {"nameWithOwner": "attacker/sanctum"},
