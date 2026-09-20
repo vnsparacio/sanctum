@@ -508,6 +508,37 @@ class RepoStewardTests(unittest.TestCase):
             len([item for item in evidence if item.kind == "debt_marker"]), 1
         )
 
+    def test_python_marker_scan_ignores_literals_but_keeps_comments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Sanctum Test"],
+                cwd=repository,
+                check=True,
+            )
+            source = repository / "tests"
+            source.mkdir()
+            (source / "test_one.py").write_text(
+                'fixture = "# TODO fixture data\\n"\n# TODO actual debt\n'
+            )
+            subprocess.run(
+                ["git", "add", "tests/test_one.py"], cwd=repository, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "fixture"], cwd=repository, check=True
+            )
+            _, evidence = collect_evidence(
+                repository, ("tests",), None, deep=True, max_markers=5
+            )
+        markers = [item for item in evidence if item.kind == "debt_marker"]
+        self.assertEqual(["tests/test_one.py:2"], [item.location for item in markers])
+
     def test_first_or_shallow_commit_falls_back_to_bounded_tracked_scan(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import subprocess
+import tokenize
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,30 @@ from .runtime import (
 
 _SOURCE_SUFFIXES = {".py", ".mjs", ".js", ".ts", ".json", ".yml", ".yaml", ".md"}
 _MARKER = re.compile(r"\b(TODO|FIXME|HACK)\b", re.IGNORECASE)
+
+
+def _marker_candidates(path: Path, text: str) -> list[tuple[int, re.Match[str]]]:
+    """Return debt markers, excluding Python strings that only contain fixtures."""
+    if path.suffix.lower() != ".py":
+        return [
+            (line_number, match)
+            for line_number, line in enumerate(text.splitlines(), 1)
+            if (match := _MARKER.search(line))
+        ]
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        return [
+            (token.start[0], match)
+            for token in tokens
+            if token.type == tokenize.COMMENT
+            and (match := _MARKER.search(token.string))
+        ]
+    except (IndentationError, tokenize.TokenError):
+        return [
+            (line_number, match)
+            for line_number, line in enumerate(text.splitlines(), 1)
+            if (match := _MARKER.search(line))
+        ]
 
 
 def _hard_runtime_control_gaps(repository: Path) -> list[tuple[str, str]]:
@@ -208,15 +234,12 @@ def collect_evidence(
         elif path.suffix.lower() in {".py", ".mjs", ".js", ".ts"}:
             changed_code.append(name)
         try:
-            lines = path.read_text(errors="replace").splitlines()
+            text = path.read_text(errors="replace")
         except OSError:
             continue
-        for line_number, line in enumerate(lines, 1):
+        for line_number, match in _marker_candidates(path, text):
             if marker_count >= max_markers:
                 break
-            match = _MARKER.search(line)
-            if not match:
-                continue
             marker_count += 1
             evidence.append(
                 Evidence(
