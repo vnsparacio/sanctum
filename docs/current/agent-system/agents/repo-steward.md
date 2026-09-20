@@ -29,6 +29,10 @@ malformed fields fail the run rather than creating a finding.
 
 The current collector prioritizes tracked changes since the last successful
 run, explicit workflow-safety checks, and bounded debt-marker/test-gap evidence.
+The hard total-runtime check evaluates the complete effective control: the
+workflow declaration, a positive implementation timeout, and the persistent
+supervisor ledger and enforcement for both running and retrying work. No single
+wording match is treated as proof that the control is absent.
 GitHub/CI and Linear backlog evidence belong to the live qualification step;
 absence of authenticated Linear access must never be interpreted as an empty
 backlog or successful duplicate search.
