@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import stat
 import subprocess
@@ -70,7 +71,12 @@ from sanctum_agents.runtime import (
 )
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
-from sanctum_agents.symphony_supervisor import evaluate_snapshot, preflight, supervise
+from sanctum_agents.symphony_supervisor import (
+    _sanitized_supervisor_environment,
+    evaluate_snapshot,
+    preflight,
+    supervise,
+)
 from sanctum_agents.triage import (
     capture_live_snapshot,
     load_snapshot,
@@ -150,6 +156,13 @@ class ConfigurationTests(unittest.TestCase):
             raw["symphony"]["default_binary"] = str(binary)
             config_path.write_text(json.dumps(raw))
             config = load_config(config_path)
+            github_config = root / "github-config"
+            github_config.mkdir(mode=0o700)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\nexit 0\n")
+            gh.chmod(0o700)
 
             status = preflight(
                 config,
@@ -157,6 +170,8 @@ class ConfigurationTests(unittest.TestCase):
                 {
                     "LINEAR_API_KEY": "synthetic-test-token",
                     "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                    "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
                 },
             )
 
@@ -845,6 +860,8 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("max_turns: 8", workflow)
         self.assertIn("stall_timeout_ms: 300000", workflow)
         self.assertIn("Human Review` is a hard stopping point", workflow)
+        self.assertIn("github_ensure_issue_pull_request", workflow)
+        self.assertNotIn(" gh ", workflow)
         self.assertNotIn("gh pr merge", workflow)
 
 
@@ -882,6 +899,28 @@ class SymphonySupervisorTests(unittest.TestCase):
         )
         self.assertEqual(
             {"turns_budget", "tokens_budget"}, {item.reason for item in second}
+        )
+
+    def test_supervisor_environment_drops_unrelated_credentials(self):
+        value = _sanitized_supervisor_environment(
+            {
+                "PATH": "/usr/bin",
+                "HOME": "/synthetic/home",
+                "LINEAR_API_KEY": "linear-secret",
+                "GH_TOKEN": "github-secret",
+                "AWS_SECRET_ACCESS_KEY": "cloud-secret",
+                "SANCTUM_SYMPHONY_BIN": "/reviewed/symphony",
+            },
+            "SANCTUM_SYMPHONY_BIN",
+        )
+        self.assertEqual(
+            {
+                "PATH": "/usr/bin",
+                "HOME": "/synthetic/home",
+                "LINEAR_API_KEY": "linear-secret",
+                "SANCTUM_SYMPHONY_BIN": "/reviewed/symphony",
+            },
+            value,
         )
 
     def test_wall_stall_and_retry_caps_are_independent(self):
@@ -929,6 +968,24 @@ class SymphonySupervisorTests(unittest.TestCase):
         self.evaluate({"running": [], "retrying": []}, ledger, now=161)
         self.assertEqual({}, ledger["issues"])
 
+    def test_operator_blocker_is_terminal_without_retry_loop(self):
+        snapshot = {
+            "running": [],
+            "retrying": [],
+            "blocked": [
+                {
+                    "issue_identifier": "TTE-9",
+                    "error": "deterministic Git metadata permission blocker",
+                }
+            ],
+        }
+        ledger: dict[str, object] = {"issues": {}}
+        first = self.evaluate(snapshot, ledger)
+        second = self.evaluate(snapshot, ledger, now=201)
+        self.assertEqual(["operator_action_required"], [item.reason for item in first])
+        self.assertEqual(["operator_action_required"], [item.reason for item in second])
+        self.assertEqual(0, ledger["issues"]["TTE-9"]["max_retry"])
+
     def test_supervisor_kills_fake_service_and_writes_incident(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -959,14 +1016,22 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             config = load_config(config_path)
             prefix = root / "private-agents"
             workspace = root / "workspaces"
+            github_config = root / "github-config"
+            github_config.mkdir(mode=0o700)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\nexit 0\n")
+            gh.chmod(0o700)
             result = supervise(
                 config,
                 ROOT,
                 {
-                    "PATH": __import__("os").environ["PATH"],
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
                     "LINEAR_API_KEY": "synthetic-test-token",
                     "SYMPHONY_WORKSPACE_ROOT": str(workspace),
                     "SANCTUM_AGENT_PREFIX": str(prefix),
+                    "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
                 },
             )
             self.assertEqual(75, result)
