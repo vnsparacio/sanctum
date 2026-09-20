@@ -835,6 +835,15 @@ class WorkIntegrityAmendments(unittest.TestCase):
 
 
 class Publication(unittest.TestCase):
+    @staticmethod
+    def audit_module():
+        spec = importlib.util.spec_from_file_location(
+            "publication_audit", ROOT / "scripts/audit.py"
+        )
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        return audit
+
     def test_project_python_names_do_not_shadow_standard_library(self):
         excluded = {
             ".git",
@@ -872,11 +881,7 @@ class Publication(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "Path")
 
     def test_finder_metadata_is_rejected(self):
-        spec = importlib.util.spec_from_file_location(
-            "publication_audit", ROOT / "scripts/audit.py"
-        )
-        audit = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(audit)
+        audit = self.audit_module()
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             (base / ".DS_Store").write_bytes(b"\x00\x80metadata")
@@ -885,11 +890,7 @@ class Publication(unittest.TestCase):
             )
 
     def test_owner_home_paths_have_no_documentation_exceptions(self):
-        spec = importlib.util.spec_from_file_location(
-            "publication_audit", ROOT / "scripts/audit.py"
-        )
-        audit = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(audit)
+        audit = self.audit_module()
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             (base / "docs").mkdir()
@@ -899,6 +900,45 @@ class Publication(unittest.TestCase):
             agents.write_text("/Users/" + "owner/Projects/sanctum")
             self.assertIn(("docs/history.md", "owner_home"), audit.scan(base))
             self.assertIn(("AGENTS.md", "owner_home"), audit.scan(base))
+
+    def test_common_secret_classes_are_rejected_without_echoing_values(self):
+        audit = self.audit_module()
+        samples = {
+            "linear.txt": "lin_" + "api_" + "A" * 32,
+            "github.txt": "github_" + "pat_" + "B" * 40,
+            "firecrawl.txt": "fc-" + "C" * 32,
+            "runpod.env.example": "RUNPOD_API_KEY=" + "D" * 32,
+            "pgp.txt": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for name, value in samples.items():
+                (base / name).write_text(value)
+            issues = audit.scan(base)
+        self.assertEqual(
+            issues,
+            [
+                ("firecrawl.txt", "provider_key"),
+                ("github.txt", "github_token"),
+                ("linear.txt", "linear_token"),
+                ("pgp.txt", "private_key"),
+                ("runpod.env.example", "credential_assignment"),
+            ],
+        )
+        rendered = repr(issues)
+        for value in samples.values():
+            self.assertNotIn(value, rendered)
+
+    def test_secret_placeholders_are_allowed(self):
+        audit = self.audit_module()
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            (base / "instructions.txt").write_text(
+                "export LINEAR_API_KEY=...\n"
+                "FIRECRAWL_API_KEY=fc-YOUR-API-KEY\n"
+                "SPLUNK_ACCESS_TOKEN=<token>\n"
+            )
+            self.assertEqual(audit.scan(base), [])
 
 
 class IntegrationAmendments(unittest.TestCase):
