@@ -205,6 +205,7 @@ def preflight(
         "launch_prefix": _launch_prefix(binary),
         "workflow": str(workflow),
         "workspace_root": str(workspace_root),
+        "wall_clock_timeout_seconds": config.roles["implementation"].wall_clock_seconds,
     }
 
 

@@ -70,7 +70,7 @@ from sanctum_agents.runtime import (
 )
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
-from sanctum_agents.symphony_supervisor import evaluate_snapshot, supervise
+from sanctum_agents.symphony_supervisor import evaluate_snapshot, preflight, supervise
 from sanctum_agents.triage import (
     capture_live_snapshot,
     load_snapshot,
@@ -100,6 +100,13 @@ def catalog() -> list[dict[str, object]]:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def write_timeout_config(self, directory: str, value: object) -> Path:
+        raw = json.loads(CONFIG.read_text())
+        raw["roles"]["implementation"]["wall_clock_seconds"] = value
+        path = Path(directory) / "agents.json"
+        path.write_text(json.dumps(raw))
+        return path
+
     def test_central_config_and_exact_gate(self):
         config = load_config(CONFIG)
         self.assertEqual("gpt-5.6-terra", config.model_for("repo_steward").model)
@@ -126,6 +133,61 @@ class ConfigurationTests(unittest.TestCase):
             path = Path(directory) / "agents.json"
             path.write_text(json.dumps(raw))
             with self.assertRaisesRegex(ConfigError, "implementation gate"):
+                load_config(path)
+
+    def test_implementation_wall_clock_timeout_default(self):
+        config = load_config(CONFIG)
+        self.assertEqual(3600, config.roles["implementation"].wall_clock_seconds)
+
+    def test_implementation_wall_clock_timeout_valid_override_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = self.write_timeout_config(directory, 1800)
+            raw = json.loads(config_path.read_text())
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+
+            status = preflight(
+                config,
+                ROOT,
+                {
+                    "LINEAR_API_KEY": "synthetic-test-token",
+                    "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                },
+            )
+
+            self.assertEqual(1800, config.roles["implementation"].wall_clock_seconds)
+            self.assertEqual(1800, status["wall_clock_timeout_seconds"])
+
+    def test_implementation_wall_clock_timeout_rejects_malformed_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_timeout_config(directory, "one hour")
+            with self.assertRaisesRegex(
+                ConfigError,
+                "roles.implementation.wall_clock_seconds must be a positive integer",
+            ):
+                load_config(path)
+
+    def test_implementation_wall_clock_timeout_rejects_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_timeout_config(directory, 0)
+            with self.assertRaisesRegex(
+                ConfigError,
+                "roles.implementation.wall_clock_seconds must be a positive integer",
+            ):
+                load_config(path)
+
+    def test_implementation_wall_clock_timeout_rejects_negative_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_timeout_config(directory, -1)
+            with self.assertRaisesRegex(
+                ConfigError,
+                "roles.implementation.wall_clock_seconds must be a positive integer",
+            ):
                 load_config(path)
 
 
