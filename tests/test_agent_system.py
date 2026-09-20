@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import stat
 import subprocess
 import sys
@@ -869,6 +870,9 @@ class SymphonySupervisorTests(unittest.TestCase):
     def test_supervisor_kills_fake_service_and_writes_incident(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                state_port = probe.getsockname()[1]
             binary = root / "fake-symphony"
             binary.write_text("""#!/usr/bin/env python3
 import json, sys
@@ -885,7 +889,7 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             binary.chmod(0o700)
             raw = json.loads(CONFIG.read_text())
             raw["symphony"]["default_binary"] = str(binary)
-            raw["symphony"]["state_port"] = 17788
+            raw["symphony"]["state_port"] = state_port
             raw["symphony"]["poll_seconds"] = 1
             config_path = root / "source" / "config" / "agents.json"
             config_path.parent.mkdir(parents=True)

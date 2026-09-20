@@ -87,7 +87,14 @@ def release(env: dict[str, str]) -> None:
 
 def agents(env: dict[str, str]) -> None:
     run(
-        [sys.executable, "-B", "-m", "unittest", "tests.test_agent_system"],
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "unittest",
+            "tests.test_agent_system",
+            "tests.test_rework_workflow",
+        ],
         ".",
         env,
     )

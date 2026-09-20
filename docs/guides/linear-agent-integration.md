@@ -127,3 +127,36 @@ Symphony is a separate owner checkpoint. A passing metadata capture and active
 management schedules do not authorize it. Before the first controlled smoke,
 the owner must select a tiny issue, personally apply both execution gates, and
 run the separate `symphony-preflight` procedure in the agent-system runbook.
+
+## Human review feedback and Rework
+
+`Human Review` is a waiting state. Comments may accumulate there, but Symphony
+does not code merely because a comment exists. Move the issue to `Rework` when
+you want its new human feedback processed.
+
+For a normal small comment—such as a rename, missing test, or ordinary review
+finding—Symphony keeps the current branch, PR, and one `## Codex Workpad`. It
+records the feedback and a delta plan, updates the existing PR, validates it,
+and returns the issue to `Human Review`.
+
+For broader or directional feedback, Symphony records a structured plan on the
+existing workpad. If the work can be usefully decomposed, it creates the
+smallest sensible set of same-project **Backlog** issues with provenance,
+acceptance criteria, validation expectations, and appropriate relationships.
+These issues have no `symphony` label and are not moved to `Ready for Agent`.
+They are proposals: authorize each one later through the established owner
+gate, `Ready for Agent` plus `symphony`.
+
+For a consequentially vague request, Symphony asks one concise question in
+Linear and preserves the current PR. For an explicit start-over request or an
+unusable closed/merged PR, it preserves historical workpad evidence and uses a
+fresh branch/workpad attempt. Prefix a comment with `mode: fix`, `mode: plan`,
+or `mode: reset` to select that handling mode; this is optional and does not
+bypass any authority or validation control.
+
+The workpad's `### Review checkpoint` records stable Linear and GitHub comment
+IDs, classifications, and dispositions. Symphony reads it before acting, so a
+poll or retry does not repeat an edit, create duplicate issues, or ask the same
+question again. The optional `execute plan` comment shortcut is intentionally
+not implemented: this deployment has no reviewed deterministic authenticated
+owner-comment binding or replay-safe command channel.
