@@ -94,6 +94,7 @@ TRIAGE_FIXTURE = ROOT / "tests" / "fixtures" / "linear-triage-snapshot.json"
 REVIEW_FIXTURE = ROOT / "tests" / "fixtures" / "reviewer-packet.json"
 LINEAR_METADATA_FIXTURE = ROOT / "tests" / "fixtures" / "linear-metadata.json"
 SCHEDULES = ROOT / "config" / "schedules.json"
+PROTECTED_BRANCH_RULESET = ROOT / ".github" / "rulesets" / "protected-branches.json"
 
 
 def catalog() -> list[dict[str, object]]:
@@ -110,6 +111,38 @@ def catalog() -> list[dict[str, object]]:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_protected_branch_ruleset_preserves_pr_flow_and_admin_only_bypass(self):
+        ruleset = json.loads(PROTECTED_BRANCH_RULESET.read_text())
+
+        self.assertEqual("branch", ruleset["target"])
+        self.assertEqual("active", ruleset["enforcement"])
+        self.assertEqual(
+            ["refs/heads/main", "refs/heads/v1.3-dev"],
+            ruleset["conditions"]["ref_name"]["include"],
+        )
+        self.assertEqual([], ruleset["conditions"]["ref_name"]["exclude"])
+
+        rules = {rule["type"]: rule for rule in ruleset["rules"]}
+        self.assertEqual({"deletion", "non_fast_forward", "pull_request"}, set(rules))
+        pull_requests = rules["pull_request"]["parameters"]
+        self.assertEqual(0, pull_requests["required_approving_review_count"])
+        self.assertTrue(pull_requests["required_review_thread_resolution"])
+        self.assertEqual(
+            ["merge", "squash", "rebase"],
+            pull_requests["allowed_merge_methods"],
+        )
+
+        self.assertEqual(
+            [
+                {
+                    "actor_id": 5,
+                    "actor_type": "RepositoryRole",
+                    "bypass_mode": "always",
+                }
+            ],
+            ruleset["bypass_actors"],
+        )
+
     def write_timeout_config(self, directory: str, value: object) -> Path:
         raw = json.loads(CONFIG.read_text())
         raw["roles"]["implementation"]["wall_clock_seconds"] = value
