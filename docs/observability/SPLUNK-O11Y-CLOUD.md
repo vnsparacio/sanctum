@@ -125,6 +125,35 @@ Confirm the request, model, authority, and egress custom metrics in Metrics
 Finder. Stop after this canary; do not expand into infrastructure, vLLM, GPU,
 Collector, dashboard, detector, profiling, or agent instrumentation.
 
+## Accepted live qualification
+
+The owner-authorized canary completed on 2026-09-20. Primary trace
+`0f820de2e8e88ce7073f975c8a0cd0c7` loaded all six expected real spans for the
+`sanctum-gateway` service under root span `sanctum.request`. The identical trace
+ID appeared in the corresponding metadata-only `sanctum_ops` records, with
+active span correlation. Secondary trace
+`352d01f6c841cf0d54c7a17d855fc211` provided additional live confirmation.
+
+Metrics Finder confirmed the bounded request, model, authority, egress,
+duration and token metrics. The review found no prompts, responses, credentials,
+private content or secret configuration in the release evidence. This is
+evidence for the documented gateway slice only; it is not evidence for the
+deferred monitoring surfaces above.
+
+One historical JSONL batch remains merged in Splunk Enterprise because it was
+indexed before the owner corrected the sourcetype. Future
+`sanctum:runtime:event` ingestion uses:
+
+```text
+SHOULD_LINEMERGE=false
+LINE_BREAKER=([\r\n]+)
+KV_MODE=json
+INDEXED_EXTRACTIONS=none
+```
+
+The historical indexed batch is retained evidence, not a current ingestion
+configuration and not a reason to rewrite or delete prior data.
+
 ## Rollback
 
 Disable O11y with the command above to stop new direct exports while preserving

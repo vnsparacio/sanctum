@@ -83,5 +83,5 @@ test('supported Splunk startup receives only manual signals and safe resources',
 test('default service version comes from the dependency package anchor',()=>{
  let options;const env={SANCTUM_O11Y_ENABLED:'1',SPLUNK_REALM:'us0',SPLUNK_ACCESS_TOKEN:'private-value'};
  const value=initializeObservability({env,start:selected=>{options=selected;},stop:async()=>{}});
- assert.equal(value.enabled,true);assert.equal(options.resource().attributes['service.version'],'1.1.0');
+ assert.equal(value.enabled,true);assert.equal(options.resource().attributes['service.version'],'1.2.0');
 });

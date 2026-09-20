@@ -1,3 +1,20 @@
+# Sanctum v1.2.0
+
+**COMPLETE WITH DOCUMENTED LIMITATIONS.** This backward-compatible release preserves the Mac-owned authority model while adding bounded agent management, stronger repository controls and an observational Splunk integration. It does not migrate or redeploy the private owner runtime.
+
+- Add the bounded V1.2 agent-management system: Repo Steward, Product Scout, Triage, a Symphony implementation worker and an independent PR reviewer, with external private state, exact role/model policy and explicit wall-clock, turn, token, retry, stall, output and workload limits.
+- Qualify the live Linear management path. Repo Steward and Product Scout created capped, replay-deduplicated findings; Triage moved only management work; four owner-configured schedules are active. Management agents still cannot set `Ready for Agent`, add `symphony`, edit source, merge, or move work to Done.
+- Add feedback-aware Symphony Rework handling and expose the reviewed implementation wall-clock timeout. Implementation still requires both owner-set execution gates, uses one isolated workspace at a time, targets `v1.2-dev`, and stops at `Human Review`.
+- Add a bounded, host-owned Git control plane for deterministic issue branches, transactional commits, normal pushes, reconciliation and unmerged pull-request handoff without exposing GitHub credentials or generic Git authority to workers. The controlled documentation smoke completed issue-to-PR handoff and stopped for human review.
+- Add repository hygiene and source-integrity improvements: Dependabot coverage, pinned Black and Ruff checks, decomposed CI jobs, portable path enforcement, broader documentation-link checks and explicit source-manifest verification.
+- Add the Sanctum logo and reorganize current, architectural, operator, development and historical documentation without rewriting retained V1/V1.1 evidence.
+- Preserve the existing metadata-only operational-event path through the private spool, S3 and Splunk Enterprise. Add optional direct Splunk Observability Cloud manual APM and bounded custom metrics, with active `trace_id`/`span_id` correlation into `sanctum_ops` records.
+- Accept the owner-verified live observability canary: all six expected real spans for trace `0f820de2e8e88ce7073f975c8a0cd0c7`, matching Core correlation, secondary trace `352d01f6c841cf0d54c7a17d855fc211`, and confirmed request, model, authority, egress, duration and token metrics.
+
+The release retains human-only implementation authorization and merge authority, implementation concurrency of one, the documented V1/V1.1 product limitations and the development-only Vitest advisory. Observability remains gateway-only, metadata-only, optional and fail-open; it cannot affect authority, routing, egress, capability, evaluation, verification or completion. Runpod/vLLM/GPU/host monitoring, collectors, dashboards, detectors, profiling, RUM, agent observability and an Observability Steward remain deferred. One historical `sanctum_ops` JSONL batch remains merged because it was indexed before the sourcetype was corrected; future ingestion uses the documented line-breaking configuration.
+
+See [the V1.2 release-completion record](docs/history/v1.2/V1.2-RELEASE-COMPLETION.md), [agent-system handoff](docs/current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md), [Git control plane](docs/current/agent-system/V1.2-GIT-CONTROL-PLANE.md), [Linear qualification](docs/current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md), [Splunk Observability guide](docs/observability/SPLUNK-O11Y-CLOUD.md) and [release limitations](docs/current/limitations.md).
+
 # Sanctum v1.1.0
 
 **COMPLETE WITH DOCUMENTED LIMITATIONS.** This release line is ready to tag after its release-completion pull request is merged into `v1.1-dev` and promoted under the repository's normal release process. It does not alter the immutable `v1.0.0` tag.
