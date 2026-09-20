@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-19T00:00:00Z",
+  "issues": [
+    {
+      "id": "issue-a",
+      "identifier": "SAN-101",
+      "title": "Bound implementation worker total runtime",
+      "description": "The implementation executor needs a hard total-runtime watchdog beyond turn and silence timeouts.",
+      "state": "Triage",
+      "labels": ["reliability", "agent-quality"],
+      "source": "Repo Steward",
+      "evidence_urls": []
+    },
+    {
+      "id": "issue-b",
+      "identifier": "SAN-102",
+      "title": "Add a total runtime cap to implementation workers",
+      "description": "A second finding reports the same missing hard deadline for implementation execution.",
+      "state": "Triage",
+      "labels": ["reliability"],
+      "source": "Repo Steward",
+      "evidence_urls": []
+    },
+    {
+      "id": "issue-c",
+      "identifier": "SAN-99",
+      "title": "Implementation worker watchdog",
+      "description": "Existing backlog item for the hard execution deadline and operator-visible stop reason.",
+      "state": "Backlog",
+      "labels": ["reliability", "agent-quality"],
+      "source": "Human",
+      "evidence_urls": []
+    }
+  ]
+}

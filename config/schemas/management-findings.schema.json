@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "summary", "severity", "recommendation", "evidence_ids", "labels"],
+        "properties": {
+          "title": {"type": "string", "minLength": 8, "maxLength": 140},
+          "summary": {"type": "string", "minLength": 20, "maxLength": 2000},
+          "severity": {"enum": ["low", "medium", "high"]},
+          "recommendation": {"enum": ["Investigate", "Watch", "Ignore"]},
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {"type": "string", "minLength": 1, "maxLength": 80}
+          },
+          "labels": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {"enum": ["tech-debt", "architecture", "security", "reliability", "agent-quality", "documentation", "research", "product-discovery"]}
+          }
+        }
+      }
+    }
+  }
+}

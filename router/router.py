@@ -94,7 +94,6 @@ def classify_difficulty(policy, task, context_tokens, source_count, quality):
 
 
 def decide_route(policy, privacy, difficulty, aws_state, hosted_state):
-    reasons = []
     local_tier = policy["local_tier"]
     aws_tier = policy["private_aws_tier"]
 
@@ -107,9 +106,7 @@ def decide_route(policy, privacy, difficulty, aws_state, hosted_state):
                 "reasoning_tier": local_tier,
                 "fallback_route": None,
                 "hosted_egress_allowed": False,
-                "reasons": [
-                    f"{privacy} + EASY => LOCAL"
-                ],
+                "reasons": [f"{privacy} + EASY => LOCAL"],
             }
 
         if aws_state == "running":
@@ -178,8 +175,9 @@ def decide_route(policy, privacy, difficulty, aws_state, hosted_state):
     }
 
 
-def route_request(policy, sources, tags, task, context_tokens, quality,
-                  aws_state, hosted_state):
+def route_request(
+    policy, sources, tags, task, context_tokens, quality, aws_state, hosted_state
+):
     if not sources:
         sources = ["unknown"]
 
@@ -187,9 +185,7 @@ def route_request(policy, sources, tags, task, context_tokens, quality,
     difficulty, difficulty_reasons = classify_difficulty(
         policy, task, context_tokens, len(sources), quality
     )
-    decision = decide_route(
-        policy, privacy, difficulty, aws_state, hosted_state
-    )
+    decision = decide_route(policy, privacy, difficulty, aws_state, hosted_state)
 
     return {
         "policy_version": policy["policy_version"],

@@ -6,6 +6,7 @@ import { createGate,createExecutor } from './core.mjs';
 import { createLocalAgent } from './local-agent.mjs';
 import { createSourceRetrieval } from './source-retrieval.mjs';
 import { createWorkCommand } from './work-command.mjs';
+import {boundedShutdown,gatewayObservability} from './observability.mjs';
 import { currentCapabilityManifest } from '../foundation/manifest.mjs';
 export default {
   id:'hybrid-ai-prompt-gate',name:'Mac privacy-first hybrid gate',
@@ -16,6 +17,7 @@ export default {
     }
     const raw=readFileSync(resolve(base,'SETTINGS.json'),'utf8'),settings=JSON.parse(raw);
     settings.settingsFileHash=createHash('sha256').update(raw).digest('hex');
+    const observability=gatewayObservability({gitCommit:process.env.SANCTUM_GIT_COMMIT});
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});
@@ -27,7 +29,7 @@ export default {
       return body.result?.details??body.result;
     };
     let retrieval=null;
-    const gate=createGate({settings,key,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
+    const gate=createGate({settings,key,observability,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
     api.registerCommand({name:'gate',description:'Mac-owned hybrid reasoning with exact disclosure approvals',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:gate});
     const work=createWorkCommand({api,base,settings,key,remote});
     api.registerCommand({name:'work',description:'Owner-selected bounded PRIVATE_LEAD Work Mode',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:work});
@@ -35,5 +37,6 @@ export default {
     // ordinary operation independent of UI polling.
     let sweeping=false;
     const timer=setInterval(async()=>{if(sweeping)return;sweeping=true;try{await gate.sweep();}finally{sweeping=false;}},30000);timer.unref();
+    api.on('gateway_stop',async()=>{clearInterval(timer);await gate.close();await boundedShutdown(observability);});
   }
 };

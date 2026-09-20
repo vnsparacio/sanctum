@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "role": "reviewer",
+  "mode": "shadow",
+  "model": "gpt-5.6-sol",
+  "reasoning": "high",
+  "runtime_seconds": 8.44,
+  "usage": {
+    "turns": 1,
+    "tokens": 14368
+  },
+  "github_writes": 0,
+  "linear_writes": 0,
+  "review": {
+    "verdict": "Approve",
+    "summary": "The documentation-only change satisfies the supplied acceptance criteria; successful CI and validation evidence support that no runtime behavior changed.",
+    "blocking": [],
+    "nonblocking": []
+  },
+  "acceptance": {
+    "fresh_ephemeral_context": true,
+    "repository_unchanged": true,
+    "unmerged_pr_required": true,
+    "human_review_required": true,
+    "private_runtime_permissions": "0700 directories, 0600 files"
+  }
+}

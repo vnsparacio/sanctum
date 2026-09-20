@@ -2,7 +2,7 @@
 
 Read the architecture and security documents before changing capability boundaries. V1 packaging must not become a feature or dependency-upgrade project.
 
-Use a fresh checkout and `make deps build test audit`. Build uses temporary OpenClaw state. Tool plugins use OpenClaw's generated metadata process; hook plugins compile with TypeScript and validate their exported registration entry. Do not run a hook plugin through the tool-only metadata generator.
+Use a fresh checkout and run `make deps format-check lint build test audit verify-source`. Use `make format` to apply Black. The individual test commands and their matching CI checks are listed in [the testing guide](docs/development/testing.md). Build uses temporary OpenClaw state. Tool plugins use OpenClaw's generated metadata process; hook plugins compile with TypeScript and validate their exported registration entry. Do not run a hook plugin through the tool-only metadata generator.
 
 Keep tests credential-free. Use fake providers for allocation ambiguity, cleanup, budget and approval tests. Put real service tests behind explicit operator setup; never read a contributor's personal sources from CI.
 

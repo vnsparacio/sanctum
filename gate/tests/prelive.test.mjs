@@ -95,7 +95,7 @@ test('signed actual worker persists global reservations across processes and rej
  }finally{h.close();}
 });
 test('runbook enforces ordered free gates fixed probes first failure and confirmed cleanup',()=>{
- const path=join(root,'docs/PROJECT-3-QWEN-PRELIVE-READINESS.md');assert.ok(existsSync(path));
+ const path=join(root,'docs/history/v1.1/project-3/PROJECT-3-QWEN-PRELIVE-READINESS.md');assert.ok(existsSync(path));
  const text=readFileSync(path,'utf8');
  const start=text.indexOf('<!-- RUNBOOK START -->'),end=text.indexOf('<!-- RUNBOOK END -->');assert.ok(start>=0&&end>start);
  const book=text.slice(start,end);assert.ok(book.includes('NOT AUTHORIZED TO EXECUTE BY THIS WORK PACKAGE'));

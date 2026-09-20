@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "role": "triage",
+  "mode": "shadow",
+  "model": "gpt-5.6-luna",
+  "reasoning": "medium",
+  "linear_writes": 0,
+  "runtime_seconds": 8.76,
+  "usage": {
+    "turns": 1,
+    "tokens": 12820
+  },
+  "decisions": [
+    {
+      "issue": "SAN-101",
+      "action": "Duplicate",
+      "duplicate_of": "SAN-99",
+      "mutation": {
+        "state": "Canceled"
+      }
+    },
+    {
+      "issue": "SAN-102",
+      "action": "Duplicate",
+      "duplicate_of": "SAN-99",
+      "mutation": {
+        "state": "Canceled"
+      }
+    }
+  ],
+  "owner_briefing": "Retain SAN-99 as the backlog record for the implementation-worker watchdog.",
+  "acceptance": {
+    "bounded_process_completed": true,
+    "repository_unchanged": true,
+    "ready_for_agent_mutations": 0,
+    "symphony_label_mutations": 0,
+    "private_runtime_permissions": "0700 directories, 0600 files"
+  }
+}

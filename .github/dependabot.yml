@@ -1,0 +1,80 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /gate/plugin
+      - /mcp-integration/guard
+      - /plugins/browser-guard
+      - /plugins/calendar-read-tools
+      - /plugins/file-steward
+      - /plugins/gmail-read-tools
+      - /plugins/local-markdown-tools
+      - /plugins/messages-read-tools
+      - /reliability
+    target-branch: v1.2-dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      dependency-non-major:
+        patterns:
+          - "*"
+        group-by: dependency-name
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /host/web-runtime
+    target-branch: v1.2-dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      optional-web-non-major:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directories:
+      - /
+      - /gate/runtime
+      - /host
+    target-branch: v1.2-dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      python-non-major:
+        patterns:
+          - "*"
+        group-by: dependency-name
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: v1.2-dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      actions-non-major:
+        update-types:
+          - minor
+          - patch

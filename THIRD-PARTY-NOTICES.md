@@ -7,6 +7,7 @@ This release is source-only: node_modules, Python environments, generated plugin
 | Dependency | Observed license / treatment |
 |---|---|
 | OpenClaw 2026.8.1; TypeBox; Ajv; Vitest | MIT; installed separately, retain upstream notices |
+| Splunk Distribution of OpenTelemetry JS 4.11.0; OpenTelemetry JS 1.9.1/2.10.0 | Apache-2.0; installed separately for the optional gateway trace/custom-metric slice, retain upstream notices |
 | TypeScript | Apache-2.0 |
 | MLX, mlx-metal, mlx-lm | MIT; separately installed Apple Silicon environment |
 | Pillow; pypdf; imageio-ffmpeg | MIT-CMU; BSD-3-Clause; BSD-2-Clause metadata respectively; separately installed. FFmpeg binaries carry their own obligations |

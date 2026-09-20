@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decisions", "owner_briefing"],
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue_id", "action", "reason", "duplicate_of", "related_ids"],
+        "properties": {
+          "issue_id": {"type": "string", "minLength": 1, "maxLength": 100},
+          "action": {"enum": ["Leave", "Backlog", "Watch", "Cancel", "Duplicate"]},
+          "reason": {"type": "string", "minLength": 20, "maxLength": 1000},
+          "duplicate_of": {"type": ["string", "null"]},
+          "related_ids": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {"type": "string", "minLength": 1, "maxLength": 100}
+          }
+        }
+      }
+    },
+    "owner_briefing": {"type": "string", "minLength": 20, "maxLength": 2000}
+  }
+}

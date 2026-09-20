@@ -32,9 +32,7 @@ def classify_task(rules, text: str) -> tuple[str, list[str]]:
     reasons = []
     for rule in rules["task_patterns"]:
         if _search(rule["regex"], text):
-            reasons.append(
-                f"task rule matched '{rule['regex']}' => {rule['task']}"
-            )
+            reasons.append(f"task rule matched '{rule['regex']}' => {rule['task']}")
             return rule["task"], reasons
 
     stripped = text.strip().lower()
@@ -77,9 +75,7 @@ def classify_user_text(
         if _search(rule["regex"], text):
             if rule["tag"] not in tags:
                 tags.append(rule["tag"])
-            reasons.append(
-                f"restricted pattern matched => tag {rule['tag']}"
-            )
+            reasons.append(f"restricted pattern matched => tag {rule['tag']}")
 
     if session_context == "restricted":
         reasons.append("session context already RESTRICTED")
@@ -150,8 +146,7 @@ def classify_user_text(
     # Large/pasted content is never auto-declassified by V1.
     if len(text) > rules["public_auto_max_chars"]:
         reasons.append(
-            f"text length {len(text)} > {rules['public_auto_max_chars']} "
-            "=> PERSONAL"
+            f"text length {len(text)} > {rules['public_auto_max_chars']} " "=> PERSONAL"
         )
         return {
             "user_class": "personal",
@@ -209,9 +204,7 @@ def classify_user_text(
             or stripped.startswith("show me ")
             or stripped.startswith("give me ")
         ):
-            reasons.append(
-                "clean session + short generic informational form => PUBLIC"
-            )
+            reasons.append("clean session + short generic informational form => PUBLIC")
             return {
                 "user_class": "public",
                 "privacy_hint": "PUBLIC",
@@ -322,7 +315,9 @@ def main():
         print(f"Task:              {result['task']}")
         print(f"Quality:           {result['quality']}")
         print(f"Auto-declassified: {'YES' if result['auto_declassified'] else 'NO'}")
-        print(f"Tags:              {', '.join(result['tags']) if result['tags'] else '-'}")
+        print(
+            f"Tags:              {', '.join(result['tags']) if result['tags'] else '-'}"
+        )
         print()
         print("Why:")
         for reason in result["reasons"]:
