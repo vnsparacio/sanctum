@@ -68,12 +68,18 @@ class AgentConfig:
             raise ConfigError(f"no model configured for role {role!r}") from exc
 
 
-def _positive(data: dict[str, Any], key: str, *, allow_zero: bool = False) -> int:
+def _positive(
+    data: dict[str, Any],
+    key: str,
+    *,
+    allow_zero: bool = False,
+    qualified_name: str | None = None,
+) -> int:
     value = data.get(key)
     minimum = 0 if allow_zero else 1
     if type(value) is not int or value < minimum:
         qualifier = "non-negative" if allow_zero else "positive"
-        raise ConfigError(f"{key} must be a {qualifier} integer")
+        raise ConfigError(f"{qualified_name or key} must be a {qualifier} integer")
     return value
 
 
@@ -95,7 +101,11 @@ def _role(name: str, raw: Any) -> RoleConfig:
     return RoleConfig(
         cadence=cadence,
         write_enabled=raw["write_enabled"],
-        wall_clock_seconds=_positive(raw, "wall_clock_seconds"),
+        wall_clock_seconds=_positive(
+            raw,
+            "wall_clock_seconds",
+            qualified_name=f"roles.{name}.wall_clock_seconds",
+        ),
         max_items=_positive(raw, "max_items"),
         max_sources=_positive(raw, "max_sources", allow_zero=True),
         max_issues_created=_positive(raw, "max_issues_created", allow_zero=True),
