@@ -5,7 +5,8 @@ through Symphony when a Linear issue simultaneously has status `Ready for
 Agent` and label `symphony`. The human owner alone controls that gate. The
 worker uses Sol-medium by default, starts from latest `v1.2-dev`, works on the
 deterministic `symphony/<issue-identifier-lowercase>` branch, validates
-proportionally, commits, pushes, opens an unmerged PR targeting `v1.2-dev`,
+proportionally, asks the host Git control plane to commit and push, opens an
+unmerged PR targeting `v1.2-dev`,
 updates the persistent Linear workpad, moves the issue to `Human Review`, and
 stops.
 
@@ -30,6 +31,10 @@ two retries, five minutes without an event, one MiB of service output, and a
 group, leaves Linear state untouched, exits with code 75, and creates a private
 incident receipt containing the exact observed value and limit.
 
+Symphony's blocked state is also terminal for the current supervisor
+invocation. A deterministic environment/control-plane blocker is recorded
+once, requests operator input, and cannot consume continuation or retry loops.
+
 Start only through:
 
 ```sh
@@ -45,6 +50,34 @@ or a reviewed signed standalone binary; no owner-home path is frozen into
 source. The supervisor explicitly passes the reference implementation's
 required engineering-preview acknowledgement flag. It also uses `mise`
 automatically when the selected development binary is adjacent to `mise.toml`.
+
+## Git authority boundary
+
+Codex remains in `workspace-write`; direct `.git` mutation is intentionally
+unavailable. Trusted lifecycle hooks run the reviewed broker before each turn
+to fetch only `origin/v1.2-dev` and establish or validate the deterministic
+issue branch. The worker receives only `git_workspace_status`,
+`git_commit_issue_changes`, `git_push_issue_branch`, and
+`git_reconcile_operation`, plus the distinct bounded
+`github_ensure_issue_pull_request` handoff. There is no arbitrary Git/GitHub
+argument tool, force push, branch deletion, merge, protected-branch write, or
+caller-selected repository/remote/base/head.
+
+The broker executable is the source-manifest-verified canonical copy, not the
+copy inside the issue workspace. It binds the real workspace path, device,
+inode, in-place Git directory, issue identifier, canonical remote, accepted
+base, and deterministic branch into a private host lease. Commit accepts only
+explicit relative nonsymlink paths. Push is a normal push of the current issue
+branch to origin. Pending commit/push receipts live under the external private
+agent prefix; an uncertain result is reconciled against actual Git state and
+is never blindly replayed.
+
+Git subprocesses receive an allowlisted environment. Tracker credentials are
+removed by Symphony, credential values are never returned, and the fixed local
+GitHub CLI plus its private external authentication directory may be used only
+by the broker's bounded remote read/push/PR operations. The worker sandbox
+cannot read that directory. Repository hooks are disabled and repository code
+is not executed by the broker.
 
 ## Validation profiles
 

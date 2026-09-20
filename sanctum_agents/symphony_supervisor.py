@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -57,7 +59,12 @@ def evaluate_snapshot(
         raise ValueError("Symphony snapshot must be an object")
     running = snapshot.get("running", [])
     retrying = snapshot.get("retrying", [])
-    if not isinstance(running, list) or not isinstance(retrying, list):
+    blocked = snapshot.get("blocked", [])
+    if (
+        not isinstance(running, list)
+        or not isinstance(retrying, list)
+        or not isinstance(blocked, list)
+    ):
         raise ValueError("Symphony snapshot collections are malformed")
     issues = ledger.setdefault("issues", {})
     violations: list[SymphonyViolation] = []
@@ -141,6 +148,21 @@ def evaluate_snapshot(
                     identifier, "retries_budget", float(attempt), float(max_retries)
                 )
             )
+    for entry in blocked:
+        if not isinstance(entry, dict):
+            raise ValueError("Symphony blocked entry is malformed")
+        identifier = entry.get("issue_identifier") or entry.get("identifier")
+        if not isinstance(identifier, str) or not identifier:
+            raise ValueError("Symphony blocked entry is malformed")
+        active_identifiers.add(identifier)
+        record = issues.setdefault(
+            identifier,
+            {"first_seen": now, "last_seen": now, "sessions": {}, "max_retry": 0},
+        )
+        record["last_seen"] = now
+        violations.append(
+            SymphonyViolation(identifier, "operator_action_required", 1.0, 0.0)
+        )
     for identifier, record in list(issues.items()):
         if (
             identifier not in active_identifiers
@@ -170,6 +192,36 @@ def _resolve_binary(config: AgentConfig, environ: dict[str, str]) -> str:
     return str(Path(binary).resolve())
 
 
+def _verified_broker_assets(repository: Path) -> tuple[str, str]:
+    manifest_path = repository / "SOURCE-MANIFEST.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError("source manifest unavailable for Git broker") from exc
+    relative_paths = (
+        "scripts/sanctum_git_broker.py",
+        "sanctum_agents/git_control_plane.py",
+    )
+    for relative in relative_paths:
+        path = repository / relative
+        expected = manifest.get(relative)
+        if (
+            not isinstance(expected, str)
+            or path.is_symlink()
+            or not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest() != expected
+        ):
+            raise ConfigError(f"reviewed Git broker source drift: {relative}")
+    python = repository.resolve() / ".venv" / "bin" / "python"
+    script = (repository / relative_paths[0]).resolve()
+    safe_path = re.compile(r"^[A-Za-z0-9_./-]+$")
+    if not python.is_file() or not os.access(python, os.X_OK):
+        raise ConfigError("reviewed Git broker Python is unavailable")
+    if not safe_path.fullmatch(str(python)) or not safe_path.fullmatch(str(script)):
+        raise ConfigError("Git broker executable paths contain unsupported characters")
+    return str(python), str(script)
+
+
 def _launch_prefix(binary: str) -> list[str]:
     project = Path(binary).parent.parent
     mise_config = project / "mise.toml"
@@ -181,6 +233,34 @@ def _launch_prefix(binary: str) -> list[str]:
             )
         return [mise, "-C", str(project), "exec", "--", binary]
     return [binary]
+
+
+def _sanitized_supervisor_environment(
+    values: dict[str, str], binary_env: str
+) -> dict[str, str]:
+    allowed = {
+        "CODEX_HOME",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LINEAR_API_KEY",
+        "LOGNAME",
+        "MISE_CACHE_DIR",
+        "MISE_CONFIG_DIR",
+        "MISE_DATA_DIR",
+        "PATH",
+        "SANCTUM_AGENT_PREFIX",
+        "SHELL",
+        "SSH_AUTH_SOCK",
+        "SYMPHONY_WORKSPACE_ROOT",
+        "TMPDIR",
+        "USER",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        binary_env,
+    }
+    return {key: value for key, value in values.items() if key in allowed}
 
 
 def preflight(
@@ -200,11 +280,72 @@ def preflight(
     source = repository.resolve()
     if workspace_root == source or workspace_root.is_relative_to(source):
         raise ConfigError("Symphony workspace root must remain outside source")
+    broker_python, broker_script = _verified_broker_assets(repository)
+    credential_helper = shutil.which("gh", path=values.get("PATH"))
+    if not credential_helper:
+        raise ConfigError("GitHub CLI credential helper is unavailable")
+    credential_helper_path = Path(credential_helper).resolve()
+    safe_path = re.compile(r"^[A-Za-z0-9_./-]+$")
+    if (
+        credential_helper_path.name != "gh"
+        or not credential_helper_path.is_file()
+        or credential_helper_path.is_symlink()
+        or not os.access(credential_helper_path, os.X_OK)
+        or not safe_path.fullmatch(str(credential_helper_path))
+        or credential_helper_path.stat().st_uid not in {0, os.getuid()}
+        or credential_helper_path.stat().st_mode & 0o022
+    ):
+        raise ConfigError("GitHub CLI credential helper is not a reviewed executable")
+    raw_github_config = values.get("SANCTUM_GIT_GH_CONFIG_DIR")
+    if not raw_github_config:
+        raise ConfigError("SANCTUM_GIT_GH_CONFIG_DIR is required")
+    github_config_dir = Path(raw_github_config).expanduser()
+    if (
+        not github_config_dir.is_absolute()
+        or github_config_dir.is_symlink()
+        or not github_config_dir.is_dir()
+    ):
+        raise ConfigError(
+            "SANCTUM_GIT_GH_CONFIG_DIR must be an existing private directory"
+        )
+    github_config_dir = github_config_dir.resolve()
+    if (
+        github_config_dir.is_relative_to(source)
+        or github_config_dir.is_relative_to(workspace_root)
+        or github_config_dir.stat().st_mode & 0o077
+    ):
+        raise ConfigError(
+            "GitHub CLI authentication must remain in a private external directory"
+        )
+    auth_environment = {
+        "GH_CONFIG_DIR": str(github_config_dir),
+        "GH_PROMPT_DISABLED": "1",
+        "HOME": values.get("HOME", "/var/empty"),
+        "NO_COLOR": "1",
+        "PATH": values.get("PATH", "/usr/bin:/bin"),
+    }
+    try:
+        authenticated = subprocess.run(
+            [str(credential_helper_path), "auth", "status", "--hostname", "github.com"],
+            env=auth_environment,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ConfigError("private GitHub CLI authentication check timed out") from exc
+    if authenticated.returncode:
+        raise ConfigError("private GitHub CLI authentication is unavailable")
     return {
         "binary": binary,
         "launch_prefix": _launch_prefix(binary),
         "workflow": str(workflow),
         "workspace_root": str(workspace_root),
+        "git_broker_python": broker_python,
+        "git_broker_script": broker_script,
+        "git_credential_helper": str(credential_helper_path),
+        "git_github_config_dir": str(github_config_dir),
         "wall_clock_timeout_seconds": config.roles["implementation"].wall_clock_seconds,
     }
 
@@ -244,8 +385,13 @@ def _stop_group(process: subprocess.Popen[Any], grace_seconds: float) -> None:
 def supervise(
     config: AgentConfig, repository: Path, environ: dict[str, str] | None = None
 ) -> int:
-    values = dict(os.environ if environ is None else environ)
-    checked = preflight(config, repository, values)
+    supplied = dict(os.environ if environ is None else environ)
+    checked = preflight(config, repository, supplied)
+    values = _sanitized_supervisor_environment(supplied, config.symphony["binary_env"])
+    values["SANCTUM_GIT_BROKER_PYTHON"] = checked["git_broker_python"]
+    values["SANCTUM_GIT_BROKER_SCRIPT"] = checked["git_broker_script"]
+    values["SANCTUM_GIT_CREDENTIAL_HELPER"] = checked["git_credential_helper"]
+    values["SANCTUM_GIT_GH_CONFIG_DIR"] = checked["git_github_config_dir"]
     role = config.roles["implementation"]
     workspace_root = Path(checked["workspace_root"])
     workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -254,6 +400,10 @@ def supervise(
     workspace_root.chmod(0o700)
     prefix = config.runtime_prefix(values)
     ensure_private_prefix(prefix)
+    broker_state = prefix / "state" / "git-control-plane"
+    broker_state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    broker_state.chmod(0o700)
+    values["SANCTUM_GIT_BROKER_STATE"] = str(broker_state)
     run_id = new_run_id("implementation")
     log = JsonlRunLog(
         prefix / "logs" / "implementation" / f"{run_id}.jsonl",

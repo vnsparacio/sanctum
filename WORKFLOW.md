@@ -26,7 +26,11 @@ workspace:
 
 hooks:
   after_create: |
-    git clone --depth 1 --branch "v1.2-dev" https://github.com/vnsparacio/sanctum.git .
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.2-dev" https://github.com/vnsparacio/sanctum.git .
+    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
+  before_run: |
+    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
+  timeout_ms: 120000
 
 agent:
   max_concurrent_agents: 1
@@ -34,14 +38,34 @@ agent:
   max_retry_backoff_ms: 120000
 
 codex:
-  command: codex -c 'model="gpt-5.6-sol"' -c 'model_reasoning_effort="medium"' app-server
+  command: >-
+    codex -c 'model="gpt-5.6-sol"' -c 'model_reasoning_effort="medium"'
+    -c 'default_permissions="sanctum-workspace"'
+    -c 'permissions.sanctum-workspace.extends=":workspace"'
+    -c 'permissions.sanctum-workspace.network.enabled=true'
+    -c 'mcp_servers.node_repl.enabled=false'
+    -c 'plugins."documents@openai-primary-runtime".enabled=false'
+    -c 'plugins."spreadsheets@openai-primary-runtime".enabled=false'
+    -c 'plugins."presentations@openai-primary-runtime".enabled=false'
+    -c 'plugins."pdf@openai-primary-runtime".enabled=false'
+    -c 'plugins."template-creator@openai-primary-runtime".enabled=false'
+    -c 'plugins."visualize@openai-bundled".enabled=false'
+    -c 'plugins."browser@openai-bundled".enabled=false'
+    -c 'plugins."codex-app-tools@openai-bundled".enabled=false'
+    -c 'plugins."unified-computer-use@openai-bundled".enabled=false'
+    -c 'plugins."computer-use@openai-bundled".enabled=false'
+    -c 'plugins."runpod@runpod".enabled=false'
+    -c "mcp_servers.sanctum_git.command=\"$SANCTUM_GIT_BROKER_PYTHON\""
+    -c "mcp_servers.sanctum_git.args=[\"$SANCTUM_GIT_BROKER_SCRIPT\",\"mcp\"]"
+    -c 'mcp_servers.sanctum_git.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_GIT_CREDENTIAL_HELPER","SANCTUM_GIT_GH_CONFIG_DIR"]'
+    -c 'mcp_servers.sanctum_git.enabled_tools=["git_workspace_status","git_commit_issue_changes","git_push_issue_branch","git_reconcile_operation","github_ensure_issue_pull_request"]'
+    -c 'mcp_servers.sanctum_git.default_tools_approval_mode="approve"'
+    app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_timeout_ms: 600000
   stall_timeout_ms: 300000
-  turn_sandbox_policy:
-    type: workspaceWrite
-    networkAccess: true
+  turn_permission_profile: sanctum-workspace
 ---
 
 You are the implementation worker for Sanctum Linear issue
@@ -95,9 +119,13 @@ Symphony should expose the `linear_graphql` tool for Linear operations.
 
 Use the repository-local `linear` skill for Linear mutations and comments.
 
-Use the repository-local `commit` skill when committing finished work.
+Use the Sanctum Git control-plane tools for status, commit, push, and uncertain
+operation reconciliation. They are semantic operations, not a generic Git
+command interface.
 
-GitHub publishing uses the authenticated `git` and `gh` command-line tools.
+PR creation uses `github_ensure_issue_pull_request` after the host Git control
+plane has pushed the issue branch. The sandboxed shell never receives GitHub
+credentials or ambient home-directory access.
 
 If a required tool or authorization is genuinely unavailable, record the
 blocker in the Linear workpad and stop rather than pretending completion.
@@ -313,11 +341,11 @@ Before modifying files:
 
    `git status --short`
 
-7. Fetch the latest base:
+7. Confirm `git_workspace_status` reports the deterministic issue branch that
+   the host prepared from accepted `origin/v1.2-dev`.
 
-   `git fetch origin v1.2-dev`
-
-8. Never work directly on `v1.2-dev`.
+8. Never ask shell Git to mutate metadata. The host hook owns base fetch and
+   issue-branch bootstrap; the Git control plane owns commit and push.
 
 For a new issue, create a dedicated branch from the latest base.
 
@@ -365,6 +393,13 @@ During implementation:
 - preserve existing architecture and security boundaries;
 - update the Linear workpad after meaningful milestones.
 
+Model/workspace operations are limited to inspecting and editing ordinary
+workspace files, running bounded tests/builds, and read-only Git inspection
+when useful. Host Git operations are base synchronization, deterministic issue
+branch establishment, commit, push, and reconciliation of uncertain results.
+Do not work around `.git` protection or invoke an arbitrary Git command through
+another tool.
+
 # Validation
 
 Select the smallest validation profile that covers the changed risk, and record
@@ -409,9 +444,10 @@ Record the exact commands and outcomes in the Linear workpad.
 
 When the implementation and validation are complete:
 
-1. Use the repository-local `commit` skill.
-2. Commit only the intended issue-scoped changes.
-3. Confirm the resulting commit and clean/expected working-tree state.
+1. Call `git_workspace_status` and select only intended issue-scoped paths.
+2. Call `git_commit_issue_changes` with those explicit paths, one bounded
+   summary line, and a stable operation ID recorded in the workpad.
+3. Confirm the returned commit and clean/expected workspace state.
 
 Do not commit to `main` or `v1.2-dev`.
 
@@ -419,13 +455,11 @@ Do not commit to `main` or `v1.2-dev`.
 
 After a valid commit exists:
 
-1. Push the current issue branch:
+1. Call `git_push_issue_branch` with a stable operation ID recorded in the
+   workpad. It can only normally push the deterministic issue branch to origin.
 
-   `git push -u origin HEAD`
-
-2. Determine whether an open PR already exists for this branch.
-
-3. If no open PR exists, create one with GitHub CLI.
+2. Call `github_ensure_issue_pull_request`. It reconciles an existing open PR
+   for the exact issue head or creates one targeting `v1.2-dev`.
 
 The PR must:
 
@@ -439,6 +473,19 @@ The PR must:
 Use the repository's PR template if one exists.
 
 Do not merge the PR.
+
+If commit or push returns an unknown result, do not call it again with a new
+operation ID. Call `git_reconcile_operation` with the original operation ID.
+If reconciliation remains unknown, record one blocker and stop.
+
+# Deterministic blockers
+
+An unchanged environment or control-plane blocker is terminal for the current
+supervisor invocation. Record it once in the workpad, then request operator
+input with the exact blocking condition so Symphony enters its blocked state.
+Do not spend continuation turns or retry cycles repeating the same failed Git
+operation. The outer supervisor stops when Symphony reports operator action is
+required; only a later operator-started invocation may resume.
 
 # Linear handoff
 
