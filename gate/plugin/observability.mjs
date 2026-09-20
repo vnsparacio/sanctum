@@ -1,13 +1,17 @@
 /* Manual, metadata-only observability. Telemetry is never an authority input. */
 import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
 
 // Setup replaces this anchor in the private installed copy. Source tests use
 // the repository package directly; no owner path is committed.
 const dependencyAnchor='@SANCTUM_PACKAGE@';
-const require=createRequire(dependencyAnchor.startsWith('@')?new URL('../../package.json',import.meta.url):dependencyAnchor);
+const packagePath=dependencyAnchor.startsWith('@')?fileURLToPath(new URL('../../package.json',import.meta.url)):dependencyAnchor;
+const require=createRequire(packagePath);
 const {context,metrics,SpanStatusCode,trace}=require('@opentelemetry/api');
 const {resourceFromAttributes}=require('@opentelemetry/resources');
 const {start:splunkStart,stop:splunkStop}=require('@splunk/otel');
+let packageVersion='unknown';
+try{const selected=require(packagePath)?.version;if(typeof selected==='string')packageVersion=selected;}catch{}
 
 const SPAN_NAMES=new Set(['sanctum.request','authority.decide','egress.decide','reasoner.route','source_need.classify','source_first.research','model.inference']);
 const SPAN_ATTRIBUTES=new Set(['sanctum.component','sanctum.outcome','sanctum.request_class','sanctum.model_role','sanctum.model','sanctum.model_revision','sanctum.provider','sanctum.capability','sanctum.authority_outcome','sanctum.egress_outcome','sanctum.source_need','sanctum.verifier_outcome','sanctum.agent','sanctum.agent_role','sanctum.git_commit','sanctum.run_id','sanctum.task_id','sanctum.session_id','sanctum.workspace_id','sanctum.error_code']);
@@ -116,7 +120,7 @@ export function currentTraceContext(){
  try{const value=trace.getSpan(context.active())?.spanContext();return value&&trace.isSpanContextValid(value)?{traceId:value.traceId,spanId:value.spanId}:{traceId:null,spanId:null};}catch{return {traceId:null,spanId:null};}
 }
 
-export function initializeObservability({env=process.env,serviceVersion='unknown',gitCommit=null,start=splunkStart,stop=splunkStop}={}){
+export function initializeObservability({env=process.env,serviceVersion=packageVersion,gitCommit=null,start=splunkStart,stop:splunkStop}={}){
  if(env.SANCTUM_O11Y_ENABLED!=='1')return createObservability({enabled:false});
  const realm=safeString(env.SPLUNK_REALM),token=typeof env.SPLUNK_ACCESS_TOKEN==='string'&&env.SPLUNK_ACCESS_TOKEN.trim()?env.SPLUNK_ACCESS_TOKEN:null;
  const serviceName=safeString(env.OTEL_SERVICE_NAME)??'sanctum-gateway';

@@ -17,8 +17,7 @@ export default {
     }
     const raw=readFileSync(resolve(base,'SETTINGS.json'),'utf8'),settings=JSON.parse(raw);
     settings.settingsFileHash=createHash('sha256').update(raw).digest('hex');
-    const release=JSON.parse(readFileSync(resolve(base,'../package.json'),'utf8'));
-    const observability=initializeObservability({serviceVersion:release.version,gitCommit:process.env.SANCTUM_GIT_COMMIT});
+    const observability=initializeObservability({gitCommit:process.env.SANCTUM_GIT_COMMIT});
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});

@@ -79,3 +79,9 @@ test('supported Splunk startup receives only manual signals and safe resources',
  const value=initializeObservability({env,serviceVersion:'1.1.0',gitCommit:'a'.repeat(40),start:selected=>{options=selected;},stop:async()=>{}});assert.equal(value.enabled,true);assert.equal(options.serviceName,'sanctum-gateway');assert.deepEqual(options.tracing.instrumentations,[]);assert.equal(options.profiling,false);assert.equal(options.logging,false);assert.equal(options.metrics.runtimeMetricsEnabled,false);
  const attributes=options.resource().attributes;assert.equal(attributes['host.name'],'sanctum-authority-mac');assert.equal(attributes['deployment.environment'],'development');assert.equal(attributes['deployment.environment.name'],'development');assert.equal(attributes['service.version'],'1.1.0');assert.equal(attributes.unapproved,undefined);assert.equal(JSON.stringify(attributes).includes('FAKE_SECRET_DO_NOT_EXPORT'),false);
 });
+
+test('default service version comes from the dependency package anchor',()=>{
+ let options;const env={SANCTUM_O11Y_ENABLED:'1',SPLUNK_REALM:'us0',SPLUNK_ACCESS_TOKEN:'private-value'};
+ const value=initializeObservability({env,start:selected=>{options=selected;},stop:async()=>{}});
+ assert.equal(value.enabled,true);assert.equal(options.resource().attributes['service.version'],'1.1.0');
+});
