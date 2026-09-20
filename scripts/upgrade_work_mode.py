@@ -59,6 +59,7 @@ FILES = (
     "plugin/index.mjs",
     "plugin/core.mjs",
     "plugin/observability.mjs",
+    "plugin/observability-bootstrap.mjs",
     "plugin/telemetry-client.mjs",
     "plugin/private-lead.mjs",
     "plugin/source-retrieval.mjs",

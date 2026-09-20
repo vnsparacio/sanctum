@@ -138,6 +138,25 @@ class Setup(unittest.TestCase):
         finally:
             op.expected_gateway_identity = original
 
+    def test_gateway_preloads_observability_only_when_enabled_and_available(self):
+        op.setup(self.prefix)
+        expected = {
+            "node_path": "/reviewed/node",
+            "entrypoint_path": "/reviewed/openclaw",
+        }
+        receipt = {"gateway_port": 28789}
+        disabled = op.gateway_command(self.prefix, receipt, expected, {})
+        self.assertEqual(disabled[1], "/reviewed/openclaw")
+        enabled = op.gateway_command(
+            self.prefix, receipt, expected, {"SANCTUM_O11Y_ENABLED": "1"}
+        )
+        self.assertEqual(enabled[1], "--import")
+        self.assertEqual(
+            enabled[2],
+            str(self.prefix / "gate/plugin/observability-bootstrap.mjs"),
+        )
+        self.assertEqual(enabled[3], "/reviewed/openclaw")
+
     def test_component_does_not_adopt_an_executable_from_path(self):
         op.setup(self.prefix)
         bin_dir = self.prefix / "fake-bin"

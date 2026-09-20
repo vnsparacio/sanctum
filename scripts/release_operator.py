@@ -362,6 +362,27 @@ def gateway_socket_ready(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def gateway_command(prefix, receipt_value, expected, env):
+    args = [expected["node_path"]]
+    bootstrap = prefix / "gate/plugin/observability-bootstrap.mjs"
+    if (
+        env.get("SANCTUM_O11Y_ENABLED") == "1"
+        and bootstrap.is_file()
+        and not bootstrap.is_symlink()
+    ):
+        args.extend(["--import", str(bootstrap)])
+    args.extend(
+        [
+            expected["entrypoint_path"],
+            "gateway",
+            "run",
+            "--port",
+            str(receipt_value["gateway_port"]),
+        ]
+    )
+    return args
+
+
 def up(prefix):
     verify()
     r = verify_install(prefix)
@@ -389,18 +410,12 @@ def up(prefix):
                 )
             raise ValueError("Cannot bind loopback gateway socket: " + str(e))
     expected = expected_gateway_identity(prefix, r)
-    args = [
-        expected["node_path"],
-        expected["entrypoint_path"],
-        "gateway",
-        "run",
-        "--port",
-        str(r["gateway_port"]),
-    ]
+    gateway_env = environment(prefix)
+    args = gateway_command(prefix, r, expected, gateway_env)
     with open(prefix / "logs/gateway.log", "ab") as log:
         p = subprocess.Popen(
             args,
-            env=environment(prefix),
+            env=gateway_env,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,
@@ -415,7 +430,16 @@ def up(prefix):
             {
                 **expected,
                 "pid": p.pid,
-                "identity": [args[0], args[1], str(r["gateway_port"])],
+                "identity": [
+                    args[0],
+                    expected["entrypoint_path"],
+                    str(r["gateway_port"]),
+                    *(
+                        [str(prefix / "gate/plugin/observability-bootstrap.mjs")]
+                        if "--import" in args
+                        else []
+                    ),
+                ],
             }
         ),
     )

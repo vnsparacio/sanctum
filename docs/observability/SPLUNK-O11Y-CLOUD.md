@@ -23,6 +23,11 @@ No logs are sent to Observability Cloud. This slice installs no macOS Collector,
 profiling, runtime/host metrics, automatic HTTP or provider instrumentation,
 dashboards, detectors, RUM, GPU monitoring, or agent observability.
 
+The supported gateway launcher preloads the manual OTel provider before
+OpenClaw starts so active span context remains available to the gate and Core
+event writer. The preload catches initialization failures and continues normal
+gateway startup; it enables no automatic instrumentation.
+
 ## Service and signal model
 
 The single service is `sanctum-gateway`, versioned with the Sanctum package.

@@ -6,7 +6,7 @@ import { createGate,createExecutor } from './core.mjs';
 import { createLocalAgent } from './local-agent.mjs';
 import { createSourceRetrieval } from './source-retrieval.mjs';
 import { createWorkCommand } from './work-command.mjs';
-import {boundedShutdown,initializeObservability} from './observability.mjs';
+import {boundedShutdown,gatewayObservability} from './observability.mjs';
 import { currentCapabilityManifest } from '../foundation/manifest.mjs';
 export default {
   id:'hybrid-ai-prompt-gate',name:'Mac privacy-first hybrid gate',
@@ -17,7 +17,7 @@ export default {
     }
     const raw=readFileSync(resolve(base,'SETTINGS.json'),'utf8'),settings=JSON.parse(raw);
     settings.settingsFileHash=createHash('sha256').update(raw).digest('hex');
-    const observability=initializeObservability({gitCommit:process.env.SANCTUM_GIT_COMMIT});
+    const observability=gatewayObservability({gitCommit:process.env.SANCTUM_GIT_COMMIT});
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});

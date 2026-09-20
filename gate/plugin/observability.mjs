@@ -24,6 +24,7 @@ const DECISIONS=new Set(['allow','deny','ask','other']);
 const DIRECTIONS=new Set(['input','output']);
 const CONFLICTING_ENDPOINTS=['OTEL_CONFIG_FILE','OTEL_EXPERIMENTAL_CONFIG_FILE','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_EXPORTER_OTLP_TRACES_ENDPOINT','OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'];
 const SENSITIVE_VALUE=/(?:^sk-|authorization|bearer|cookie|credential|password|private.?key|secret|prompt|email.?body|file.?body|source.?excerpt)/i;
+let preloadedObservability=null;
 
 const safeString=value=>typeof value==='string'&&SAFE_VALUE.test(value)&&!SENSITIVE_VALUE.test(value)?value:null;
 const elapsedMs=start=>Math.max(0,performance.now()-start);
@@ -129,6 +130,15 @@ export function initializeObservability({env=process.env,serviceVersion=packageV
   start({realm,accessToken:token,serviceName,logLevel:'none',resource:()=>resourceFromAttributes(resourceAttributes({env,serviceVersion,gitCommit})),tracing:{instrumentations:[],serverTimingEnabled:false},metrics:{runtimeMetricsEnabled:false,debugMetricsEnabled:false},profiling:false,logging:false,opamp:false,secureapp:false});
   return createObservability({enabled:true,shutdown:()=>stop()});
  }catch{safeCall(()=>{void Promise.resolve(stop()).catch(()=>{});});return createObservability({enabled:false});}
+}
+
+export function preloadObservability(options={}){
+ if(preloadedObservability===null)preloadedObservability=initializeObservability(options);
+ return preloadedObservability;
+}
+
+export function gatewayObservability(options={}){
+ return preloadedObservability??initializeObservability(options);
 }
 
 export async function boundedShutdown(observability,timeoutMs=2000){
