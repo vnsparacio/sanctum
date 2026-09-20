@@ -5,6 +5,7 @@ Current contributor and operator material is organized by purpose:
 - [`architecture/`](architecture/) defines the current authority, privacy, capability, container and compatibility boundaries.
 - [`guides/`](guides/) contains setup, configuration, operations, troubleshooting, release and migration procedures. The [Linear agent integration guide](guides/linear-agent-integration.md) reproduces the V1.2 metadata and management-agent setup.
 - [`development/`](development/) covers testing, dependency review and publication scope. Start with the [testing guide](development/testing.md).
+- [`observability/`](observability/) documents the bounded Splunk application tracing and custom-metrics slice.
 - [`current/`](current/) records current limitations, roadmap and the V1.2 agent-management system.
 - [`history/`](history/) retains design history, lessons, benchmarks and versioned project evidence.
 
