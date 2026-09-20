@@ -98,6 +98,7 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
         "@CONFIG@": str(prefix / "config"),
         "@GATE@": str(prefix / "gate"),
         "@OPENCLAW@": str(ROOT / "node_modules/openclaw"),
+        "@SANCTUM_PACKAGE@": str(ROOT / "package.json"),
         "@NODE@": node,
     }
     # These values are inserted into reviewed JSON/Python/JS string literals.

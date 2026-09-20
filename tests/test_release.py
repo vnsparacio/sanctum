@@ -95,10 +95,16 @@ class Setup(unittest.TestCase):
 
     def test_no_gate_template_left_in_rendered_paths(self):
         op.setup(self.prefix)
-        for n in ["SETTINGS.json", "webui/pipe.py", "webui/bridge.mjs"]:
+        for n in [
+            "SETTINGS.json",
+            "webui/pipe.py",
+            "webui/bridge.mjs",
+            "plugin/observability.mjs",
+        ]:
             text = (self.prefix / "gate" / n).read_text()
             self.assertNotIn("@GATE@", text)
             self.assertNotIn("@PYTHON@", text)
+            self.assertNotIn("@SANCTUM_PACKAGE@", text)
 
     def test_gateway_process_identity_is_exact_and_stale_records_fail(self):
         expected = {
@@ -223,6 +229,60 @@ class Amendments(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.configure(self.prefix, {"integrations": ["shell"]})
         self.assertEqual(before, (self.prefix / "receipt.json").read_bytes())
+
+    def test_observability_secret_is_private_reversible_and_disabled_cleanly(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_o11y", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "config/environment.json").read_bytes()
+        fake = "sk-fake-super-secret"
+        mod.configure(
+            self.prefix,
+            {
+                "observability": {
+                    "enabled": True,
+                    "realm": "us0",
+                    "access_token": fake,
+                }
+            },
+        )
+        op.verify_install(self.prefix)
+        path = self.prefix / "config/environment.json"
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        configured = json.loads(path.read_text())
+        self.assertEqual(configured["SANCTUM_O11Y_ENABLED"], "1")
+        self.assertEqual(configured["SPLUNK_REALM"], "us0")
+        self.assertEqual(configured["SPLUNK_ACCESS_TOKEN"], fake)
+        mod.configure(self.prefix, {"observability": {"enabled": False}})
+        disabled = json.loads(path.read_text())
+        self.assertEqual(disabled["SANCTUM_O11Y_ENABLED"], "0")
+        self.assertNotIn("SPLUNK_ACCESS_TOKEN", disabled)
+        self.assertNotIn("SPLUNK_REALM", disabled)
+        logs = sorted((self.prefix / "state/amendments").iterdir())
+        mod.rollback(self.prefix, logs[-1])
+        self.assertEqual(json.loads(path.read_text())["SPLUNK_ACCESS_TOKEN"], fake)
+        mod.rollback(self.prefix, logs[0])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_observability_rejects_missing_or_malformed_private_values(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_o11y_invalid", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "receipt.json").read_bytes()
+        for value in (
+            {"enabled": True, "realm": "bad realm", "access_token": "x"},
+            {"enabled": True, "realm": "us0", "access_token": ""},
+            {"enabled": "yes"},
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                mod.configure(self.prefix, {"observability": value})
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
 
 
 class WorkProfileAmendments(unittest.TestCase):

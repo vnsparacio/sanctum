@@ -214,10 +214,57 @@ def configure(prefix, proposal):
         "work_host",
         "work_integrity",
         "work_editing",
+        "observability",
     }:
         raise ValueError("Unknown configuration field")
     changes = {}
     cfg = json.loads((prefix / "config/openclaw.json").read_text())
+    if "observability" in proposal:
+        if set(proposal) != {"observability"}:
+            raise ValueError(
+                "Observability amendment cannot combine configuration changes"
+            )
+        item = proposal["observability"]
+        if type(item) is not dict or set(item) not in (
+            {"enabled"},
+            {"enabled", "realm", "access_token"},
+        ):
+            raise ValueError("Invalid observability amendment")
+        env = json.loads((prefix / "config/environment.json").read_text())
+        if item["enabled"] is False:
+            for name in (
+                "SPLUNK_REALM",
+                "SPLUNK_ACCESS_TOKEN",
+                "OTEL_SERVICE_NAME",
+                "OTEL_RESOURCE_ATTRIBUTES",
+            ):
+                env.pop(name, None)
+            env["SANCTUM_O11Y_ENABLED"] = "0"
+        elif item["enabled"] is True:
+            realm, token = item["realm"], item["access_token"]
+            if type(realm) is not str or not re.fullmatch(
+                r"[a-z]{2,8}[0-9]{1,3}", realm
+            ):
+                raise ValueError("Invalid Splunk realm")
+            if (
+                type(token) is not str
+                or not token
+                or len(token) > 2048
+                or any(char in token for char in "\0\r\n")
+            ):
+                raise ValueError("Invalid Splunk access token")
+            env.update(
+                {
+                    "SANCTUM_O11Y_ENABLED": "1",
+                    "SPLUNK_REALM": realm,
+                    "SPLUNK_ACCESS_TOKEN": token,
+                    "OTEL_SERVICE_NAME": "sanctum-gateway",
+                    "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment=development,deployment.environment.name=development,host.name=sanctum-authority-mac,sanctum.host_role=authority",
+                }
+            )
+        else:
+            raise ValueError("Observability enabled must be boolean")
+        changes["config/environment.json"] = json.dumps(env, indent=2) + "\n"
     if "work_editing" in proposal:
         if set(proposal) != {"work_editing"}:
             raise ValueError("Editing amendment cannot combine configuration changes")
@@ -729,12 +776,27 @@ if __name__ == "__main__":
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--proposal", type=Path)
     g.add_argument("--rollback", type=Path)
+    g.add_argument("--observability-env", action="store_true")
+    g.add_argument("--disable-observability", action="store_true")
     a = p.parse_args()
     try:
         prefix = a.prefix.absolute()
         if a.proposal:
             configure(prefix, json.loads(a.proposal.read_text()))
-        else:
+        elif a.rollback:
             rollback(prefix, a.rollback.absolute())
+        elif a.observability_env:
+            configure(
+                prefix,
+                {
+                    "observability": {
+                        "enabled": True,
+                        "realm": os.environ.get("SPLUNK_REALM"),
+                        "access_token": os.environ.get("SPLUNK_ACCESS_TOKEN"),
+                    }
+                },
+            )
+        else:
+            configure(prefix, {"observability": {"enabled": False}})
     except (ValueError, OSError, KeyError) as e:
         raise SystemExit("REFUSED: " + str(e))

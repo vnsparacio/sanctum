@@ -70,6 +70,7 @@ class PackageClosure(unittest.TestCase):
                     "@PYTHON@": sys.executable,
                     "@NODE@": shutil.which("node"),
                     "@OPENCLAW@": str(ROOT / "node_modules/openclaw"),
+                    "@SANCTUM_PACKAGE@": str(ROOT / "package.json"),
                 }
                 for old, new in tokens.items():
                     text = text.replace(old, new)

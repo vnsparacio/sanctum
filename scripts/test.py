@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 GATE_NODE_TESTS = (
     "tests/core.test.mjs",
+    "tests/observability.test.mjs",
     "tests/local-agent.test.mjs",
     "tests/source-retrieval.test.mjs",
     "tests/work-mode.test.mjs",
@@ -119,6 +120,8 @@ def environment(temp_dir: str) -> dict[str, str]:
         "OPENCLAW_STATE_DIR": temp_dir,
         "OPENCLAW_CONFIG_PATH": f"{temp_dir}/openclaw.json",
         "VINCEAI_STATE_DIR": temp_dir,
+        "SANCTUM_O11Y_ENABLED": "0",
+        "SANCTUM_TELEMETRY_DISABLE": "1",
         "PATH": str(ROOT / "node_modules/.bin") + os.pathsep + os.environ["PATH"],
     }
     for key in ("VINCEAI_GATEWAY_PORT", "VINCEAI_MLX_PORT", "VINCEAI_CONTACTS_FILE"):

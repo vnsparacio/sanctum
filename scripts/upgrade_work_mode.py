@@ -58,6 +58,8 @@ FILES = (
     "foundation/vllm-structured-output.mjs",
     "plugin/index.mjs",
     "plugin/core.mjs",
+    "plugin/observability.mjs",
+    "plugin/telemetry-client.mjs",
     "plugin/private-lead.mjs",
     "plugin/source-retrieval.mjs",
     "plugin/work-mode.mjs",
@@ -258,6 +260,7 @@ def rendered_file(prefix, name):
         "@CONFIG@": str(prefix / "config"),
         "@GATE@": str(prefix / "gate"),
         "@OPENCLAW@": str(ROOT / "node_modules/openclaw"),
+        "@SANCTUM_PACKAGE@": str(ROOT / "package.json"),
         "@NODE@": str(Path(shutil.which("node")).resolve()),
     }
     for old, new in tokens.items():
