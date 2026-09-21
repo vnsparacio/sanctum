@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 from sanctum_agents.git_control_plane import GitControlPlane
 from sanctum_agents.validation import (
-    HostValidationRunner,
     VALIDATION_PROFILES,
+    HostValidationRunner,
     ValidationError,
 )
 

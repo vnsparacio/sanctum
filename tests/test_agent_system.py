@@ -77,9 +77,9 @@ from sanctum_agents.runtime import (
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
 from sanctum_agents.symphony_supervisor import (
+    TerminationClass,
     _ledger_epoch_sha256,
     _sanitized_supervisor_environment,
-    TerminationClass,
     classify_termination,
     evaluate_snapshot,
     preflight,
