@@ -94,6 +94,7 @@ def agents(env: dict[str, str]) -> None:
             "-m",
             "unittest",
             "tests.test_agent_system",
+            "tests.test_codex_token_baseline",
             "tests.test_git_control_plane",
             "tests.test_rework_workflow",
         ],
