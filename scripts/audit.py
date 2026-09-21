@@ -43,8 +43,7 @@ PATTERNS = {
     ),
     "linear_token": r"\blin_(?:api|oauth)_[A-Za-z0-9]{20,}\b",
     "provider_key": (
-        r"\b(?:sk-[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16}"
-        r"|fc-[A-Za-z0-9_-]{20,})\b"
+        r"\b(?:sk-[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16}" r"|fc-[A-Za-z0-9_-]{20,})\b"
     ),
     "credential_assignment": (
         r"(?m)^[ \t]*(?:export[ \t]+)?(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN"

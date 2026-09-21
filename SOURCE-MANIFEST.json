@@ -363,7 +363,7 @@
   "sanctum_agents/symphony_supervisor.py": "60ab4ec2172e948263aed09d63e272d7bc8b56a8102822800389bd82d2dccef2",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
-  "scripts/audit.py": "b8052ee5b54c5dfaae8de95c1368ea937a51e88f3d2a51d2b0106824b5b9ef86",
+  "scripts/audit.py": "f24198512c9b7b3f3c682a0a3d1e3b68b623575c3d7d30662c9e299d30bcbda1",
   "scripts/bootstrap.py": "d9f42e55374e4cffeee6ff0626ccb0b40706d72055bfc89c5b43859547468206",
   "scripts/build.py": "19bb21ceb403f619447648c6ae58c54473502e02efd4c83c100627c9efa763d2",
   "scripts/capability_manifest.mjs": "7263b8586e257a3d5a88a5bcfcd5352afe02aa71f17a13e3816399e0fd70821f",
