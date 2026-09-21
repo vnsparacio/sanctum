@@ -2,9 +2,11 @@
 
 The implementation worker is the only role that may modify source, and only
 through Symphony when a Linear issue simultaneously has status `Ready for
-Agent` and label `symphony`. The human owner alone controls that gate. The
-worker uses Sol-medium by default, starts from latest `v1.3-dev`, works on the
-deterministic `symphony/<issue-identifier-lowercase>` branch, validates
+Agent`, label `symphony`, and exactly one of `agent-standard` or `agent-deep`.
+The human owner alone controls those gates. The standard worker uses Sol-medium;
+the deep worker uses Astra-high only after an owner-routed model-reasoning
+escalation. Both start from latest `v1.3-dev` and work on the
+deterministic `symphony/<issue-identifier-lowercase>` branch, validate
 proportionally, asks the host Git control plane to commit and push, opens an
 unmerged PR targeting `v1.3-dev`,
 updates the persistent Linear workpad, moves the issue to `Human Review`, and
@@ -24,12 +26,15 @@ issue first-seen time and per-session high-water marks. This makes the limits
 span normal continuation sessions and service restarts rather than relying on
 Symphony's per-worker `max_turns` alone.
 
-The first-version implementation envelope is one concurrent issue, one hour
-total elapsed time, eight aggregate turns, 500,000 aggregate reported tokens,
-two retries, five minutes without an event, one MiB of service output, and a
-30-second state-API grace period. A violation terminates the whole process
-group, leaves Linear state untouched, exits with code 75, and creates a private
-incident receipt containing the exact observed value and limit.
+The standard implementation envelope is one concurrent issue, six hours total
+elapsed time, 40 aggregate turns, 8,000,000 aggregate reported tokens, three
+retries, 16 MiB of service output, and a 30-second state-API grace period. The
+deep envelope is eight hours, 60 aggregate turns, and 12,000,000 tokens with
+the same concurrency and retry bounds. Symphony separately owns a 60-minute
+turn timeout and 15-minute worker silence timeout. A violation terminates the
+whole process group, leaves Linear state untouched, exits with code 75, and
+creates a private incident receipt containing the exact observed value and
+limit.
 
 Symphony's blocked state is also terminal for the current supervisor
 invocation. A deterministic environment/control-plane blocker is recorded
@@ -45,6 +50,10 @@ export LINEAR_API_KEY=... # set locally; never paste or commit it
 .venv/bin/python -m sanctum_agents.cli symphony-run
 ```
 
+Pass `--worker-class deep` to both commands only for an issue carrying
+`agent-deep`. Standard is the default. Both classes share the same exclusive
+lock, so implementation concurrency remains one.
+
 `SANCTUM_SYMPHONY_BIN` should point to the inspected external reference checkout
 or a reviewed signed standalone binary; no owner-home path is frozen into
 source. The supervisor explicitly passes the reference implementation's
@@ -59,7 +68,9 @@ to fetch only `origin/v1.3-dev` and establish or validate the deterministic
 issue branch. The worker receives only `git_workspace_status`,
 `git_commit_issue_changes`, `git_push_issue_branch`, and
 `git_reconcile_operation`, plus the distinct bounded
-`github_ensure_issue_pull_request` handoff. There is no arbitrary Git/GitHub
+`github_ensure_issue_pull_request` handoff. Every mutating call uses a stable
+operation ID; an uncertain commit, push, or PR result must be reconciled and
+must not be replayed under a new ID. There is no arbitrary Git/GitHub
 argument tool, force push, branch deletion, merge, protected-branch write, or
 caller-selected repository/remote/base/head.
 
@@ -87,16 +98,19 @@ is not executed by the broker.
 - `architecture-security`: `make deps`, `make build`, `make test`, `make audit`,
   and focused security/contract tests.
 
-These are minimums; `AGENTS.md` and issue-specific requirements take
+These fixed commands execute through a manifest-verified host runner bound to
+the leased issue workspace. The worker cannot supply an arbitrary command or
+receive credentials. Receipts bind the operation to the current Git and file
+state. These are minimums; `AGENTS.md` and issue-specific requirements take
 precedence. The host router treats WORKFLOW, AGENTS, security files, authority
 code, and the supervisor itself as architecture/security work.
 
 ## Qualification status
 
 The workflow parses under the inspected Symphony schema with the intended
-model, timeouts, concurrency, retry backoff, and active states. A fake-service
-integration smoke proves process-group termination and incident creation. A
-real controlled Linear issue cannot be created or advanced in this environment
-because `LINEAR_API_KEY` / `linear_graphql` access is unavailable; live
-qualification therefore remains blocked, and implementation `write_enabled`
-stays false.
+model, timeouts, concurrency, retry backoff, and active states. Synthetic
+integration tests prove process-group termination, incidents, explicit resume,
+validation isolation, and Git/PR reconciliation. Live TTE-9/TTE-14 history is
+diagnostic evidence, not post-change qualification. A new controlled smoke
+must reach Human Review before enabling continuous implementation; until then,
+implementation `write_enabled` stays false.

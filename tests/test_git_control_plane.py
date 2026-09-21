@@ -374,7 +374,9 @@ class GitControlPlaneTests(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0, "", "")
 
         with patch.object(broker, "_gh", side_effect=fake_gh):
-            value = broker.ensure_pull_request(response["title"], response["body"])
+            value = broker.ensure_pull_request(
+                response["title"], response["body"], "pr-create"
+            )
         self.assertEqual("created", value["status"])
         lookup = next(call for call in calls if call[:2] == ("pr", "list"))
         self.assertEqual("symphony/tte-9", lookup[lookup.index("--head") + 1])
@@ -406,6 +408,63 @@ class GitControlPlaneTests(unittest.TestCase):
         completed = subprocess.CompletedProcess((), 0, json.dumps(response), "")
         with patch.object(broker, "_gh", return_value=completed):
             self.assertIsNone(broker._open_pull_request(identity))
+
+    def test_pull_request_creation_reconciles_once_and_operation_id_is_stable(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("PR handoff\n")
+        broker.commit("Prepare pull request handoff", ["docs.md"], "pr-commit")
+        broker.push("pr-push")
+        github_config = self.root / "github-config"
+        github_config.mkdir(mode=0o700)
+        gh_dir = self.root / "bin"
+        gh_dir.mkdir()
+        gh = gh_dir / "gh"
+        gh.write_text("#!/bin/sh\nexit 1\n")
+        gh.chmod(0o700)
+        broker = self.broker(
+            credential_helper=str(gh), github_config_dir=str(github_config)
+        )
+        response = {
+            "number": 43,
+            "url": "https://github.example/pr/43",
+            "baseRefName": "v1.3-dev",
+            "headRefName": "symphony/tte-9",
+            "headRefOid": broker._head(),
+            "headRepository": {"nameWithOwner": "vnsparacio/sanctum"},
+            "headRepositoryOwner": {"login": "vnsparacio"},
+            "isDraft": False,
+            "title": "Complete bounded Git handoff",
+            "body": "Implements TTE-9 with bounded validation evidence.",
+        }
+        lookups = 0
+        creates = 0
+
+        def ambiguous_create(*arguments, **_values):
+            nonlocal lookups, creates
+            if arguments[:2] == ("pr", "list"):
+                lookups += 1
+                payload = [] if lookups == 1 else [response]
+                return subprocess.CompletedProcess(
+                    arguments, 0, json.dumps(payload), ""
+                )
+            if arguments[:2] == ("pr", "create"):
+                creates += 1
+                from sanctum_agents import git_control_plane
+
+                raise git_control_plane._InjectedAmbiguity("synthetic lost response")
+            raise AssertionError(arguments)
+
+        with patch.object(broker, "_gh", side_effect=ambiguous_create):
+            first = broker.ensure_pull_request(
+                response["title"], response["body"], "stable-pr-operation"
+            )
+            second = broker.ensure_pull_request(
+                response["title"], response["body"], "stable-pr-operation"
+            )
+        self.assertEqual("created", first["status"])
+        self.assertEqual("already_applied", second["status"])
+        self.assertEqual(1, creates)
 
 
 if __name__ == "__main__":

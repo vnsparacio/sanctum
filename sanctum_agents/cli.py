@@ -22,6 +22,7 @@ from .scheduler import load_schedule_plan
 from .symphony_supervisor import (
     preflight as symphony_preflight,
 )
+from .symphony_supervisor import resume_from_incident
 from .symphony_supervisor import (
     supervise as supervise_symphony,
 )
@@ -37,8 +38,17 @@ def parser() -> argparse.ArgumentParser:
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("validate-config")
     subcommands.add_parser("models-check")
-    subcommands.add_parser("symphony-preflight")
-    subcommands.add_parser("symphony-run")
+    preflight = subcommands.add_parser("symphony-preflight")
+    preflight.add_argument(
+        "--worker-class", choices=["standard", "deep"], default="standard"
+    )
+    symphony_run = subcommands.add_parser("symphony-run")
+    symphony_run.add_argument(
+        "--worker-class", choices=["standard", "deep"], default="standard"
+    )
+    resume = subcommands.add_parser("symphony-resume")
+    resume.add_argument("--incident", type=Path, required=True)
+    resume.add_argument("--issue", required=True)
     subcommands.add_parser("schedule-plan")
     subcommands.add_parser("linear-metadata-capture")
     linear_check = subcommands.add_parser("linear-metadata-check")
@@ -87,10 +97,23 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "symphony-preflight":
-            print(json.dumps(symphony_preflight(config, ROOT), sort_keys=True))
+            print(
+                json.dumps(
+                    symphony_preflight(config, ROOT, worker_class=args.worker_class),
+                    sort_keys=True,
+                )
+            )
             return 0
         if args.command == "symphony-run":
-            return supervise_symphony(config, ROOT)
+            return supervise_symphony(config, ROOT, worker_class=args.worker_class)
+        if args.command == "symphony-resume":
+            print(
+                json.dumps(
+                    resume_from_incident(config, args.incident, args.issue),
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.command == "schedule-plan":
             print(
                 json.dumps(

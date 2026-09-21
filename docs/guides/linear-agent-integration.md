@@ -2,8 +2,9 @@
 
 This guide reproduces Sanctum's Linear metadata qualification and bounded
 management-agent activation. It does not authorize implementation. Only the
-owner may set both `Ready for Agent` and `symphony`, and only the owner may
-merge or move work to Done.
+owner may set `Ready for Agent`, `symphony`, and exactly one routing label
+(`agent-standard` or `agent-deep`), and only the owner may merge or move work
+to Done.
 
 ## Prerequisites
 
@@ -94,8 +95,8 @@ management states with one approved management source label, and fails closed
 instead of silently truncating a paginated result.
 
 Management roles may create or organize findings only. They cannot add
-`symphony`, move an issue to `Ready for Agent`, modify source, merge, or move an
-issue to Done.
+`symphony`, `agent-standard`, or `agent-deep`, move an issue to `Ready for
+Agent`, modify source, merge, or move an issue to Done.
 
 ## Install Codex desktop schedules
 
@@ -127,8 +128,10 @@ make a reviewed source change that disables the affected schedules and
 
 Symphony is a separate owner checkpoint. A passing metadata capture and active
 management schedules do not authorize it. Before the first controlled smoke,
-the owner must select a tiny issue, personally apply both execution gates, and
-run the separate `symphony-preflight` procedure in the agent-system runbook.
+the owner must select a tiny issue, personally apply status `Ready for Agent`,
+label `symphony`, and exactly one routing label, then run the matching
+`symphony-preflight --worker-class standard|deep` procedure in the agent-system
+runbook.
 
 ## Human review feedback and Rework
 

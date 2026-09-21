@@ -13,7 +13,14 @@ class ConfigError(ValueError):
     """Configuration is missing, malformed, or unsafe."""
 
 
-_ROLES = {"repo_steward", "product_scout", "triage", "implementation", "reviewer"}
+_ROLES = {
+    "repo_steward",
+    "product_scout",
+    "triage",
+    "implementation",
+    "implementation_deep",
+    "reviewer",
+}
 _REASONING = {"low", "medium", "high", "xhigh", "max", "ultra"}
 
 
@@ -144,6 +151,11 @@ def load_config(path: str | Path) -> AgentConfig:
     gate = raw["project"].get("implementation_gate")
     if gate != {"status": "Ready for Agent", "label": "symphony"}:
         raise ConfigError("implementation gate must remain Ready for Agent + symphony")
+    if raw["project"].get("worker_routing") != {
+        "standard_label": "agent-standard",
+        "deep_label": "agent-deep",
+    }:
+        raise ConfigError("worker routing must remain agent-standard/agent-deep")
     if raw["project"].get("human_review_status") != "Human Review":
         raise ConfigError("human_review_status must remain Human Review")
     if raw["project"].get("integration_branch") != "v1.3-dev":
@@ -155,7 +167,7 @@ def load_config(path: str | Path) -> AgentConfig:
         raise ConfigError(
             "Symphony engineering preview must be explicitly acknowledged"
         )
-    for key in ("binary_env", "default_binary", "workflow"):
+    for key in ("binary_env", "default_binary", "workflow", "deep_workflow"):
         if not isinstance(symphony.get(key), str) or not symphony[key]:
             raise ConfigError(f"symphony.{key} must be non-empty")
     for key in (
@@ -166,6 +178,9 @@ def load_config(path: str | Path) -> AgentConfig:
         "output_limit_bytes",
     ):
         _positive(symphony, key)
+    warning_ratio = symphony.get("budget_warning_ratio")
+    if type(warning_ratio) not in {int, float} or not 0 < warning_ratio < 1:
+        raise ConfigError("symphony.budget_warning_ratio must be between zero and one")
     runtime = raw["runtime"]
     if not isinstance(runtime.get("prefix_env"), str) or not runtime["prefix_env"]:
         raise ConfigError("runtime.prefix_env must be non-empty")

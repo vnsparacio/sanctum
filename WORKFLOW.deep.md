@@ -7,7 +7,7 @@ tracker:
 
   required_labels:
     - symphony
-    - agent-standard
+    - agent-deep
 
   active_states:
     - Ready for Agent
@@ -35,12 +35,12 @@ hooks:
 
 agent:
   max_concurrent_agents: 1
-  max_turns: 20
+  max_turns: 30
   max_retry_backoff_ms: 120000
 
 codex:
   command: >-
-    codex -c 'model="gpt-5.6-sol"' -c 'model_reasoning_effort="medium"'
+    codex -c 'model="gpt-6-astra"' -c 'model_reasoning_effort="high"'
     -c 'default_permissions="sanctum-workspace"'
     -c 'permissions.sanctum-workspace.extends=":workspace"'
     -c 'permissions.sanctum-workspace.network.enabled=true'
@@ -89,7 +89,7 @@ Current state:
 Labels:
 {{ issue.labels }}
 
-Worker class: standard (`agent-standard`). `agent-standard` and `agent-deep`
+Worker class: deep (`agent-deep`). `agent-standard` and `agent-deep`
 are mutually exclusive routing labels; stop and record an owner-action blocker
 if both or neither is present.
 
