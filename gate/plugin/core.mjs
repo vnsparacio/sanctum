@@ -23,9 +23,9 @@ export function eligibleRoute(route,excluded,{highStakes=false,tools=false,visua
 }
 const URGENT='An urgent-safety signal was detected. Ordinary answering is paused. If someone may be in immediate danger, contact local emergency services. No tool or action was executed.';
 const FAIL='The gate could not complete a reliable assessment. Ordinary advice is blocked. No automatic retry was made. Clarify the request or start a genuinely new conversation with /gate new.';
-const HELP='Mac gate: /gate new; /gate ask QUESTION; /gate ask-235 QUESTION; /gate ask-strong QUESTION (OpenAI last resort). Private 80B is permanently retired and unavailable. Other configured tiers are eligible by default. /gate exclude 80b|235b|vision|frontier|local removes a tier for this session; /gate include NAME restores it. Hosted disclosures still require approval. /gate attach TOKEN adds a locally prepared media/document snapshot. /gate detach removes it. /gate mode active enables quality routing for this session; /gate mode shadow records quality but keeps eligible text on the local agent. /gate approve ID approves one exact disclosure; /gate result ID retrieves background work; /gate status; /gate cancel; /gate end. Remote reasoning has no tools or action authority.';
+const HELP='Mac gate: ordinary text starts or continues a conversation; /gate new clears it. /gate ask QUESTION remains available, with /gate ask-235 and /gate ask-strong for explicit routing. Private 80B is permanently retired and unavailable. Other configured tiers are eligible by default. /gate exclude 80b|235b|vision|frontier|local removes a tier for this session; /gate include NAME restores it. Hosted disclosures still require approval. /gate attach TOKEN adds a locally prepared media/document snapshot. /gate detach removes it. /gate mode active enables quality routing for this session; /gate mode shadow records quality but keeps eligible text on the local agent. /gate audit status shows the bounded Gemini audit grant; /gate audit revoke removes it. /gate approve ID approves one exact disclosure; /gate result ID retrieves background work; /gate status; /gate cancel; /gate end. Work Mode always requires an explicit /work command. Remote reasoning has no tools or action authority.';
 const SECRET=/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-or-v1-[A-Za-z0-9]{24,}|\bAKIA[0-9A-Z]{16}\b/;
-export const inertAnswer=text=>text.replace(/\bMEDIA\s*:/gi,'Media reference (not opened):').replace(/\[\[/g,'［［').replace(/!\[/g,'!\\[').replace(/\[Mac gate job:/g,'[Model job reference:').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+export const inertAnswer=text=>text.replace(/\bMEDIA\s*:/gi,'Media reference (not opened):').replace(/\[\[/g,'［［').replace(/!\[/g,'!\\[').replace(/\[Mac gate job:/g,'[Model job reference:').replace(/Approval needed:/gi,'Model-quoted approval notice:').replace(/\/gate\s+approve(?:-session)?\b/gi,'[Model-quoted approval command]').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 export const executorDeadlineSeconds=(body,settings)=>body.packet?.experiment
   ?Math.max(0,body.packet.experiment.deadline-Date.now()/1000-120)
   :body.operation==='private_lead_propose'
@@ -64,26 +64,57 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
   const excluded=s=>new Set([...s.excluded,'PRIVATE_80B']);
   const help=()=>HELP;
   const spec=settings.settingsFileHash??hash(JSON.stringify(settings));
+  const auditGrantExpiry=Math.min(Math.max(settings.audit_session_grant_expiry_seconds??900,60),3600);
+  const auditGrantCalls=Math.min(Math.max(settings.audit_session_grant_max_calls??8,1),32);
+  const auditDestinationDigest=()=>contractDigest({destination:destinationFor(settings,'GEMINI_AUDIT'),model:settings.models?.GEMINI_AUDIT});
   function body(s,operation,tier,packet={},approval='local_control'){
     return {operation,tier,packet,state:structuredClone(s.state),scope:s.state.scope,approval,strong:s.strong??false,
       nonce:randomBytes(32).toString('hex'),expires:now()/1000+settings.approval_expiry_seconds,spec_sha256:spec};
   }
   async function control(s,op,packet={}){return execute(body(s,op,'CONTROL',packet),new AbortController().signal);}
   function cancel(s){s.generation++;s.pending=null;s.abort?.abort();s.abort=null;s.busy=false;s.job=null;}
+  function freshSession(){return {generation:0,pending:null,busy:false,job:null,privateGrant:false,auditGrant:null,excluded:new Set(['PRIVATE_80B']),mode:settings.mode,messages:[],revision:-1,strong:false,media:null,state:{scope:id(),high_stakes:false,privacy_floor:'PERSONAL',revision:-1,request_digest:''}};}
+  function auditGrant(s){
+    const grant=s.auditGrant;
+    if(!grant||now()>=grant.expires||grant.remaining<1||auditDestinationDigest()!==grant.destinationDigest){s.auditGrant=null;return null;}
+    return grant;
+  }
+  function auditGrantEligible(s,p){
+    const summary=p.packet?.attachment_summary;
+    return p.operation==='classify'&&p.tier==='GEMINI_AUDIT'&&p.egress.purpose==='RISK_CLASSIFICATION'
+      &&p.egress.dataClasses.length===1&&p.egress.dataClasses[0]==='PERSONAL'
+      &&Object.keys(p.packet).sort().join(',')==='attachment_summary,disclosed,prompt,revision,scope,semantic_state'
+      &&p.packet.disclosed&&Object.keys(p.packet.disclosed).length===0
+      &&summary&&Object.keys(summary).sort().join(',')==='count,document_count,video_count,visual_count'
+      &&['count','visual_count','document_count','video_count'].every(k=>summary[k]===0);
+  }
+  function consumeAuditGrant(s){
+    const p=s.pending,grant=auditGrant(s);
+    if(!p||!grant||!auditGrantEligible(s,p)||active>=4)return null;
+    const egress={...p.egress,outcome:'ALLOW_ONCE',approvalState:'CONSUMED',reasonCodes:['OWNER_SESSION_AUDIT_GRANT']};
+    const claim={requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation:p.operation}),packetDigest:contractDigest(p.packet),scope:s.state.scope,revision:s.revision,capability:'reasoner_inference',capabilityDigest:contractDigest({operation:p.operation,tier:p.tier}),dataClasses:['PERSONAL'],purpose:'RISK_CLASSIFICATION',destination:destinationFor(settings,p.tier)};
+    const matched=egressMatches(egress,claim,now()/1000);observability.recordAuthority(matched.ok?'allow':'deny');observability.recordEgress(matched.ok?'allow':'deny');
+    if(!matched.ok){s.auditGrant=null;return null;}
+    grant.remaining--;s.pending=null;
+    emit({eventType:'approval_consumed',component:'mac-authority',outcome:'completed',taskId:s.state.scope,modelRole:'gemini-audit',payload:{reason_code:'OWNER_SESSION_AUDIT_GRANT',purpose:'RISK_CLASSIFICATION'}});
+    return launch(s,p.operation,p.tier,p.packet,{...p.after,sessionAuditGrant:true});
+  }
   function ticket(s,operation,tier,packet,after={}){
     if(operation==='infer'&&tier==='PRIVATE_80B')throw Error('Private 80B is permanently retired and unavailable.');
     const token=id(),serialized=JSON.stringify(packet);
     const destination=destinationFor(settings,tier);
     const egress={schema:CONTRACT_VERSION,outcome:'ASK',capability:'reasoner_inference',capabilityDigest:contractDigest({operation,tier}),requestDigest:contractDigest({scope:s.state.scope,revision:s.revision,operation}),packetDigest:contractDigest(packet),scope:s.state.scope,revision:s.revision,dataClasses:['PERSONAL'],destination,purpose:operation==='classify'?'RISK_CLASSIFICATION':'ANSWER_GENERATION',expires:now()/1000+settings.approval_expiry_seconds,oneUse:true,approvalState:'PENDING',reasonCodes:['EXACT_OWNER_DISCLOSURE_REQUIRED']};
     if(!validateEgressDecision(egress,now()/1000).ok)throw Error(FAIL);
-    emit({eventType:'egress_approval_required',component:'egress-policy',outcome:'needs_approval',taskId:s.state.scope,modelRole:tier.toLowerCase().replaceAll('_','-'),payload:{destination_category:destination?.kind??'REASONER',purpose:egress.purpose,decision:'ASK',source_sensitivity:'PERSONAL'}});
     s.pending={id:token,operation,tier,packet:structuredClone(packet),after:structuredClone(after),egress,generation:s.generation,expires:now()+settings.approval_expiry_seconds*1000,digest:hash(serialized)};
+    const granted=consumeAuditGrant(s);if(granted)return granted;
+    emit({eventType:'egress_approval_required',component:'egress-policy',outcome:'needs_approval',taskId:s.state.scope,modelRole:tier.toLowerCase().replaceAll('_','-'),payload:{destination_category:destination?.kind??'REASONER',purpose:egress.purpose,decision:'ASK',source_sensitivity:'PERSONAL'}});
     const context=operation==='classify'?packet.disclosed??{}:packet;
     const extras=[context.history?'earlier gate messages (including any tool-derived information in their replies)':null,context.media_ref?'the selected local attachment snapshot':null,context.evidence?'the bounded public Source-First evidence view':null].filter(Boolean);
     const displayDestination={GEMINI_AUDIT:'Gemini audit through OpenRouter / Google Vertex',HOSTED_235B:'Qwen 235B through OpenRouter / Google Vertex',MULTIMODAL:settings.multimodal.transport==='local'?'local Qwen3-VL 30B':'Qwen3-VL 30B through OpenRouter / DeepInfra',OPENAI_FRONTIER:settings.frontier_transport==='openai'?'OpenAI API (ChatGPT model family; direct API retention policy)':'OpenAI frontier (GPT-6 Astra Pro) through OpenRouter / Azure'}[tier];
     const purpose=operation==='classify'?'assess risk, quality and context needs':'generate an answer';
     const cost=` Per-call budget cap $${settings.max_request_usd}.`;
-    return {text:`Approval needed: send the current prompt${extras.length?' plus '+extras.join(' and '):' only (no raw history, attachments or tool data)'} to ${displayDestination} to ${purpose}.${cost} This grants no tool or action permission.\n\nPacket ${s.pending.digest.slice(0,12)} · expires in ${settings.approval_expiry_seconds/60} minutes.\nTo approve this exact disclosure once: /gate approve ${token}\nTo keep it local: /gate cancel`};
+    const sessionOption=auditGrantEligible(s,s.pending)?`\nSession option: current-prompt text only for Gemini risk/context audit, up to ${auditGrantCalls} calls or ${auditGrantExpiry/60} minutes (aggregate cap $${(auditGrantCalls*settings.max_request_usd).toFixed(2)}); no history, attachments, tool results, answer generation or action authority.`:'';
+    return {text:`Approval needed: send the current prompt${extras.length?' plus '+extras.join(' and '):' only (no raw history, attachments or tool data)'} to ${displayDestination} to ${purpose}.${cost} This grants no tool or action permission.${sessionOption}\n\nPacket ${s.pending.digest.slice(0,12)} · expires in ${settings.approval_expiry_seconds/60} minutes.\nTo approve this exact disclosure once: /gate approve ${token}${sessionOption?`\nTo allow the bounded Gemini audit grant for this chat: /gate approve-session ${token}`:''}\nTo keep it local: /gate cancel`};
   }
   function packetFor(s){return {scope:s.state.scope,revision:s.revision,prompt:s.prompt,semantic_state:{high_stakes:s.state.high_stakes,privacy_floor:'PERSONAL'},attachment_summary:s.media?.summary??{count:0,visual_count:0,document_count:0,video_count:0},disclosed:{}};}
   function selected(s,needs){
@@ -124,7 +155,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
     const requestStarted=performance.now();let requestOutcome='success',requestError=null;
     job.promise=(requestSpan??{run:fn=>fn()}).run(()=>(async()=>{
       try{
-        const approval=after.privateGrant?'session_private_prompt':'exact_disclosure';
+        const approval=after.sessionAuditGrant?'session_audit_prompt':after.privateGrant?'session_private_prompt':'exact_disclosure';
         const result=await modelCall(s,tier,operation,()=>execute(body(s,operation,tier,packet,approval),controller.signal));
         if(!valid())return;
         if(result?.status!=='OK'){
@@ -183,7 +214,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
           job.result=ticket(s,'infer',route,answerPacket,{evidencePack,evidenceView});return;
         }
         job.result=finishAnswer(s,result,tier,packet,after.evidencePack,after.evidenceView);
-      }catch(e){requestOutcome='failure';requestError='REQUEST_FAILED';if(valid()){if(operation==='classify'&&!assessed)s.state.high_stakes=true;job.result={text:e.message&&e.message.length<600?e.message:FAIL};}}
+      }catch(e){requestOutcome='failure';requestError='REQUEST_FAILED';if(valid()){if(operation==='classify'&&!assessed)s.state.high_stakes=true;job.result={text:e.message&&e.message.length<600?inertAnswer(e.message):FAIL};}}
       finally{active--;if(valid()){s.busy=false;s.abort=null;if(!job.result)job.result={text:FAIL};}if(requestSpan){requestSpan.end(requestOutcome,requestError);observability.recordRequest({outcome:requestOutcome,requestClass:operation==='classify'?'classification':'inference',durationMs:Math.max(0,performance.now()-requestStarted)});}}
     })());
     return jobText(job);
@@ -215,18 +246,23 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
     if(args==='new'){
       if(!s&&sessions.size>=32)return {text:'Conversation limit reached. End another gate conversation first.'};
       if(s){cancel(s);await control(s,'close');}
-      s={generation:0,pending:null,busy:false,job:null,privateGrant:false,excluded:new Set(['PRIVATE_80B']),mode:settings.mode,messages:[],revision:-1,strong:false,media:null,state:{scope:id(),high_stakes:false,privacy_floor:'PERSONAL',revision:-1,request_digest:''}};
+      s=freshSession();
       sessions.set(identity,s);
-      return {text:`New empty gate conversation. Quality mode: ${s.mode}. Private 80B is permanently retired and unavailable. Gemini audits and hosted answers require disclosure approval. Use /gate ask QUESTION. Reasoning is replaceable. Authority stays on the Mac.`};
+      return {text:`New empty gate conversation. Quality mode: ${s.mode}. Private 80B is permanently retired and unavailable. Ordinary text is accepted; Gemini audits and hosted answers require disclosure approval. Work Mode still requires /work. Reasoning is replaceable. Authority stays on the Mac.`};
     }
-    if(!s)return {text:'Start with /gate new. Restarting clears approvals and gate history.'};
+    const conversational=args.match(/^(ask|ask-235|ask-strong)\s+([\s\S]+)$/);
+    if(!s&&conversational){if(sessions.size>=32)return {text:'Conversation limit reached. End another gate conversation first.'};s=freshSession();sessions.set(identity,s);}
+    if(!s)return {text:'Start with ordinary text or /gate new. Restarting clears approvals and gate history.'};
     if(args==='end'){cancel(s);s.privateGrant=false;const r=await control(s,'close');sessions.delete(identity);return {text:`Gate session closed; pending approvals cleared. ${r?.gpu?.phase==='OFFLINE'?'GPU compute is offline.':'Final lease cleanup has been requested; other active leases may keep compute running. Check the local GPU status for confirmation.'} Persistent cache is preserved.`};}
     if(args==='cancel'){cancel(s);await control(s,'close');return {text:'Pending work cancelled and this GPU lease closed. Cancellation cannot undo data already sent or actions already completed.'};}
     if(args==='status'){
-      const r=await control(s,'status');return {text:`Gate ${s.busy?'working':s.pending?'approval pending':'ready'}; quality ${s.mode}; privacy PERSONAL; retained high stakes ${s.state.high_stakes}; PRIVATE_80B RETIRED / unavailable. GPU ${r?.gpu?.phase??'status unavailable'}; leases ${r?.gpu?.leases??'unknown'}. Excluded tiers: ${[...s.excluded].join(', ')||'none'}. Cache volume is never deleted by this router.`};
+      const grant=auditGrant(s),grantText=grant?`Gemini audit grant active: ${grant.remaining} call(s) remain; expires in ${Math.max(0,Math.ceil((grant.expires-now())/60000))} minute(s).`:'Gemini audit grant inactive.';
+      const r=await control(s,'status');return {text:`Gate ${s.busy?'working':s.pending?'approval pending':'ready'}; quality ${s.mode}; privacy PERSONAL; retained high stakes ${s.state.high_stakes}; ${grantText} PRIVATE_80B RETIRED / unavailable. GPU ${r?.gpu?.phase??'status unavailable'}; leases ${r?.gpu?.leases??'unknown'}. Excluded tiers: ${[...s.excluded].join(', ')||'none'}. Cache volume is never deleted by this router.`};
     }
     if(args.startsWith('result '))return s.job?.id===args.slice(7).trim()?(s.job.result??jobText(s.job)):{text:'That job is not available in this session.'};
     if(s.busy)return {text:'A request is running. Use /gate result, /gate status or /gate cancel.'};
+    if(args==='audit status'){const grant=auditGrant(s);return {text:grant?`Gemini audit grant active for current-prompt text only: ${grant.remaining} call(s) remain; expires in ${Math.max(0,Math.ceil((grant.expires-now())/60000))} minute(s). It grants no history, attachments, tool results, answer disclosure or action authority.`:'Gemini audit grant is inactive.'};}
+    if(args==='audit revoke'){s.auditGrant=null;return {text:'Gemini audit grant revoked. Future eligible prompts require fresh owner consent.'};}
     if(args==='private80 allow')return {text:'Private 80B is permanently retired and unavailable.'};
     if(args==='private80 deny'){cancel(s);s.excluded.add('PRIVATE_80B');s.privateGrant=false;await control(s,'close');return {text:'Automatic private 80B grant revoked and its lease closed.'};}
     const availability=args.match(/^(exclude|include) (local|4b|80b|235b|vision|multimodal|frontier|openai)$/);
@@ -244,6 +280,13 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
       const r=await control(s,'media',{token});
       if(r?.status!=='OK')return {text:'The local snapshot could not be bound to this session. Nothing was disclosed.'};
       s.media={token,digest:r.digest,summary:r.summary};return {text:`Local snapshot selected: ${r.summary.count} file(s), ${r.summary.visual_count} image/frame(s), ${r.summary.document_count} text document(s). Contents have not been sent. Ask the question, then review any proposed disclosure.`};
+    }
+    if(args.startsWith('approve-session ')){
+      const p=s.pending,token=args.slice(16).trim();
+      if(!p||p.id!==token||p.generation!==s.generation||now()>=p.expires||hash(JSON.stringify(p.packet))!==p.digest||!auditGrantEligible(s,p))return {text:'Session approval invalid, expired, changed, ineligible or from another session. Nothing was sent.'};
+      if(active>=4)return {text:'The gate is busy. Approval remains pending; try shortly.'};
+      s.auditGrant={expires:now()+auditGrantExpiry*1000,remaining:auditGrantCalls,destinationDigest:auditDestinationDigest()};
+      return consumeAuditGrant(s)??{text:'Session approval could not be applied. Nothing was sent.'};
     }
     if(args.startsWith('approve ')){
       const p=s.pending;
@@ -263,7 +306,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
       if(!matched.ok){requestSpan.end('blocked','APPROVAL_INVALID');observability.recordRequest({outcome:'blocked',requestClass:p.operation==='classify'?'classification':'inference',durationMs:0});return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};}
       s.pending=null;return requestSpan.run(()=>launch(s,p.operation,p.tier,p.packet,p.after,requestSpan));
     }
-    const match=args.match(/^(ask|ask-235|ask-strong)\s+([\s\S]+)$/);
+    const match=conversational;
     if(!match)return {text:help()};
     const prompt=match[2].trim();
     if(!prompt||SECRET.test(prompt)||Buffer.byteLength(prompt)>settings.max_context_bytes)return {text:'Empty, oversize or recognized credential text was refused. Nothing was sent.'};

@@ -2,7 +2,7 @@
 
 `gate/SETTINGS.json` is a reviewed template. Setup binds its Python, gate, state and config paths in a private prefix and computes a deployment-specific freeze. The unrendered template is not an executable production configuration. Source integrity is checked before rendering.
 
-The generated environment defines OpenClaw state/config, socket cache, contact mapping, file roots, gateway/MLX ports and the local auth database. It does not redefine the user's HOME. Model/provider IDs, price ceilings, disclosure expiry and safety policy retain their dated production values. These values are version pins, not current catalog/pricing promises.
+The generated environment defines OpenClaw state/config, socket cache, contact mapping, file roots, gateway/MLX ports and the local auth database. It does not redefine the user's HOME. Model/provider IDs, price ceilings, disclosure expiry and safety policy retain their dated production values. These values are version pins, not current catalog/pricing promises. The Gemini audit session grant is source-pinned to at most eight eligible calls or 15 minutes, whichever comes first; each call remains subject to the existing per-request and total network budgets. Changing these authority bounds or the configured audit destination requires a reviewed source release, not a private runtime amendment.
 
 `config/openclaw.json` contains a new gateway token and is mode 0600. Gate authority material, contacts, accounts and receipts remain local. OpenRouter credentials must belong in the isolated OpenClaw auth store; direct OpenAI retention authorization stays false. Keychain references and a dedicated SSH path are configured locally; do not copy production secret values into the source tree.
 

@@ -216,6 +216,43 @@ class Authority(Temp):
         with self.assertRaises(sqlite3.IntegrityError):
             self.auth(b)
 
+    def test_session_audit_approval_accepts_only_current_prompt_text_packet(self):
+        b = self.body()
+        b.update(
+            operation="classify",
+            tier="GEMINI_AUDIT",
+            packet=packet(),
+            approval="session_audit_prompt",
+        )
+        self.auth(b)
+        for field, value in (
+            ("disclosed", {"history": [{"role": "user", "content": "old"}]}),
+            (
+                "attachment_summary",
+                {"count": 1, "visual_count": 0, "document_count": 1, "video_count": 0},
+            ),
+        ):
+            changed = self.body()
+            changed.update(
+                operation="classify",
+                tier="GEMINI_AUDIT",
+                packet=packet(),
+                approval="session_audit_prompt",
+            )
+            changed["packet"][field] = value
+            with self.assertRaisesRegex(Refused, "session_audit_grant_scope"):
+                self.auth(changed)
+
+        changed = self.body()
+        changed.update(
+            operation="classify",
+            tier="HOSTED_235B",
+            packet=packet(),
+            approval="session_audit_prompt",
+        )
+        with self.assertRaisesRegex(Refused, "classification_approval"):
+            self.auth(changed)
+
     def test_disabled_80b_refuses_both_inference_approval_classes(self):
         self.s["gpu"]["enabled"] = False
         for approval in ("session_private_prompt", "exact_disclosure"):
