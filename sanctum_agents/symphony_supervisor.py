@@ -108,6 +108,7 @@ def evaluate_snapshot(
     snapshot: dict[str, Any],
     ledger: dict[str, Any],
     *,
+    runtime_id: str = "runtime",
     now: float,
     wall_clock_seconds: int,
     max_turns: int,
@@ -137,20 +138,12 @@ def evaluate_snapshot(
         active_identifiers.add(identifier)
         record = issues.setdefault(
             identifier,
-            {"first_seen": now, "last_seen": now, "sessions": {}, "max_retry": 0},
+            {"first_seen": now, "last_seen": now, "runtimes": {}, "max_retry": 0},
         )
         record["last_seen"] = now
-        sessions = record.setdefault("sessions", {})
-        if not isinstance(sessions, dict):
-            raise ValueError("Symphony supervisor session ledger is malformed")
-        session = entry.get("session_id")
-        session_key = (
-            session
-            if isinstance(session, str) and session
-            else f"started:{entry.get('started_at')}"
-        )
-        session_record = sessions.setdefault(
-            session_key,
+        runtimes = _runtime_counters(record)
+        runtime_record = runtimes.setdefault(
+            runtime_id,
             {"turns": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0},
         )
         elapsed = max(0, now - float(record["first_seen"]))
@@ -174,16 +167,17 @@ def evaluate_snapshot(
         counters = (turns, tokens, input_tokens, output_tokens)
         if any(type(value) is not int or value < 0 for value in counters):
             raise ValueError("Symphony running counters are malformed")
-        session_record["turns"] = max(session_record.get("turns", 0), turns)
-        session_record["tokens"] = max(session_record.get("tokens", 0), tokens)
-        session_record["input_tokens"] = max(
-            session_record.get("input_tokens", 0), input_tokens
+        runtime_record["turns"] = max(runtime_record.get("turns", 0), turns)
+        runtime_record["tokens"] = max(runtime_record.get("tokens", 0), tokens)
+        runtime_record["input_tokens"] = max(
+            runtime_record.get("input_tokens", 0), input_tokens
         )
-        session_record["output_tokens"] = max(
-            session_record.get("output_tokens", 0), output_tokens
+        runtime_record["output_tokens"] = max(
+            runtime_record.get("output_tokens", 0), output_tokens
         )
-        total_turns = sum(item["turns"] for item in sessions.values())
-        total_tokens = sum(item["tokens"] for item in sessions.values())
+        totals = _ledger_totals(record, now)
+        total_turns = totals["turn_count"]
+        total_tokens = totals["tokens"]
         checks = [
             ("wall_clock_budget", elapsed, wall_clock_seconds),
             ("turns_budget", total_turns, max_turns),
@@ -212,7 +206,7 @@ def evaluate_snapshot(
             raise ValueError("Symphony retry attempt is malformed")
         record = issues.setdefault(
             identifier,
-            {"first_seen": now, "last_seen": now, "sessions": {}, "max_retry": 0},
+            {"first_seen": now, "last_seen": now, "runtimes": {}, "max_retry": 0},
         )
         record["last_seen"] = now
         record["max_retry"] = max(record.get("max_retry", 0), attempt)
@@ -246,7 +240,7 @@ def evaluate_snapshot(
         active_identifiers.add(identifier)
         record = issues.setdefault(
             identifier,
-            {"first_seen": now, "last_seen": now, "sessions": {}, "max_retry": 0},
+            {"first_seen": now, "last_seen": now, "runtimes": {}, "max_retry": 0},
         )
         record["last_seen"] = now
         violations.append(
@@ -277,9 +271,56 @@ def _save_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
-    sessions = record.get("sessions", {})
+def _runtime_counters(record: dict[str, Any]) -> dict[str, Any]:
+    runtimes = record.setdefault("runtimes", {})
+    if not isinstance(runtimes, dict):
+        raise ValueError("Symphony supervisor runtime ledger is malformed")
+    sessions = record.pop("sessions", None)
+    if sessions is None:
+        return runtimes
     if not isinstance(sessions, dict):
+        raise ValueError("Symphony supervisor legacy session ledger is malformed")
+    legacy = {"turns": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0}
+    for session in sessions.values():
+        if not isinstance(session, dict):
+            raise ValueError("Symphony supervisor legacy session ledger is malformed")
+        for name in legacy:
+            value = session.get(name, 0)
+            if type(value) is not int or value < 0:
+                raise ValueError(
+                    "Symphony supervisor legacy session counters are malformed"
+                )
+            legacy[name] = max(legacy[name], value)
+    if sessions:
+        runtimes.setdefault("legacy", legacy)
+    return runtimes
+
+
+def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
+    runtimes = record.get("runtimes")
+    if runtimes is None:
+        sessions = record.get("sessions", {})
+        if not isinstance(sessions, dict):
+            runtimes = {}
+        else:
+            legacy = {
+                "turns": max(
+                    (item.get("turns", 0) for item in sessions.values()), default=0
+                ),
+                "tokens": max(
+                    (item.get("tokens", 0) for item in sessions.values()), default=0
+                ),
+                "input_tokens": max(
+                    (item.get("input_tokens", 0) for item in sessions.values()),
+                    default=0,
+                ),
+                "output_tokens": max(
+                    (item.get("output_tokens", 0) for item in sessions.values()),
+                    default=0,
+                ),
+            }
+            runtimes = {"legacy": legacy} if sessions else {}
+    if not isinstance(runtimes, dict):
         return {
             "elapsed_ms": 0.0,
             "turn_count": 0.0,
@@ -290,13 +331,13 @@ def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
         }
     return {
         "elapsed_ms": max(0.0, now - float(record.get("first_seen", now))) * 1000,
-        "turn_count": float(sum(item.get("turns", 0) for item in sessions.values())),
-        "tokens": float(sum(item.get("tokens", 0) for item in sessions.values())),
+        "turn_count": float(sum(item.get("turns", 0) for item in runtimes.values())),
+        "tokens": float(sum(item.get("tokens", 0) for item in runtimes.values())),
         "input_tokens": float(
-            sum(item.get("input_tokens", 0) for item in sessions.values())
+            sum(item.get("input_tokens", 0) for item in runtimes.values())
         ),
         "output_tokens": float(
-            sum(item.get("output_tokens", 0) for item in sessions.values())
+            sum(item.get("output_tokens", 0) for item in runtimes.values())
         ),
         "retry_count": float(record.get("max_retry", 0)),
     }
@@ -799,6 +840,7 @@ def supervise(
                         violations = evaluate_snapshot(
                             snapshot,
                             ledger,
+                            runtime_id=run_id,
                             now=time.time(),
                             wall_clock_seconds=role.wall_clock_seconds,
                             max_turns=role.max_turns,
@@ -816,8 +858,12 @@ def supervise(
                             session_identity = (identifier, session)
                             record = ledger.get("issues", {}).get(identifier, {})
                             if session_identity not in seen_sessions:
+                                already_seen = any(
+                                    issue_id == identifier
+                                    for issue_id, _ in seen_sessions
+                                )
                                 seen_sessions.add(session_identity)
-                                if len(record.get("sessions", {})) > 1:
+                                if already_seen or len(record.get("runtimes", {})) > 1:
                                     log.emit(
                                         "agent_run_resumed",
                                         issue_id=identifier,
