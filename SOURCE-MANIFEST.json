@@ -26,7 +26,7 @@
   "config/schemas/pr-review.schema.json": "2a4a412a531f22e30017fbf8e651d01ddcbd9578d755586878204d76303e35db",
   "config/schemas/product-discoveries.schema.json": "90826114dbe9e421e7ac894aa7db8a40e68a3889c5767315b2d00909b5f7dadf",
   "config/schemas/triage-decisions.schema.json": "e335db9b4bb9d681591796ab1e52645c9f831dab75996b43a52150f65e0a83f6",
-  "docs/README.md": "313a6ef93454c94da4840f131b2749630e16187db94132b2a17a10137d02fb13",
+  "docs/README.md": "01ad6fd963ddbe498a51852a3ec6ade1b50eecc394a7e9ab1903bb56a55c0310",
   "docs/architecture/architecture.md": "c753114b509734b8ab77cdc2ce671d3c46f57a066933d4402fe06bb214e8c04c",
   "docs/architecture/capabilities.md": "4076ebff3ed0ad8de32ac74c8c6896e2ec343926fd38f899235ab27a0f6727ac",
   "docs/architecture/containerization.md": "45e21777f7a5f1ceb0d5edb096a20f7b215b6cc9c29f6596e79012af3aae3b4f",
@@ -55,6 +55,7 @@
   "docs/development/PUBLICATION-INVENTORY.md": "708eb3fe2616e096d8ea0ff91877758a8566f4cbe12ad1b26b62f515880cc919",
   "docs/development/dependency-review.md": "4a834bf3aba79b18e4e7eaa560f466a5fdd5690f9fbfc2e452e0870d6944c7e7",
   "docs/development/github-rulesets.md": "b84c79c63548ec88fc37a302dcc37659b8148755993126652da593771b8ff09e",
+  "docs/development/secret-scanning.md": "bf209542219508744b280c6c06920425a91849ddc87e2a25a2a760b5c7279554",
   "docs/development/testing.md": "9d9966e6603da3d79f69878de44b44a09ebb897f974abdae330e262620889fa9",
   "docs/guides/configuration.md": "00432d2f7cf3a55dfc06f6c4ea81a285adbba2657628a5261673b473bd86d637",
   "docs/guides/installation.md": "2fe674f8e3c625106bb5bf3cb74ac9ca6c464b099eecaba6646399be592dd680",
@@ -362,7 +363,7 @@
   "sanctum_agents/symphony_supervisor.py": "60ab4ec2172e948263aed09d63e272d7bc8b56a8102822800389bd82d2dccef2",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
-  "scripts/audit.py": "4c506d45ad92d3fa2cafc2b7be0bf0cec3f2f94dcb1ddadd8b10b8c7cdc4b839",
+  "scripts/audit.py": "f24198512c9b7b3f3c682a0a3d1e3b68b623575c3d7d30662c9e299d30bcbda1",
   "scripts/bootstrap.py": "d9f42e55374e4cffeee6ff0626ccb0b40706d72055bfc89c5b43859547468206",
   "scripts/build.py": "19bb21ceb403f619447648c6ae58c54473502e02efd4c83c100627c9efa763d2",
   "scripts/capability_manifest.mjs": "7263b8586e257a3d5a88a5bcfcd5352afe02aa71f17a13e3816399e0fd70821f",
@@ -381,6 +382,6 @@
   "tests/fixtures/reviewer-packet.json": "2621773936d6ceb1449dcb2b4d3e9616fa9d962aa7e3a041121a9a4d55d5db55",
   "tests/test_agent_system.py": "a347111f23d4752466114b59cf3e1cc000cc75e2f03828b85a9608a82c7acd5d",
   "tests/test_git_control_plane.py": "d2be914d8a4ad0a7a769e55ee3b7070b3a36091e750db5f436904c661bda43a2",
-  "tests/test_release.py": "9d1f39b9c0d8f9e7ec20af7b72d6c19bdd3385ef8f5fb6333883a7c046a361bf",
+  "tests/test_release.py": "78aa98e6f47a459d55044e97e4816df2b428b36c28f2b59cac214cc66ad3e769",
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332"
 }
