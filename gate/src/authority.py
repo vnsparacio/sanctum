@@ -84,10 +84,34 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         raise Refused("invalid_identity")
     if type(b["strong"]) is not bool or type(b["packet"]) is not dict:
         raise Refused("packet_contract")
-    if b["operation"] == "classify" and (
-        b["tier"] != "GEMINI_AUDIT" or b["approval"] != "exact_disclosure"
-    ):
-        raise Refused("classification_approval")
+    if b["operation"] == "classify":
+        if b["tier"] != "GEMINI_AUDIT" or b["approval"] not in (
+            "exact_disclosure",
+            "session_audit_prompt",
+        ):
+            raise Refused("classification_approval")
+        if b["approval"] == "session_audit_prompt":
+            packet = b["packet"]
+            if (
+                set(packet)
+                != {
+                    "scope",
+                    "revision",
+                    "prompt",
+                    "semantic_state",
+                    "attachment_summary",
+                    "disclosed",
+                }
+                or packet["disclosed"] != {}
+                or packet["attachment_summary"]
+                != {
+                    "count": 0,
+                    "visual_count": 0,
+                    "document_count": 0,
+                    "video_count": 0,
+                }
+            ):
+                raise Refused("session_audit_grant_scope")
     if b["tier"] == "PRIVATE_80B" and b["operation"] not in (
         "status",
         "close",

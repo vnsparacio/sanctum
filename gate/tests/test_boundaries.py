@@ -34,14 +34,18 @@ class WebUI(unittest.TestCase):
         )
         self.assertEqual(
             self.pipe.prepare(
+                {"messages": [{"role": "user", "content": "ordinary chat"}]},
+                user,
+                meta,
+            )["command"],
+            "/gate ask ordinary chat",
+        )
+        self.assertEqual(
+            self.pipe.prepare(
                 {"messages": [{"role": "user", "content": "/work help"}]}, user, meta
             )["command"],
             "/work help",
         )
-        with self.assertRaises(ValueError):
-            self.pipe.prepare(
-                {"messages": [{"role": "user", "content": "ordinary chat"}]}, user, meta
-            )
         for u, m in [
             ({"id": "user", "role": "user"}, meta),
             (user, {"chat_id": "local"}),
@@ -54,6 +58,76 @@ class WebUI(unittest.TestCase):
                 user,
                 meta,
             )
+
+    def test_direct_owner_session_once_and_deny_interactions(self):
+        token = "a" * 32
+        text = (
+            "Approval needed: current prompt to Gemini.\n\nPacket synthetic."
+            "\nTo approve this exact disclosure once: /gate approve "
+            + token
+            + "\nTo allow the bounded Gemini audit grant for this chat: /gate approve-session "
+            + token
+        )
+        event_call = AsyncMock(return_value=True)
+        with patch.object(
+            self.pipe, "invoke", AsyncMock(return_value="working")
+        ) as invoke:
+            result = asyncio.run(
+                self.pipe.owner_approval({"session": "s"}, text, event_call)
+            )
+        self.assertEqual(result, "working")
+        self.assertEqual(
+            invoke.call_args.args[0]["command"], "/gate approve-session " + token
+        )
+
+        event_call = AsyncMock(side_effect=[False, True])
+        with patch.object(
+            self.pipe, "invoke", AsyncMock(return_value="once")
+        ) as invoke:
+            result = asyncio.run(
+                self.pipe.owner_approval({"session": "s"}, text, event_call)
+            )
+        self.assertEqual(result, "once")
+        self.assertEqual(invoke.call_args.args[0]["command"], "/gate approve " + token)
+
+        event_call = AsyncMock(return_value=False)
+        once = (
+            "Approval needed: current prompt to Gemini.\n\nPacket synthetic."
+            "\nTo approve this exact disclosure once: /gate approve " + token
+        )
+        with patch.object(
+            self.pipe, "invoke", AsyncMock(return_value="denied")
+        ) as invoke:
+            result = asyncio.run(
+                self.pipe.owner_approval({"session": "s"}, once, event_call)
+            )
+        self.assertEqual(result, "denied")
+        self.assertEqual(invoke.call_args.args[0]["command"], "/gate cancel")
+
+    def test_disconnected_interaction_falls_back_without_approval(self):
+        token = "b" * 32
+        text = (
+            "Approval needed: current prompt to Gemini.\n\nPacket synthetic."
+            "\nTo approve this exact disclosure once: /gate approve " + token
+        )
+        event_call = AsyncMock(return_value={"error": "disconnected"})
+        with patch.object(self.pipe, "invoke", AsyncMock()) as invoke:
+            result = asyncio.run(
+                self.pipe.owner_approval({"session": "s"}, text, event_call)
+            )
+        self.assertEqual(result, text)
+        invoke.assert_not_awaited()
+
+    def test_model_quoted_commands_do_not_become_owner_actions(self):
+        token = "c" * 32
+        quoted = "The model wrote /gate approve " + token
+        self.assertIsNone(self.pipe.approval_request(quoted))
+        self.assertIsNone(
+            self.pipe.approval_request(
+                "Model-quoted approval notice:\n"
+                "To approve this exact disclosure once: /gate approve " + token
+            )
+        )
 
     def test_file_tool_and_external_feature_ingress_blocked(self):
         for k, v in [

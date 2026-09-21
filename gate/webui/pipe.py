@@ -1,7 +1,7 @@
 """
 title: Mac prompt gate
-description: Explicit Mac gate and bounded owner Work Mode commands.
-version: 2.0.0
+description: Conversational Mac gate with bounded owner disclosure and explicit Work Mode.
+version: 2.1.0
 """
 
 import asyncio
@@ -63,16 +63,19 @@ def prepare(body, user, metadata, files=None, tools=None):
     if not isinstance(message, str):
         raise ValueError("The Mac gate currently accepts plain text only.")
     message = message.strip()
-    if not re.match(r"^/(?:gate|work)(?:\s|$)", message):
-        raise ValueError(
-            "Use an explicit /gate or /work owner command. This model does not accept ordinary chat text."
-        )
     if len(message.encode()) > 32768:
-        raise ValueError("This command exceeds the Mac gate text limit.")
+        raise ValueError("This message exceeds the Mac gate text limit.")
+    # This transformation is local and deterministic. Ordinary chat can only
+    # enter Assistant Mode; Work Mode remains an explicit owner command.
+    command = (
+        message
+        if re.match(r"^/(?:gate|work)(?:\s|$)", message)
+        else "/gate ask " + message
+    )
     identity = hashlib.sha256(
         json.dumps([user["id"], chat], separators=(",", ":")).encode()
     ).hexdigest()
-    return {"session": identity, "command": message}
+    return {"session": identity, "command": command}
 
 
 async def invoke(request):
@@ -114,6 +117,114 @@ async def poll_result(request, token):
     )
 
 
+def approval_request(text):
+    match = re.search(
+        r"(?:^|\n)Approval needed:.*?\nTo approve this exact disclosure once: "
+        r"/gate approve ([a-f0-9]{32})(?:\n|$)",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    return {
+        "token": match.group(1),
+        "session": "/gate approve-session " + match.group(1) in text,
+    }
+
+
+async def owner_approval(request, text, event_call):
+    approval = approval_request(text)
+    if not approval or event_call is None:
+        return text
+    session_boundary = (
+        "Current prompt text only, to the fixed Gemini audit destination, for "
+        "risk/routing/context assessment. No history, attachments, tool results, "
+        "answer generation, or action authority."
+    )
+    start = text.rfind("Approval needed:")
+    exact_boundary = (
+        text[start:].split("\n\nPacket", 1)[0]
+        if start >= 0
+        else "This exact packet and destination only. No tool or action authority."
+    )
+    if approval["session"]:
+        choice = await event_call(
+            {
+                "type": "confirmation",
+                "data": {
+                    "title": "Allow Gemini audit for this chat?",
+                    "message": session_boundary
+                    + " OK allows the displayed bounded session grant. Cancel lets you choose send-once or keep-local next.",
+                },
+            }
+        )
+        if isinstance(choice, dict) and choice.get("error"):
+            return text
+        if choice is True:
+            return await invoke(
+                {
+                    **request,
+                    "command": "/gate approve-session " + approval["token"],
+                }
+            )
+    choice = await event_call(
+        {
+            "type": "confirmation",
+            "data": {
+                "title": "Send this disclosure once?",
+                "message": exact_boundary
+                + " OK sends once. Cancel keeps it local and denies this disclosure.",
+            },
+        }
+    )
+    if isinstance(choice, dict) and choice.get("error"):
+        return text
+    command = "/gate approve " + approval["token"] if choice is True else "/gate cancel"
+    return await invoke({**request, "command": command})
+
+
+async def drive(request, text, event_call=None, event_emitter=None):
+    # A single chat turn may require the initial audit decision and later a
+    # genuinely different answer/context disclosure. Each is asked separately.
+    for _ in range(6):
+        approved = await owner_approval(request, text, event_call)
+        if approved == text and approval_request(text):
+            return text
+        text = approved
+        job = re.search(r"\[Mac gate job:([a-f0-9]{32})\]", text)
+        if not job:
+            if not approval_request(text):
+                return text
+            continue
+        token = job.group(1)
+        deadline = time.monotonic() + 4900
+        while time.monotonic() < deadline:
+            if event_emitter:
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": "Mac gate is assessing or preparing the selected model. No new disclosure is being approved.",
+                            "done": False,
+                        },
+                    }
+                )
+            await asyncio.sleep(4)
+            text = await poll_result(request, token)
+            if "[Mac gate job:" + token + "]" not in text:
+                if event_emitter:
+                    await event_emitter(
+                        {
+                            "type": "status",
+                            "data": {"description": "Mac gate finished.", "done": True},
+                        }
+                    )
+                break
+        else:
+            return "The job is still pending. Retrieve it with /gate result " + token
+    return "The Mac gate reached its bounded interaction limit. No additional disclosure was approved."
+
+
 class Pipe:
     async def pipe(
         self,
@@ -124,6 +235,7 @@ class Pipe:
         __files__: list = None,
         __tools__: dict = None,
         __event_emitter__=None,
+        __event_call__=None,
     ) -> str:
         if __task__ or (__metadata__ or {}).get("task"):
             return (
@@ -146,38 +258,11 @@ class Pipe:
                     or hashlib.sha256(path.read_bytes()).hexdigest() != expected
                 ):
                     return UNAVAILABLE
-            text = await invoke(request)
-            job = re.search(r"\[Mac gate job:([a-f0-9]{32})\]", text)
-            if not job:
-                return text
-            token = job.group(1)
-            deadline = time.monotonic() + 4900
-            while time.monotonic() < deadline:
-                if __event_emitter__:
-                    await __event_emitter__(
-                        {
-                            "type": "status",
-                            "data": {
-                                "description": "Mac gate is assessing or preparing the selected model. No new disclosure is being approved.",
-                                "done": False,
-                            },
-                        }
-                    )
-                await asyncio.sleep(4)
-                # Polling retrieves only this existing job; it can never approve or retry it.
-                text = await poll_result(request, token)
-                if "[Mac gate job:" + token + "]" not in text:
-                    if __event_emitter__:
-                        await __event_emitter__(
-                            {
-                                "type": "status",
-                                "data": {
-                                    "description": "Mac gate finished.",
-                                    "done": True,
-                                },
-                            }
-                        )
-                    return text
-            return "The job is still pending. Retrieve it with /gate result " + token
+            return await drive(
+                request,
+                await invoke(request),
+                event_call=__event_call__,
+                event_emitter=__event_emitter__,
+            )
         except (Exception, asyncio.CancelledError):
             return UNAVAILABLE

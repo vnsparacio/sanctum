@@ -2,7 +2,7 @@
 
 The Mac owns authority: authentication, risk composition, privacy floors, exact disclosure tickets, local tool permissions, provider budgets and GPU ownership. Models reason over packets selected by that authority plane.
 
-`gate/plugin/core.mjs` owns gate sessions, exclusions, revision-bound approval, routing and background results. `local-agent.mjs` invokes the authenticated OpenClaw agent, with loopback endpoint and local model checks. Calling a bare MLX endpoint would lose the tool loop; packaging preserves this distinction. Configurable ports remain loopback-only.
+`gate/plugin/core.mjs` owns gate sessions, exclusions, revision-bound approval, routing and background results. The dedicated Open WebUI pipe maps ordinary owner text only to Assistant Mode; Work Mode still requires an explicit `/work` command. A Mac-owned, owner-session-bound Gemini audit grant may cover only repeated current-prompt text classification to the frozen configured destination. It has fixed call and time limits, is visible and revocable, and cannot cover history, attachments, tool results, answer generation or actions. Every use still produces an exact per-message egress decision. `local-agent.mjs` invokes the authenticated OpenClaw agent, with loopback endpoint and local model checks. Calling a bare MLX endpoint would lose the tool loop; packaging preserves this distinction. Configurable ports remain loopback-only.
 
 `gate/src/authority.py` validates signed requests and durable one-use nonces. `dispatch.py` composes risk/capability policy. `backends.py` contains tool-free reasoning transports, identity checks, context and cost limits. No failure silently authorizes another provider.
 
