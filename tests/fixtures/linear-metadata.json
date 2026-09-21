@@ -26,6 +26,8 @@
     "research": "label-research",
     "documentation": "label-documentation",
     "symphony": "label-symphony",
+    "agent-standard": "label-agent-standard",
+    "agent-deep": "label-agent-deep",
     "Repo Steward": "label-source-repo",
     "Product Scout": "label-source-product"
   },

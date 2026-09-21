@@ -53,6 +53,8 @@ _REQUIRED_LABELS = {
     "research",
     "documentation",
     "symphony",
+    "agent-standard",
+    "agent-deep",
     "Repo Steward",
     "Product Scout",
 }
@@ -286,8 +288,12 @@ def _issue_input(
     validate_issue_mutation(
         Role.REPO_STEWARD, {"state": "Triage", "add_labels": labels}
     )
-    if "symphony" in {item.lower() for item in labels}:
-        raise LinearMetadataError("management proposal may not add symphony")
+    if {item.lower() for item in labels} & {
+        "symphony",
+        "agent-standard",
+        "agent-deep",
+    }:
+        raise LinearMetadataError("management proposal may not add execution labels")
     try:
         label_ids = [metadata.labels[item] for item in labels]
     except KeyError as exc:

@@ -108,8 +108,9 @@ TOOLS = [
             "properties": {
                 "title": {"type": "string", "minLength": 8, "maxLength": 120},
                 "body": {"type": "string", "minLength": 20, "maxLength": 4000},
+                "operation_id": {"type": "string", "minLength": 1, "maxLength": 80},
             },
-            "required": ["title", "body"],
+            "required": ["title", "body", "operation_id"],
             "additionalProperties": False,
         },
         "annotations": {
@@ -138,7 +139,11 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
     if name == "git_reconcile_operation":
         return broker.reconcile(arguments.get("kind"), arguments.get("operation_id"))
     if name == "github_ensure_issue_pull_request":
-        return broker.ensure_pull_request(arguments.get("title"), arguments.get("body"))
+        return broker.ensure_pull_request(
+            arguments.get("title"),
+            arguments.get("body"),
+            arguments.get("operation_id"),
+        )
     raise GitControlError("tool_unsupported", "unsupported Git control-plane operation")
 
 

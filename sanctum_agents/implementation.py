@@ -53,9 +53,24 @@ class PullRequestHandoff:
     issue_state: str
 
 
-def validate_dispatch(state: str, labels: list[str]) -> None:
+def worker_class_eligible(labels: list[str], worker_class: str) -> bool:
+    selected = {label for label in labels if label in {"agent-standard", "agent-deep"}}
+    expected = {
+        "standard": "agent-standard",
+        "deep": "agent-deep",
+    }.get(worker_class)
+    return expected is not None and selected == {expected}
+
+
+def validate_dispatch(
+    state: str, labels: list[str], worker_class: str = "standard"
+) -> None:
     if not implementation_eligible(state, labels):
         raise LifecycleError("implementation requires Ready for Agent + symphony")
+    if not worker_class_eligible(labels, worker_class):
+        raise LifecycleError(
+            "implementation requires exactly one matching agent-standard/agent-deep label"
+        )
 
 
 def validate_handoff(value: PullRequestHandoff, identifier: str) -> None:

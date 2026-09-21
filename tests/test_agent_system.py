@@ -29,6 +29,7 @@ from sanctum_agents.implementation import (
     validate_dispatch,
     validate_handoff,
     validation_profile,
+    worker_class_eligible,
 )
 from sanctum_agents.integrations import (
     ExternalCallError,
@@ -76,9 +77,13 @@ from sanctum_agents.runtime import (
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
 from sanctum_agents.symphony_supervisor import (
+    TerminationClass,
+    _ledger_epoch_sha256,
     _sanitized_supervisor_environment,
+    classify_termination,
     evaluate_snapshot,
     preflight,
+    resume_from_incident,
     supervise,
 )
 from sanctum_agents.triage import (
@@ -106,7 +111,12 @@ def catalog() -> list[dict[str, object]]:
                 for effort in ("low", "medium", "high", "xhigh", "max", "ultra")
             ],
         }
-        for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+        for model in (
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        )
     ]
 
 
@@ -155,6 +165,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", config.model_for("repo_steward").model)
         self.assertEqual("gpt-5.6-luna", config.model_for("triage").model)
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
+        self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
         self.assertEqual(1, config.symphony["max_concurrency"])
         validate_model_catalog(config, catalog())
 
@@ -180,7 +191,7 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_implementation_wall_clock_timeout_default(self):
         config = load_config(CONFIG)
-        self.assertEqual(3600, config.roles["implementation"].wall_clock_seconds)
+        self.assertEqual(21600, config.roles["implementation"].wall_clock_seconds)
 
     def test_implementation_wall_clock_timeout_valid_override_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -214,6 +225,7 @@ class ConfigurationTests(unittest.TestCase):
 
             self.assertEqual(1800, config.roles["implementation"].wall_clock_seconds)
             self.assertEqual(1800, status["wall_clock_timeout_seconds"])
+            self.assertEqual("standard", status["worker_class"])
 
     def test_implementation_wall_clock_timeout_rejects_malformed_value(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -929,9 +941,17 @@ class TriageTests(unittest.TestCase):
 class ImplementationLifecycleTests(unittest.TestCase):
     def test_branch_name_dispatch_gate_and_human_review_stop(self):
         self.assertEqual("symphony/san-123", issue_branch("SAN-123"))
-        validate_dispatch("Ready for Agent", ["security", "symphony"])
+        validate_dispatch("Ready for Agent", ["security", "symphony", "agent-standard"])
         with self.assertRaises(LifecycleError):
-            validate_dispatch("Backlog", ["symphony"])
+            validate_dispatch("Backlog", ["symphony", "agent-standard"])
+        with self.assertRaises(LifecycleError):
+            validate_dispatch("Ready for Agent", ["symphony"])
+        self.assertTrue(worker_class_eligible(["symphony", "agent-deep"], "deep"))
+        self.assertFalse(
+            worker_class_eligible(
+                ["symphony", "agent-standard", "agent-deep"], "standard"
+            )
+        )
         valid = PullRequestHandoff(
             "v1.3-dev", "symphony/san-123", False, "Human Review"
         )
@@ -958,13 +978,36 @@ class ImplementationLifecycleTests(unittest.TestCase):
 
     def test_workflow_pins_model_limits_and_never_merges(self):
         workflow = (ROOT / "WORKFLOW.md").read_text()
+        deep_workflow = (ROOT / "WORKFLOW.deep.md").read_text()
         self.assertIn('model="gpt-5.6-sol"', workflow)
-        self.assertIn("max_turns: 8", workflow)
-        self.assertIn("stall_timeout_ms: 300000", workflow)
+        self.assertIn("agent-standard", workflow)
+        self.assertIn("max_turns: 20", workflow)
+        self.assertIn("turn_timeout_ms: 3600000", workflow)
+        self.assertIn("stall_timeout_ms: 900000", workflow)
+        self.assertIn("dashboard_enabled: false", workflow)
+        self.assertIn("run_validation_profile", workflow)
+        self.assertIn('model="gpt-6-astra"', deep_workflow)
+        self.assertIn("agent-deep", deep_workflow)
+        self.assertIn("max_turns: 30", deep_workflow)
         self.assertIn("Human Review` is a hard stopping point", workflow)
         self.assertIn("github_ensure_issue_pull_request", workflow)
         self.assertNotIn(" gh ", workflow)
         self.assertNotIn("gh pr merge", workflow)
+
+    def test_standard_and_deep_workflows_have_identical_authority(self):
+        standard = (ROOT / "WORKFLOW.md").read_text()
+        deep = (ROOT / "WORKFLOW.deep.md").read_text()
+        normalized = (
+            deep.replace("    - agent-deep\n", "    - agent-standard\n")
+            .replace("max_turns: 30", "max_turns: 20")
+            .replace('model="gpt-6-astra"', 'model="gpt-5.6-sol"')
+            .replace('model_reasoning_effort="high"', 'model_reasoning_effort="medium"')
+            .replace(
+                "Worker class: deep (`agent-deep`).",
+                "Worker class: standard (`agent-standard`).",
+            )
+        )
+        self.assertEqual(standard, normalized)
 
 
 class SymphonySupervisorTests(unittest.TestCase):
@@ -984,7 +1027,6 @@ class SymphonySupervisorTests(unittest.TestCase):
             ledger,
             now=now,
             wall_clock_seconds=100,
-            stall_seconds=10,
             max_turns=8,
             max_tokens=500,
             max_retries=2,
@@ -1002,6 +1044,19 @@ class SymphonySupervisorTests(unittest.TestCase):
         self.assertEqual(
             {"turns_budget", "tokens_budget"}, {item.reason for item in second}
         )
+
+    def test_input_and_output_token_high_water_marks_are_preserved(self):
+        ledger: dict[str, object] = {"issues": {}}
+        entry = self.running("one", 1, 30)
+        entry["tokens"] = {
+            "total_tokens": 30,
+            "input_tokens": 20,
+            "output_tokens": 10,
+        }
+        self.evaluate({"running": [entry], "retrying": []}, ledger)
+        session = ledger["issues"]["SAN-7"]["sessions"]["one"]
+        self.assertEqual(20, session["input_tokens"])
+        self.assertEqual(10, session["output_tokens"])
 
     def test_supervisor_environment_drops_unrelated_credentials(self):
         value = _sanitized_supervisor_environment(
@@ -1025,7 +1080,7 @@ class SymphonySupervisorTests(unittest.TestCase):
             value,
         )
 
-    def test_wall_stall_and_retry_caps_are_independent(self):
+    def test_wall_and_retry_caps_are_outer_supervisor_owned(self):
         ledger = {
             "issues": {
                 "SAN-7": {
@@ -1040,12 +1095,6 @@ class SymphonySupervisorTests(unittest.TestCase):
             {"running": [self.running("one", 1, 10)], "retrying": []}, ledger
         )
         self.assertEqual({"wall_clock_budget"}, {item.reason for item in running})
-        stalled_entry = self.running("one", 1, 10)
-        stalled_entry["last_event_at"] = "1970-01-01T00:02:00Z"
-        stalled = self.evaluate(
-            {"running": [stalled_entry], "retrying": []}, {"issues": {}}, now=200
-        )
-        self.assertIn("stall_budget", {item.reason for item in stalled})
         retry = self.evaluate(
             {
                 "running": [],
@@ -1055,6 +1104,37 @@ class SymphonySupervisorTests(unittest.TestCase):
             now=200,
         )
         self.assertEqual({"retries_budget"}, {item.reason for item in retry})
+
+    def test_failure_classification_is_deterministic(self):
+        self.assertEqual(
+            TerminationClass.TOKEN_BUDGET,
+            classify_termination("tokens_budget"),
+        )
+        self.assertEqual(
+            TerminationClass.SANDBOX,
+            classify_termination(
+                "operator_action_required", "/bin/ps operation_not_permitted"
+            ),
+        )
+        self.assertEqual(
+            TerminationClass.GIT_CONTROL_PLANE,
+            classify_termination("retries_budget", "push result unknown"),
+        )
+        cases = {
+            TerminationClass.MODEL_REASONING: ("failed", "malformed model output"),
+            TerminationClass.ENVIRONMENT: ("state_api_stall", None),
+            TerminationClass.VALIDATION: ("failed", "test failed"),
+            TerminationClass.NETWORK_PROVIDER: ("failed", "provider rate limit"),
+            TerminationClass.TIME_BUDGET: ("wall_clock_budget", None),
+            TerminationClass.OWNER_ACTION_REQUIRED: (
+                "operator_action_required",
+                None,
+            ),
+            TerminationClass.UNKNOWN: ("unclassified", None),
+        }
+        for expected, (reason, detail) in cases.items():
+            with self.subTest(expected=expected):
+                self.assertEqual(expected, classify_termination(reason, detail))
 
     def test_completed_issue_ledger_is_eventually_removed(self):
         ledger = {
@@ -1069,6 +1149,102 @@ class SymphonySupervisorTests(unittest.TestCase):
         }
         self.evaluate({"running": [], "retrying": []}, ledger, now=161)
         self.assertEqual({}, ledger["issues"])
+
+    def test_budget_incident_resume_starts_new_epoch_without_linear_state_bounce(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "private"
+            incident = prefix / "incidents" / "implementation-budget.json"
+            ledger = prefix / "state" / "symphony-ledger.json"
+            incident.parent.mkdir(parents=True)
+            ledger.parent.mkdir(parents=True)
+            record = {
+                "first_seen": 1,
+                "last_seen": 2,
+                "sessions": {"one": {"turns": 8, "tokens": 99}},
+                "max_retry": 0,
+            }
+            incident.write_text(
+                json.dumps(
+                    {
+                        "linear_state_changed": False,
+                        "violations": [
+                            {
+                                "issue_identifier": "TTE-14",
+                                "reason": "tokens_budget",
+                            }
+                        ],
+                        "issue_metrics": {
+                            "TTE-14": {
+                                "ledger_epoch_sha256": _ledger_epoch_sha256(record)
+                            }
+                        },
+                    }
+                )
+            )
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "issues": {"TTE-14": record},
+                    }
+                )
+            )
+            config = load_config(CONFIG)
+            environment = {"SANCTUM_AGENT_PREFIX": str(prefix)}
+            first = resume_from_incident(config, incident, "TTE-14", environment)
+            second = resume_from_incident(config, incident, "TTE-14", environment)
+            self.assertEqual("applied", first["status"])
+            self.assertEqual("already_applied", second["status"])
+            self.assertFalse(first["linear_state_changed"])
+            self.assertNotIn("TTE-14", json.loads(ledger.read_text())["issues"])
+
+    def test_resume_rejects_stale_incident_or_nonbudget_blocker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "private"
+            incident = prefix / "incidents" / "blocked.json"
+            ledger = prefix / "state" / "symphony-ledger.json"
+            incident.parent.mkdir(parents=True)
+            ledger.parent.mkdir(parents=True)
+            record = {"first_seen": 1, "sessions": {}, "max_retry": 0}
+            ledger.write_text(
+                json.dumps({"schema_version": 1, "issues": {"TTE-14": record}})
+            )
+            incident.write_text(
+                json.dumps(
+                    {
+                        "linear_state_changed": False,
+                        "violations": [
+                            {
+                                "issue_identifier": "TTE-14",
+                                "reason": "operator_action_required",
+                            }
+                        ],
+                        "issue_metrics": {
+                            "TTE-14": {
+                                "ledger_epoch_sha256": _ledger_epoch_sha256(record)
+                            }
+                        },
+                    }
+                )
+            )
+            with self.assertRaisesRegex(ConfigError, "not a resumable"):
+                resume_from_incident(
+                    load_config(CONFIG),
+                    incident,
+                    "TTE-14",
+                    {"SANCTUM_AGENT_PREFIX": str(prefix)},
+                )
+            payload = json.loads(incident.read_text())
+            payload["violations"][0]["reason"] = "tokens_budget"
+            payload["issue_metrics"]["TTE-14"]["ledger_epoch_sha256"] = "0" * 64
+            incident.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ConfigError, "current ledger epoch"):
+                resume_from_incident(
+                    load_config(CONFIG),
+                    incident,
+                    "TTE-14",
+                    {"SANCTUM_AGENT_PREFIX": str(prefix)},
+                )
 
     def test_operator_blocker_is_terminal_without_retry_loop(self):
         snapshot = {

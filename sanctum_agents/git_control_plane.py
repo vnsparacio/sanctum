@@ -919,7 +919,9 @@ class GitControlPlane:
             )
         return value
 
-    def ensure_pull_request(self, title: Any, body: Any) -> dict[str, Any]:
+    def ensure_pull_request(
+        self, title: Any, body: Any, operation_id: Any
+    ) -> dict[str, Any]:
         identity = self._require_issue_branch()
         if (
             not isinstance(title, str)
@@ -942,6 +944,8 @@ class GitControlPlane:
                 "pull_request_body_invalid",
                 "PR body must be bounded and reference the issue identifier",
             )
+        if not isinstance(operation_id, str):
+            raise GitControlError("operation_id_invalid", "operation id is required")
         if not self._clean():
             raise GitControlError(
                 "pull_request_dirty", "PR handoff requires a clean workspace"
@@ -951,6 +955,52 @@ class GitControlPlane:
             raise GitControlError(
                 "pull_request_unpushed", "PR handoff requires the pushed local HEAD"
             )
+        receipt_path = self._receipt_path(identity, "pull-request", operation_id)
+        intent = {
+            "schema_version": 1,
+            "kind": "pull-request",
+            "operation_id": operation_id,
+            "issue_identifier": identity.issue_identifier,
+            "branch": identity.branch,
+            "head": local_head,
+            "title": title,
+            "body": body,
+        }
+        prior = self._load_receipt(receipt_path)
+        if prior:
+            if any(prior.get(key) != value for key, value in intent.items()):
+                raise GitControlError(
+                    "operation_id_conflict",
+                    "operation id was already used for a different pull-request request",
+                )
+            reconciled = self._open_pull_request(identity)
+            if (
+                reconciled
+                and reconciled.get("title") == title
+                and reconciled.get("body") == body
+            ):
+                prior.update(
+                    {
+                        "state": "applied",
+                        "number": reconciled["number"],
+                        "url": reconciled["url"],
+                        "reconciled": True,
+                    }
+                )
+                _atomic_private_json(receipt_path, prior)
+                return {
+                    "status": "already_applied",
+                    "number": reconciled["number"],
+                    "url": reconciled["url"],
+                    "base": INTEGRATION_BASE,
+                    "head": identity.branch,
+                }
+            raise UnknownGitResult(
+                "pull_request_unknown",
+                "pull-request result is unknown and was not replayed; operator review required",
+            )
+        receipt = {**intent, "state": "pending"}
+        _atomic_private_json(receipt_path, receipt)
         existing = self._open_pull_request(identity)
         if existing:
             if existing.get("title") != title or existing.get("body") != body:
@@ -977,6 +1027,25 @@ class GitControlPlane:
                             "pull_request_unknown",
                             "PR update result is unknown and was not replayed; operator review required",
                         )
+                existing = self._open_pull_request(identity)
+                if (
+                    not existing
+                    or existing.get("title") != title
+                    or existing.get("body") != body
+                ):
+                    raise UnknownGitResult(
+                        "pull_request_unknown",
+                        "PR update result is unknown and was not replayed; operator review required",
+                    )
+            receipt.update(
+                {
+                    "state": "applied",
+                    "number": existing["number"],
+                    "url": existing["url"],
+                    "reconciled": False,
+                }
+            )
+            _atomic_private_json(receipt_path, receipt)
             return {
                 "status": "updated",
                 "number": existing["number"],
@@ -984,6 +1053,7 @@ class GitControlPlane:
                 "base": INTEGRATION_BASE,
                 "head": identity.branch,
             }
+        creation_reconciled = False
         try:
             result = self._gh(
                 "pr",
@@ -1001,6 +1071,7 @@ class GitControlPlane:
                 check=False,
             )
             if result.returncode:
+                creation_reconciled = True
                 reconciled = self._open_pull_request(identity)
                 if not reconciled:
                     raise GitControlError(
@@ -1010,12 +1081,22 @@ class GitControlPlane:
             else:
                 reconciled = self._open_pull_request(identity)
         except _InjectedAmbiguity:
+            creation_reconciled = True
             reconciled = self._open_pull_request(identity)
         if not reconciled:
             raise UnknownGitResult(
                 "pull_request_unknown",
                 "PR creation result is unknown and was not replayed; operator review required",
             )
+        receipt.update(
+            {
+                "state": "applied",
+                "number": reconciled["number"],
+                "url": reconciled["url"],
+                "reconciled": creation_reconciled,
+            }
+        )
+        _atomic_private_json(receipt_path, receipt)
         return {
             "status": "created",
             "number": reconciled["number"],
