@@ -79,6 +79,7 @@ from sanctum_agents.supervisor import BoundedProcess
 from sanctum_agents.symphony_supervisor import (
     TerminationClass,
     _ledger_epoch_sha256,
+    _ledger_totals,
     _sanitized_supervisor_environment,
     classify_termination,
     evaluate_snapshot,
@@ -1021,10 +1022,11 @@ class SymphonySupervisorTests(unittest.TestCase):
             "last_event_at": "1970-01-01T00:03:15Z",
         }
 
-    def evaluate(self, snapshot, ledger, now=200):
+    def evaluate(self, snapshot, ledger, now=200, runtime_id="runtime-one"):
         return evaluate_snapshot(
             snapshot,
             ledger,
+            runtime_id=runtime_id,
             now=now,
             wall_clock_seconds=100,
             max_turns=8,
@@ -1032,14 +1034,32 @@ class SymphonySupervisorTests(unittest.TestCase):
             max_retries=2,
         )
 
-    def test_total_turn_and_token_caps_span_continuation_sessions(self):
+    def test_cumulative_counters_are_not_summed_across_continuation_sessions(self):
         ledger: dict[str, object] = {"issues": {}}
         first = self.evaluate(
             {"running": [self.running("one", 4, 300)], "retrying": []}, ledger
         )
         self.assertEqual([], first)
         second = self.evaluate(
-            {"running": [self.running("two", 5, 300)], "retrying": []}, ledger
+            {"running": [self.running("two", 5, 400)], "retrying": []}, ledger
+        )
+        self.assertEqual([], second)
+        record = ledger["issues"]["SAN-7"]
+        self.assertEqual(5, _ledger_totals(record, 200)["turn_count"])
+        self.assertEqual(400, _ledger_totals(record, 200)["tokens"])
+
+    def test_total_turn_and_token_caps_span_supervisor_runtimes(self):
+        ledger: dict[str, object] = {"issues": {}}
+        first = self.evaluate(
+            {"running": [self.running("one", 4, 300)], "retrying": []},
+            ledger,
+            runtime_id="runtime-one",
+        )
+        self.assertEqual([], first)
+        second = self.evaluate(
+            {"running": [self.running("two", 5, 300)], "retrying": []},
+            ledger,
+            runtime_id="runtime-two",
         )
         self.assertEqual(
             {"turns_budget", "tokens_budget"}, {item.reason for item in second}
@@ -1054,9 +1074,33 @@ class SymphonySupervisorTests(unittest.TestCase):
             "output_tokens": 10,
         }
         self.evaluate({"running": [entry], "retrying": []}, ledger)
-        session = ledger["issues"]["SAN-7"]["sessions"]["one"]
-        self.assertEqual(20, session["input_tokens"])
-        self.assertEqual(10, session["output_tokens"])
+        runtime = ledger["issues"]["SAN-7"]["runtimes"]["runtime-one"]
+        self.assertEqual(20, runtime["input_tokens"])
+        self.assertEqual(10, runtime["output_tokens"])
+
+    def test_legacy_session_ledger_uses_cumulative_high_water_marks(self):
+        record = {
+            "first_seen": 1,
+            "last_seen": 2,
+            "sessions": {
+                "one": {"turns": 1, "tokens": 100},
+                "two": {"turns": 2, "tokens": 180},
+                "three": {"turns": 3, "tokens": 250},
+            },
+            "max_retry": 0,
+        }
+        totals = _ledger_totals(record, 200)
+        self.assertEqual(3, totals["turn_count"])
+        self.assertEqual(250, totals["tokens"])
+        ledger = {"issues": {"SAN-7": record}}
+        self.evaluate(
+            {"running": [self.running("four", 4, 300)], "retrying": []},
+            ledger,
+            runtime_id="runtime-two",
+        )
+        self.assertNotIn("sessions", record)
+        self.assertEqual(7, _ledger_totals(record, 200)["turn_count"])
+        self.assertEqual(550, _ledger_totals(record, 200)["tokens"])
 
     def test_supervisor_environment_drops_unrelated_credentials(self):
         value = _sanitized_supervisor_environment(
