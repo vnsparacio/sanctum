@@ -359,11 +359,13 @@ class GitControlPlane:
         digest = hashlib.sha256(str(identity.workspace).encode()).hexdigest()
         return self.state_root / "workspaces" / f"{digest}.json"
 
-    def _lease_value(self, identity: WorkspaceIdentity) -> dict[str, Any]:
+    def _lease_value(
+        self, identity: WorkspaceIdentity, base_head: str
+    ) -> dict[str, Any]:
         stat = identity.workspace.stat()
         git_stat = identity.git_dir.stat()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace": str(identity.workspace),
             "workspace_root": str(identity.workspace_root),
             "workspace_device": stat.st_dev,
@@ -374,13 +376,16 @@ class GitControlPlane:
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
             "base": INTEGRATION_BASE,
+            "base_head": base_head,
             "remote": self.expected_remote,
         }
 
-    def _write_lease(self, identity: WorkspaceIdentity) -> None:
-        _atomic_private_json(self._lease_path(identity), self._lease_value(identity))
+    def _write_lease(self, identity: WorkspaceIdentity, base_head: str) -> None:
+        _atomic_private_json(
+            self._lease_path(identity), self._lease_value(identity, base_head)
+        )
 
-    def _require_lease(self, identity: WorkspaceIdentity) -> None:
+    def _require_lease(self, identity: WorkspaceIdentity) -> dict[str, Any]:
         path = self._lease_path(identity)
         try:
             value = json.loads(path.read_text())
@@ -388,11 +393,20 @@ class GitControlPlane:
             raise GitControlError(
                 "workspace_not_prepared", "host workspace lease is missing or invalid"
             ) from exc
-        if value != self._lease_value(identity):
+        base_head = value.get("base_head") if isinstance(value, dict) else None
+        if not isinstance(base_head, str) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", base_head
+        ):
             raise GitControlError(
                 "workspace_identity_changed",
                 "host workspace identity no longer matches",
             )
+        if value != self._lease_value(identity, base_head):
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        return value
 
     def _current_branch(self) -> str:
         return self._git("branch", "--show-current").stdout.strip()
@@ -408,14 +422,23 @@ class GitControlPlane:
             raise GitControlError("base_rejected", "only origin/v1.3-dev is permitted")
         identity = self.identity()
         lease_exists = self._lease_path(identity).exists()
+        lease = None
         if lease_exists:
-            self._require_lease(identity)
+            lease = self._require_lease(identity)
         self._git(
             "fetch",
             "--no-tags",
             "origin",
             f"refs/heads/{INTEGRATION_BASE}:refs/remotes/origin/{INTEGRATION_BASE}",
         )
+        base_head = self._git(
+            "rev-parse", f"refs/remotes/origin/{INTEGRATION_BASE}"
+        ).stdout.strip()
+        if lease and lease["base_head"] != base_head:
+            raise GitControlError(
+                "base_advanced",
+                "accepted origin/v1.3-dev advanced after workspace preparation",
+            )
         current = self._current_branch()
         if current == INTEGRATION_BASE:
             if not self._clean():
@@ -423,9 +446,6 @@ class GitControlPlane:
                     "bootstrap_dirty",
                     "base workspace must be clean before branch creation",
                 )
-            base_head = self._git(
-                "rev-parse", f"refs/remotes/origin/{INTEGRATION_BASE}"
-            ).stdout.strip()
             if self._head() != base_head:
                 raise GitControlError(
                     "base_stale", "local base does not equal accepted origin/v1.3-dev"
@@ -454,7 +474,7 @@ class GitControlPlane:
                     "unleased issue branch does not descend from accepted origin/v1.3-dev",
                 )
         if not lease_exists:
-            self._write_lease(identity)
+            self._write_lease(identity, base_head)
         return {
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
@@ -749,12 +769,12 @@ class GitControlPlane:
         _atomic_private_json(receipt_path, receipt)
         return {"status": "applied", "commit": receipt["head"], "paths": staged}
 
-    def _remote_branch_head(self, identity: WorkspaceIdentity) -> str | None:
+    def _remote_ref_head(self, ref: str) -> str | None:
         result = self._git(
             "ls-remote",
             "--heads",
             "origin",
-            f"refs/heads/{identity.branch}",
+            ref,
             check=False,
             credentialed=True,
         )
@@ -765,11 +785,25 @@ class GitControlPlane:
         fields = result.stdout.strip().split()
         if not fields:
             return None
-        if len(fields) != 2 or fields[1] != f"refs/heads/{identity.branch}":
+        if len(fields) != 2 or fields[1] != ref:
             raise UnknownGitResult(
                 "remote_state_unknown", "remote returned an unexpected branch identity"
             )
         return fields[0]
+
+    def _remote_branch_head(self, identity: WorkspaceIdentity) -> str | None:
+        return self._remote_ref_head(f"refs/heads/{identity.branch}")
+
+    def _require_base_unchanged(self, identity: WorkspaceIdentity) -> str:
+        lease = self._require_lease(identity)
+        accepted = lease["base_head"]
+        current = self._remote_ref_head(f"refs/heads/{INTEGRATION_BASE}")
+        if current != accepted:
+            raise GitControlError(
+                "base_advanced",
+                "accepted origin/v1.3-dev advanced after workspace preparation",
+            )
+        return accepted
 
     def _reconcile_push(
         self, path: Path, receipt: dict[str, Any], identity: WorkspaceIdentity
@@ -794,30 +828,52 @@ class GitControlPlane:
             raise GitControlError("operation_id_invalid", "operation id is required")
         if not self._clean():
             raise GitControlError("push_dirty", "push requires a clean issue workspace")
+        local_head = self._head()
+        lease = self._require_lease(identity)
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "branch": identity.branch,
+                    "local_head": local_head,
+                    "base_head": lease["base_head"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         receipt_path = self._receipt_path(identity, "push", operation_id)
         existing = self._load_receipt(receipt_path)
         if existing:
+            if existing.get("request_sha256") != request_hash:
+                raise GitControlError(
+                    "operation_id_conflict",
+                    "operation id was already used for a different push request",
+                )
             if existing.get("state") == "applied":
                 return {
                     "status": "already_applied",
                     "remote_head": existing.get("local_head"),
                 }
             return self._reconcile_push(receipt_path, existing, identity)
-        local_head = self._head()
+        accepted_base_head = self._require_base_unchanged(identity)
         remote_head = self._remote_branch_head(identity)
-        if remote_head == local_head:
-            return {"status": "already_applied", "remote_head": remote_head}
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "push",
             "state": "pending",
             "operation_id": operation_id,
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
             "local_head": local_head,
+            "base_head": accepted_base_head,
             "remote_head_before": remote_head,
+            "request_sha256": request_hash,
         }
         _atomic_private_json(receipt_path, receipt)
+        if remote_head == local_head:
+            receipt.update({"state": "applied", "reconciled": False})
+            _atomic_private_json(receipt_path, receipt)
+            return {"status": "already_applied", "remote_head": remote_head}
         try:
             result = self._git(
                 "push",

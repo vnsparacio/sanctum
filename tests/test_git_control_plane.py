@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -276,20 +277,86 @@ class GitControlPlaneTests(unittest.TestCase):
         replay = self.broker().push("push-unknown")
         self.assertEqual("already_applied", replay["status"])
 
+    def test_push_operation_id_is_bound_to_local_head(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("first push intent\n")
+        broker.commit("Prepare first push intent", ["docs.md"], "first-commit")
+        broker.push("stable-push-operation")
+        self.assertEqual(
+            "already_applied", broker.push("stable-push-operation")["status"]
+        )
+        (self.workspace / "docs.md").write_text("changed push intent\n")
+        broker.commit("Prepare changed push intent", ["docs.md"], "second-commit")
+        with self.assertRaisesRegex(GitControlError, "different push request"):
+            broker.push("stable-push-operation")
+
+    def test_push_detects_base_advancement_before_remote_mutation(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("bounded branch change\n")
+        broker.commit("Prepare push from accepted base", ["docs.md"], "branch-commit")
+        (self.seed / "README.md").write_text("advanced base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+        with self.assertRaisesRegex(GitControlError, "advanced"):
+            broker.push("base-advanced-push")
+        remote_branch = subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(self.remote),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/symphony/tte-9",
+            ],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(0, remote_branch.returncode)
+
     def test_unreconciled_pending_push_is_unknown_and_not_replayed(self):
         broker = self.broker()
         broker.prepare()
+        identity = broker.identity()
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "push",
             "state": "pending",
             "operation_id": "lost-push",
             "issue_identifier": "TTE-9",
             "branch": "symphony/tte-9",
             "local_head": broker._head(),
+            "base_head": broker._require_lease(identity)["base_head"],
             "remote_head_before": None,
         }
-        identity = broker.identity()
+        receipt["request_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "branch": receipt["branch"],
+                    "local_head": receipt["local_head"],
+                    "base_head": receipt["base_head"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         path = broker._receipt_path(identity, "push", "lost-push")
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(receipt))
