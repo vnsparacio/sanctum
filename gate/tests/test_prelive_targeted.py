@@ -419,7 +419,7 @@ class CompilerRepairTests(unittest.TestCase):
         ]
         self.assertEqual(compiled, expected)
         self.assertEqual(len(grammars), len(expected))
-        self.assertEqual(len(grammars), 25)
+        self.assertEqual(len(grammars), 27)
         self.assertTrue(
             all(row["schemaKind"] == "generation" for row in result["exactCompiler"])
         )

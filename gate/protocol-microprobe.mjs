@@ -41,7 +41,7 @@ export async function runProtocolMicroprobes({reasoner,manifest,onEvent=()=>{},b
     budgetStatus:()=>captured?'MICROPROBE_CAPTURED':null,
     onEvent:(kind,value)=>onEvent(probe.id,kind,value),
    });
-   const result=await work.run({task:probe.task,scope,capabilities:['worktree_list','worktree_read','worktree_edit','worktree_command'],maxModelCalls:probe.id==='postPatch'?3:2,maxTaskSeconds:Math.max(1,Math.min(maxSeconds,deadline-now())),signal:controller.signal});
+   const result=await work.run({task:probe.task,scope,capabilities:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'],maxModelCalls:probe.id==='postPatch'?3:2,maxTaskSeconds:Math.max(1,Math.min(maxSeconds,deadline-now())),signal:controller.signal});
    const passed=probe.id==='inability'?result.reason==='MODEL_ESCALATION'&&!captured:captured&&semanticChoice&&result.reason==='MICROPROBE_CAPTURED';
    rows.push({id:probe.id,passed,semanticChoice:probe.id==='inability'?passed:semanticChoice,hostBoundary:probe.id==='inability'?'TERMINAL_FRESHNESS':'CANONICAL_AND_AUTHORITY',calls:probeCalls,hostSeededPatch:seeded,status:result.status,reason:result.reason});
    if(!passed)break;

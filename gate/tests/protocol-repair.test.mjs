@@ -25,7 +25,7 @@ const manifest=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.n
 const evidence=async({scope,workspace,turn})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',bytes:0,digest:'a'.repeat(64)},status:{ok:true,executionState:'COMPLETED',bytes:0,digest:'b'.repeat(64)}});
 const config={verifyProtectedEvidence:syntheticProtection,manifest,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:evidence,invoke:async()=>({ok:true}),egress:()=>({}),evaluate:async()=>({passed:false})};
 test('preflight schema is the exact runtime schema, including branch order',async()=>{
- for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>x!=='worktree_edit')]]){
+ for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>!['worktree_edit','worktree_patch'].includes(x))]]){
   let captured;
   await createWorkMode({...config,reasoner:{async invoke(request){captured=request;return {kind:'ESCALATION',reason:'SYNTHETIC'};}}}).run({task:'synthetic',scope:'s',capabilities});
   assert.deepEqual(captured.state.workIntent,preflightCurrentWorkIntentSchemas().schemas[surface].request);
@@ -43,9 +43,9 @@ test('oversized accumulated context stops before sending an omitted goal',async(
  assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(calls,6);
 });
 
-const positives=[{kind:'ESCALATION',reason:'BOUNDED_INABILITY'},{kind:'FINAL',text:'synthetic'},...Object.entries({worktree_list:{},worktree_read:{path:'index.js'},worktree_edit:{path:'index.js',old_text:'old',new_text:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'}}).map(([capability,args])=>({kind:'TOOL_PROPOSAL',capability,arguments:args}))];
+const positives=[{kind:'ESCALATION',reason:'BOUNDED_INABILITY'},{kind:'FINAL',text:'synthetic'},...Object.entries({worktree_list:{},worktree_read:{path:'index.js'},worktree_edit:{path:'index.js',old_text:'old',new_text:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},worktree_patch:{patch:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'}}).map(([capability,args])=>({kind:'TOOL_PROPOSAL',capability,arguments:args}))];
 test('every semantic branch survives the adapter and canonical binding',async()=>{
- const built=decisionSurface({manifest,names,limit:5,terminalKinds:['FINAL','ESCALATION']});
+ const built=decisionSurface({manifest,names,limit:6,terminalKinds:['FINAL','ESCALATION']});
  for(const value of positives){
   const adapter=createPrivateLeadReasoner({execute:async()=>({status:'OK',result:value}),profile:{status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}},body:()=>({})});
   const request={schema:CONTRACT_VERSION,requestId:'r',scope:'a'.repeat(32),revision:0,messages:[{role:'user',content:'synthetic'}],manifestDigest:manifest.digest,state:{workIntent:built.request}};
@@ -77,7 +77,7 @@ test('terminal differential matrix documents projection, NUL and Unicode length 
 });
 test('all corresponding surfaces and argument constraints share exact identities',()=>{
  for(const [label,row] of Object.entries(preflightCurrentWorkIntentSchemas().schemas)){
-  const built=decisionSurface({manifest,names:row.capabilities,limit:label==='allEligible'?5:4,testOnly:label==='testOnlyIneligible',reviewer:label==='reviewer',terminalKinds:label==='reviewer'?['FINAL']:label.endsWith('Ineligible')?['ESCALATION']:['FINAL','ESCALATION']});
+  const built=decisionSurface({manifest,names:row.capabilities,limit:row.capabilities.length,testOnly:label==='testOnlyIneligible',reviewer:label==='reviewer',terminalKinds:label==='reviewer'?['FINAL']:label.endsWith('Ineligible')?['ESCALATION']:['FINAL','ESCALATION']});
   assert.deepEqual(built.request,row.request);assert.deepEqual(built.capabilities,row.capabilities);
   const validator=new Ajv({strict:false}).compile(built.request.schema);
   for(const value of positives.filter(x=>x.kind==='TOOL_PROPOSAL'?built.capabilities.includes(x.capability):built.terminalKinds.includes(x.kind)))assert.equal(validator(value),true,label);
@@ -86,7 +86,7 @@ test('all corresponding surfaces and argument constraints share exact identities
  assert.equal(validateWorkIntent({kind:'TOOL_PROPOSAL',capability:'worktree_command',arguments:{operation:'build'}},{specs:built.specs,testOnly:true,terminalKinds:built.terminalKinds}).ok,false);
 });
 test('structural diagnostics name the actual predicate and never disclose unknown keys or values',()=>{
- const built=decisionSurface({manifest,names,limit:5,terminalKinds:['ESCALATION']});
+ const built=decisionSurface({manifest,names,limit:6,terminalKinds:['ESCALATION']});
  for(const [args,keyword,field] of [[{},'required','path'],[{path:''},'minLength','path'],[{path:'a'.repeat(513)},'maxLength','path'],[{path:'../synthetic'},'pattern','path'],[{path:3},'type','path'],[{path:'index.js',max_chars:0},'minimum','max_chars'],[{path:'index.js',max_chars:24001},'maximum','max_chars'],[{path:'index.js','synthetic private key':'synthetic private value'},'additionalProperties','arguments']]){
   const diagnostic=schemaDiagnostic({kind:'TOOL_PROPOSAL',capability:'worktree_read',arguments:args},built.authoritativeSchema);
   assert.equal(diagnostic.keyword,keyword);assert.equal(diagnostic.field,field);assert.ok(!JSON.stringify(diagnostic).includes('synthetic private'));
@@ -125,7 +125,7 @@ test('signed worker microprobes use production requests, parser, adapter and hos
     if(probe==='postPatch'&&!seeded){seeded=true;return {kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{path:'index.js',old_text:'old',new_text:'synthetic host seed'}};}
     requests.push(request);return adapter.invoke(request);
    }};
-   const work=await createWorkMode({...config,reasoner,authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),invoke:async({proposal})=>{actions++;if(proposal.capability==='worktree_edit')return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};assert.equal(proposal.capability,expected.capability);assert.equal(proposal.arguments.task_id,'a'.repeat(32));return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),evaluate:async()=>({passed:true})}).run({task:probe==='inspection'?'Read index.js to inspect its exported function.':probe==='postPatch'?'Run the required test for the host-seeded synthetic patch.':'The required external capability is unavailable; report inability.',scope:'a'.repeat(32),capabilities:['worktree_list','worktree_read','worktree_edit','worktree_command'],maxModelCalls:probe==='postPatch'?2:1});
+   const work=await createWorkMode({...config,reasoner,authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),invoke:async({proposal})=>{actions++;if(proposal.capability==='worktree_edit')return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};assert.equal(proposal.capability,expected.capability);assert.equal(proposal.arguments.task_id,'a'.repeat(32));return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),evaluate:async()=>({passed:true})}).run({task:probe==='inspection'?'Read index.js to inspect its exported function.':probe==='postPatch'?'Run the required test for the host-seeded synthetic patch.':'The required external capability is unavailable; report inability.',scope:'a'.repeat(32),capabilities:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'],maxModelCalls:probe==='postPatch'?2:1});
    assert.equal(inferenceCalls,1);assert.equal(requests.length,1);
    if(probe==='inability'){assert.equal(work.reason,'MODEL_ESCALATION');assert.equal(actions,0);}
    else if(probe==='postPatch'){assert.equal(actions,2);assert.equal(work.status,'COMPLETE');assert.deepEqual(requests[0].state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);}

@@ -30,7 +30,6 @@ from media import expand, load
 from protocol_stream import safe_diagnostic
 from source_policy import minimize_query
 from workspace import (
-    apply_patch,
     cleanup_worktree,
     create_worktree,
     inspect_worktree,
@@ -70,7 +69,6 @@ def execute(b, settings, remote=None, lifecycle=None):
     # workspace routes, including internal patch and cleanup, against mutation.
     if b["operation"] in {
         "worktree_list",
-        "worktree_patch",
         "worktree_command",
         "worktree_integrity",
         "worktree_acceptance",
@@ -156,20 +154,10 @@ def _execute(b, settings, remote=None, lifecycle=None):
     if op == "worktree_patch":
         p = b["packet"]
         record = work_record(settings, scope)
-        assessment = task_evidence.patch_assessment(settings, record, p["patch"])
-        if assessment != "PASS":
-            return {
-                "status": "OK",
-                "result": {
-                    "ok": False,
-                    "code": assessment,
-                    "executionState": "NOT_STARTED",
-                },
-            }
-        result = apply_patch(record["root"], p["patch"])
-        if task_evidence.check(settings, record)["integrity"] != "PASS":
-            raise Refused("protected_input_modified")
-        return {"status": "OK", "result": result}
+        return {
+            "status": "OK",
+            "result": worktree_edit.apply_patch(settings, record, p["patch"]),
+        }
     if op == "worktree_command":
         p = b["packet"]
         record = work_record(settings, scope)

@@ -18,7 +18,7 @@ function ruleCheck(value){
 test('R1 initial and correction HTTP requests communicate the retained reason rule',async()=>{
  const run=await leadRun([plan(bad),plan(valid)]);
  assert.equal(run.result.status,'BLOCKED');assert.equal(run.result.reason,'MODEL_ESCALATION');assert.equal(run.attempts,2);assert.equal(run.effects,0);
- for(const sent of run.captures){const body=context(sent);ruleCheck(body.state.resultRequirements);assert.equal(body.task,'essential goal');assert.equal(body.capabilities.length,4);assert.ok(!JSON.stringify(body.state.resultRequirements).includes('INJECTED_PRIVATE'));}
+ for(const sent of run.captures){const body=context(sent);ruleCheck(body.state.resultRequirements);assert.equal(body.task,'essential goal');assert.equal(body.capabilities.length,5);assert.ok(!JSON.stringify(body.state.resultRequirements).includes('INJECTED_PRIVATE'));}
  ruleCheck(context(run.captures[1]).state.correction.resultRequirements);
  assert.equal(run.result.state.correction,undefined);
 });

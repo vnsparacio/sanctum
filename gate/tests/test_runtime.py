@@ -886,8 +886,8 @@ class Janitor(Temp):
         ineligible = result["schemas"]["ordinaryIneligible"]
         self.assertTrue(result["ok"])
         self.assertEqual(eligible["dialect"], "vllm-0.20.1-outlines")
-        self.assertEqual(eligible["branches"], 6)
-        self.assertEqual(ineligible["branches"], 5)
+        self.assertEqual(eligible["branches"], 7)
+        self.assertEqual(ineligible["branches"], 6)
         self.assertNotEqual(eligible["schemaDigest"], ineligible["schemaDigest"])
 
     def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):

@@ -72,7 +72,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
  if(!reasoner||!manifest||typeof invoke!=='function'||typeof authorize!=='function'||typeof egress!=='function'||typeof evaluate!=='function'||typeof workspaceState!=='function'||completionPolicy!==MUTABLE_WORKTREE_COMPLETION_POLICY)throw Error('workmode_config');
  return Object.freeze({async run({task,scope,workspace=null,capabilities=[],maxIterations=8,maxModelCalls=16,maxTaskSeconds=900,requestId=rid(),signal}={}){
    if(typeof task!=='string'||!task.trim()||task.length>4000||!validId(scope)||!validId(requestId)||!Number.isSafeInteger(maxIterations)||maxIterations<1||maxIterations>32||!Number.isSafeInteger(maxModelCalls)||maxModelCalls<1||maxModelCalls>32||!Number.isFinite(maxTaskSeconds)||maxTaskSeconds<1||maxTaskSeconds>3600)return {status:'ENVIRONMENT_FAILURE',reason:'TASK_CONTRACT'};
-   const started=now(),visible=selectCapabilities(manifest,{names:capabilities,limit:4});
+   const started=now(),visible=selectCapabilities(manifest,{names:capabilities,limit:5});
    const state={phase:'INSPECT',task,workspace:workspace?{kind:'ISOLATED_WORKTREE',id:scope}:null,iteration:0,modelCalls:0,invalidProposals:0,observations:[],tests:{passed:null,required:false},executionStateKnown:true,evaluatorState:'NOT_RUN',evaluationTrigger:null,review:null,reviewUsed:false,workspaceGeneration:0,readRequired:[],editRecovery:null};
    const emit=(kind,fields={})=>{try{onEvent(kind,{phase:state.phase,iteration:state.iteration,modelCalls:state.modelCalls,...fields});}catch{throw Error('ledger_unavailable');}};
    const stop=(status,reason)=>{const value={status,reason,phase:'TERMINAL',state:structuredClone(state),metrics:{iterations:state.iteration,modelCalls:state.modelCalls,elapsedSeconds:now()-started}};try{emit('STOP',{status,reason,...value.metrics});}catch{return {...value,status:'ENVIRONMENT_FAILURE',reason:'LEDGER_UNAVAILABLE'};}return value;};
@@ -145,7 +145,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      const eligibility=completionEligibility({policy:completionPolicy,activeDecision:true,hostStopActive:false,executionStateKnown:state.executionStateKnown,workspaceEvidenceValid:true,diffBytes:captured.value.diff.bytes,statusBytes:captured.value.status.bytes,postPatchTestOutstanding:state.tests.required});
      const terminalKinds=eligibility.eligible?['FINAL','ESCALATION']:['ESCALATION'];
      const decisionState=eligibility.eligible?'COMPLETION_ELIGIBLE':state.tests.required?'TEST_REQUIRED':'WORK_REQUIRED';
-     const decisionArtifact=decisionSurface({manifest,names:phaseVisible.map(x=>x.name),testOnly:state.tests.required,terminalKinds}),semantic=decisionArtifact.request;
+     const decisionArtifact=decisionSurface({manifest,names:phaseVisible.map(x=>x.name),limit:phaseVisible.length,testOnly:state.tests.required,terminalKinds}),semantic=decisionArtifact.request;
      const latestTestState=state.tests.required?'STALE':state.tests.passed===true?'PASS':state.tests.passed===false?'FAIL':'NOT_RUN';
      const reviewDisposition=reviewer===null?'NOT_CONFIGURED':state.review?.verdict??'NOT_RUN';
      const surface=(stage,selectedResultKind='PENDING',validationCode='PENDING')=>({stage,decisionState,completionEligible:eligibility.eligible,eligibilityReason:eligibility.reason,completionPolicy,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest,semanticSchemaDigest:semantic.semanticSchemaDigest,terminalKinds,visibleCapabilities:phaseVisible.map(x=>x.name),workspaceGeneration:state.workspaceGeneration,snapshotDigest:captured.digest,postPatchTestOutstanding:state.tests.required,latestTestState,evaluatorState:state.evaluatorState,evaluationTrigger:state.evaluationTrigger??'NONE',selectedResultKind,validationCode,reviewDisposition});
@@ -205,13 +205,13 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      const executionState=executed?.executionState??(executed?.ok?'COMPLETED':'COMPLETION_UNKNOWN');
      state.executionStateKnown=executionState!=='COMPLETION_UNKNOWN';
      const completed=executionState==='COMPLETED',successful=completed&&executed?.ok===true;
-     if(checked.spec.name==='worktree_edit'&&successful){state.tests={passed:null,required:true};const observedPath=candidate.arguments.operation==='move'?candidate.arguments.destination:candidate.arguments.operation==='delete'?null:candidate.arguments.path;if(observedPath&&!state.readRequired.includes(observedPath))state.readRequired.push(observedPath);}
+     if(['worktree_edit','worktree_patch'].includes(checked.spec.name)&&successful){state.tests={passed:null,required:true};const observedPaths=checked.spec.name==='worktree_patch'?(executed?.data?.receipt?.paths??[]):[candidate.arguments.operation==='move'?candidate.arguments.destination:candidate.arguments.operation==='delete'?null:candidate.arguments.path];for(const observedPath of observedPaths)if(observedPath&&!state.readRequired.includes(observedPath))state.readRequired.push(observedPath);}
      if(checked.spec.policy.effect==='MUTATION'&&successful)state.workspaceGeneration++;
      const explicitTest=checked.spec.name==='worktree_command'&&candidate.arguments.operation==='test';
      if(explicitTest)state.tests={passed:successful,required:false};
      const candidateCode=executed?.error?.code??executed?.code,errorCode=validId(candidateCode)?candidateCode:null;
      if(checked.spec.name==='worktree_edit'&&['EDIT_SOURCE_NOT_OBSERVED','EDIT_SOURCE_STALE','EDIT_TARGET_NOT_FOUND','EDIT_TARGET_NOT_UNIQUE'].includes(errorCode)){state.editRecovery={path:candidate.arguments.path,code:errorCode,requiredAction:'worktree_read'};if(!state.readRequired.includes(candidate.arguments.path))state.readRequired.push(candidate.arguments.path);}
-     if(checked.spec.name==='worktree_edit')emit('EDIT',{success:successful,errorCode,proposalDigest:digest(candidate),...(executed?.data?.receipt??{})});
+     if(['worktree_edit','worktree_patch'].includes(checked.spec.name))emit('EDIT',{success:successful,errorCode,proposalDigest:digest(candidate),...(executed?.data?.receipt??{})});
      try{emit('EXECUTION',{capability:checked.spec.name,executionState,resultDigest:safeDigest(executed??{}),verifier:executed?.verifier??'UNKNOWN',...(errorCode?{errorCode}:{})});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}
      if(!state.executionStateKnown)return stop('BLOCKED','COMPLETION_UNKNOWN');
      if(executed?.error?.code==='PROTECTED_INPUT_MODIFIED')return stop('BLOCKED','PROTECTED_INPUT_MODIFIED');

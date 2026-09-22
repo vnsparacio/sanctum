@@ -82,6 +82,9 @@ class ExactEdit(unittest.TestCase):
             {"operation": operation, "path": path, **arguments},
         )
 
+    def patch(self, value, **arguments):
+        return editor.apply_patch(self.settings, self.record, value, **arguments)
+
     def assert_diff_receipt(self, result):
         directory = evidence.store_root(self.settings) / self.record["workspace_id"]
         diff = (
@@ -158,6 +161,215 @@ class ExactEdit(unittest.TestCase):
         self.assertTrue(empty["ok"], empty)
         self.assertEqual((self.root / "empty.js").read_bytes(), b"")
         self.assert_diff_receipt(empty)
+
+    def test_atomic_patch_changes_existing_and_new_files(self):
+        value = """--- a/a.js
++++ b/a.js
+@@ -1,2 +1,2 @@
+   const x = 10;
+-\treturn x;
++\treturn x + 1;
+--- /dev/null
++++ b/new.js
+@@ -0,0 +1,2 @@
++export const added = true;
++export default added;
+"""
+        result = self.patch(value)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(
+            (self.root / "a.js").read_bytes(),
+            b"  const x = 10;\n\treturn x + 1;\n",
+        )
+        self.assertEqual(
+            (self.root / "new.js").read_bytes(),
+            b"export const added = true;\nexport default added;\n",
+        )
+        self.assertEqual(result["receipt"]["paths"], ["a.js", "new.js"])
+        self.assertEqual(result["receipt"]["fuzzy_match_count"], 0)
+        self.assertEqual(result["receipt"]["rollback"], "NOT_NEEDED")
+        diff = self.assert_diff_receipt(result)
+        self.assertIn(b"a.js", diff)
+        self.assertIn(b"new.js", diff)
+
+    def test_patch_accepts_exact_insertion_with_context_and_git_headers(self):
+        value = """diff --git a/a.js b/a.js
+index 1234567..7654321 100644
+--- a/a.js
++++ b/a.js
+@@ -1,2 +1,3 @@
+   const x = 10;
++\tconst y = 1;
+ \treturn x;
+"""
+        result = self.patch(value)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(
+            (self.root / "a.js").read_bytes(),
+            b"  const x = 10;\n\tconst y = 1;\n\treturn x;\n",
+        )
+        self.assert_diff_receipt(result)
+
+    def test_patch_refuses_context_free_insertion_into_existing_file(self):
+        value = """--- a/a.js
++++ b/a.js
+@@ -1,0 +2 @@
++new line
+"""
+        result = self.patch(value)
+        self.assertEqual(result["code"], "EDIT_PATCH_CONTEXT_REQUIRED", result)
+        self.assertEqual(result["executionState"], "NOT_STARTED")
+        self.assertEqual((self.root / "a.js").read_bytes(), self.initial)
+
+    def test_patch_refuses_case_alias_of_untracked_destination(self):
+        (self.root / "untracked.js").write_text("existing\n")
+        value = """--- /dev/null
++++ b/UNTRACKED.JS
+@@ -0,0 +1 @@
++new
+"""
+        result = self.patch(value)
+        self.assertEqual(result["code"], "EDIT_DESTINATION_EXISTS", result)
+        self.assertEqual((self.root / "untracked.js").read_text(), "existing\n")
+
+    def test_patch_stale_or_duplicate_context_never_partially_edits(self):
+        original = (self.root / "a.js").read_bytes()
+        for code, old in [
+            ("EDIT_PATCH_CONTEXT_STALE", "missing"),
+            ("EDIT_PATCH_CONTEXT_DUPLICATE", "same"),
+        ]:
+            (self.root / "b.js").write_text(
+                "same\nsame\n" if old == "same" else "const y = 1;\n"
+            )
+            value = f"""--- a/a.js
++++ b/a.js
+@@ -1 +1 @@
+-  const x = 10;
++  const x = 20;
+--- a/b.js
++++ b/b.js
+@@ -1 +1 @@
+-{old}
++changed
+"""
+            before = (self.root / "b.js").read_bytes()
+            result = self.patch(value)
+            self.assertEqual(result["code"], code, result)
+            self.assertEqual(result["executionState"], "NOT_STARTED")
+            self.assertEqual((self.root / "a.js").read_bytes(), original)
+            self.assertEqual((self.root / "b.js").read_bytes(), before)
+
+    def test_patch_commit_failure_rolls_back_completed_files(self):
+        value = """--- a/a.js
++++ b/a.js
+@@ -1 +1 @@
+-  const x = 10;
++  const x = 20;
+--- a/b.js
++++ b/b.js
+@@ -1 +1 @@
+-const y = 1;
++const y = 2;
+"""
+        before_a = (self.root / "a.js").read_bytes()
+        before_b = (self.root / "b.js").read_bytes()
+        replace = editor.os.replace
+        failed = False
+
+        def second_file_failure(src, dst, **kwargs):
+            nonlocal failed
+            if dst == "b.js" and not failed:
+                failed = True
+                raise OSError("synthetic commit failure")
+            return replace(src, dst, **kwargs)
+
+        with patch.object(editor.os, "replace", second_file_failure):
+            result = self.patch(value)
+        self.assertEqual(result["code"], "EDIT_PATCH_APPLY_FAILED", result)
+        self.assertEqual(result["executionState"], "NOT_STARTED")
+        self.assertEqual(result["rollback"], "COMPLETED")
+        self.assertEqual((self.root / "a.js").read_bytes(), before_a)
+        self.assertEqual((self.root / "b.js").read_bytes(), before_b)
+
+    def test_patch_rollback_does_not_overwrite_unrecognized_external_write(self):
+        value = """--- a/a.js
++++ b/a.js
+@@ -1 +1 @@
+-  const x = 10;
++  const x = 20;
+--- a/b.js
++++ b/b.js
+@@ -1 +1 @@
+-const y = 1;
++const y = 2;
+"""
+        replace = editor.os.replace
+        failed = False
+
+        def race_then_fail(src, dst, **kwargs):
+            nonlocal failed
+            if dst == "b.js" and not failed:
+                failed = True
+                (self.root / "a.js").write_bytes(b"external write\n")
+                raise OSError("synthetic commit failure")
+            return replace(src, dst, **kwargs)
+
+        with patch.object(editor.os, "replace", race_then_fail):
+            result = self.patch(value)
+        self.assertEqual(result["executionState"], "COMPLETION_UNKNOWN")
+        self.assertEqual(result["rollback"], "UNKNOWN")
+        self.assertEqual((self.root / "a.js").read_bytes(), b"external write\n")
+
+    def test_patch_postmutation_evidence_failure_is_unknown(self):
+        value = """--- a/a.js
++++ b/a.js
+@@ -1 +1 @@
+-  const x = 10;
++  const x = 20;
+"""
+        original = evidence.check
+        calls = 0
+
+        def fail_after_mutation(settings, record):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise OSError("synthetic evidence failure")
+            return original(settings, record)
+
+        with patch.object(editor.task_evidence, "check", fail_after_mutation):
+            result = self.patch(value)
+        self.assertEqual(result["executionState"], "COMPLETION_UNKNOWN")
+        self.assertEqual(
+            (self.root / "a.js").read_bytes(), self.initial.replace(b"10", b"20")
+        )
+
+    def test_patch_explicit_binary_generated_vendor_and_large_limits(self):
+        (self.root / "binary.dat").write_bytes(b"before\0after\n")
+        (self.root / "large.txt").write_bytes(b"x" * (editor.MAX_FILE + 1))
+        cases = [
+            (
+                "EDIT_BINARY_FILE_UNSUPPORTED",
+                "--- a/binary.dat\n+++ b/binary.dat\n@@ -1 +1 @@\n-before\n+after\n",
+            ),
+            (
+                "EDIT_GENERATED_PATH_UNSUPPORTED",
+                "--- /dev/null\n+++ b/generated/output.js\n@@ -0,0 +1 @@\n+x\n",
+            ),
+            (
+                "EDIT_VENDOR_PATH_UNSUPPORTED",
+                "--- /dev/null\n+++ b/vendor/library.js\n@@ -0,0 +1 @@\n+x\n",
+            ),
+            (
+                "EDIT_FILE_TOO_LARGE",
+                "--- a/large.txt\n+++ b/large.txt\n@@ -1 +1 @@\n-x\n+y\n",
+            ),
+        ]
+        for code, value in cases:
+            with self.subTest(code=code):
+                result = self.patch(value)
+                self.assertEqual(result["code"], code, result)
+                self.assertEqual(result["executionState"], "NOT_STARTED")
 
     def test_file_operations_require_explicit_safe_paths_and_observations(self):
         self.assertEqual(
@@ -486,7 +698,6 @@ class ExactEdit(unittest.TestCase):
 
         for op in [
             "worktree_list",
-            "worktree_patch",
             "worktree_command",
             "worktree_integrity",
             "worktree_acceptance",
