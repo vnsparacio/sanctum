@@ -24,6 +24,7 @@ class WorkWorkspaceError(RuntimeError):
 STATE_SCHEMA = "sanctum-work-mode-task-workspace/v1"
 BRANCH_STATE_SCHEMA = "sanctum-work-mode-task-branch/v1"
 COMMIT_STATE_SCHEMA = "sanctum-work-mode-task-commit/v1"
+PULL_REQUEST_STATE_SCHEMA = "sanctum-work-mode-task-pull-request/v1"
 _TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 _ISSUE_ID = re.compile(r"[A-Z][A-Z0-9]*-[1-9][0-9]*")
 _OPERATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
@@ -101,12 +102,16 @@ class WorkWorkspaceManager:
         workspace_root: Path,
         state_root: Path,
         *,
+        github_executable: Path | None = None,
+        github_config_dir: Path | None = None,
         fault_injector: Callable[[str], None] | None = None,
     ) -> None:
         self.profiles = profiles
         self.repository_bindings = dict(repository_bindings)
         self.workspace_root = _real_directory(workspace_root, "workspace root")
         self.state_root = _real_directory(state_root, "workspace state root")
+        self.github_executable = github_executable
+        self.github_config_dir = github_config_dir
         self.fault_injector = fault_injector
         if (
             self.state_root == self.workspace_root
@@ -150,6 +155,61 @@ class WorkWorkspaceManager:
             raise WorkWorkspaceError("workspace Git operation unavailable") from exc
         if check and result.returncode != 0:
             raise WorkWorkspaceError("workspace Git operation refused")
+        return result
+
+    def _gh(
+        self, *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        executable = self.github_executable
+        config = self.github_config_dir
+        executable_path = (
+            executable.resolve(strict=False) if isinstance(executable, Path) else None
+        )
+        if (
+            not isinstance(executable, Path)
+            or not executable.is_absolute()
+            or executable.name != "gh"
+            or executable.is_symlink()
+            or not executable.is_file()
+            or not os.access(executable, os.X_OK)
+            or executable_path != executable
+            or executable.is_relative_to(self.workspace_root)
+        ):
+            raise WorkWorkspaceError("reviewed GitHub CLI is unavailable")
+        if (
+            not isinstance(config, Path)
+            or not config.is_absolute()
+            or config.is_symlink()
+            or not config.is_dir()
+            or config.resolve(strict=True) != config
+            or config.stat().st_mode & 0o077
+            or config == self.workspace_root
+            or config.is_relative_to(self.workspace_root)
+        ):
+            raise WorkWorkspaceError(
+                "private GitHub authentication directory is unavailable"
+            )
+        environment = {
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "HOME": "/nonexistent",
+            "GH_CONFIG_DIR": str(config),
+        }
+        try:
+            result = subprocess.run(
+                [str(executable), *arguments],
+                cwd=self.workspace_root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise WorkWorkspaceError("GitHub PR operation unavailable") from exc
+        if check and result.returncode != 0:
+            raise WorkWorkspaceError("GitHub PR operation refused")
         return result
 
     @staticmethod
@@ -242,6 +302,21 @@ class WorkWorkspaceManager:
         directory.mkdir(mode=0o700, exist_ok=True)
         directory.chmod(0o700)
         return directory / f"commit-{operation_id}.json"
+
+    def _pull_request_path(self, task_id: str, operation_id: Any) -> Path:
+        self._task_paths(task_id)
+        if type(operation_id) is not str or not _OPERATION_ID.fullmatch(operation_id):
+            raise WorkWorkspaceError("invalid pull-request operation identifier")
+        directory = self.operation_root / task_id
+        if directory.exists() and (
+            directory.is_symlink()
+            or not directory.is_dir()
+            or directory.resolve(strict=True).parent != self.operation_root
+        ):
+            raise WorkWorkspaceError("pull-request operation state mismatch")
+        directory.mkdir(mode=0o700, exist_ok=True)
+        directory.chmod(0o700)
+        return directory / f"pull-request-{operation_id}.json"
 
     @staticmethod
     def _private_state(path: Path) -> dict[str, Any] | None:
@@ -729,6 +804,305 @@ class WorkWorkspaceManager:
             receipt.update({"state": "applied", "commit": head, "reconciled": False})
             _atomic_private_json(receipt_path, receipt)
             return {"status": "applied", "commit": head, "paths": staged}
+
+    @staticmethod
+    def _validation_evidence(
+        profile: ProjectProfile, receipts: Any
+    ) -> list[dict[str, Any]]:
+        from sanctum_agents.work_validation import ValidationReceipt
+
+        if not isinstance(receipts, list) or not receipts:
+            raise WorkWorkspaceError("successful validation receipts are required")
+        evidence: dict[str, dict[str, Any]] = {}
+        for receipt in receipts:
+            if not isinstance(receipt, ValidationReceipt):
+                raise WorkWorkspaceError("validation receipt provenance is invalid")
+            result = receipt.result
+            if (
+                receipt.project_id != profile.project_id
+                or receipt.profile != profile.private_config_refs.validation
+                or receipt.command not in profile.validation_operations
+                or receipt.command in evidence
+                or result.get("ok") is not True
+                or result.get("code") != "OK"
+                or result.get("executionState") != "COMPLETED"
+                or result.get("exit_code") != 0
+                or type(result.get("stdout")) is not str
+                or type(result.get("stderr")) is not str
+            ):
+                raise WorkWorkspaceError("validation receipt does not prove success")
+            evidence[receipt.command] = {
+                "schema": receipt.as_dict()["schema"],
+                "project_id": receipt.project_id,
+                "profile": receipt.profile,
+                "command": receipt.command,
+                "code": result["code"],
+                "executionState": result["executionState"],
+                "exit_code": result["exit_code"],
+                "stdout_sha256": hashlib.sha256(result["stdout"].encode()).hexdigest(),
+                "stderr_sha256": hashlib.sha256(result["stderr"].encode()).hexdigest(),
+            }
+        if set(evidence) != set(profile.validation_operations):
+            raise WorkWorkspaceError(
+                "validation receipts do not cover the project profile"
+            )
+        return [evidence[command] for command in profile.validation_operations]
+
+    def _remote_task_head(self, profile: ProjectProfile, branch: str) -> str:
+        result = self._gh(
+            "api",
+            f"repos/{profile.repository}/git/ref/heads/{branch.replace('/', '%2F')}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise WorkWorkspaceError("approved task branch is not available on GitHub")
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise WorkWorkspaceError("GitHub task branch response is invalid") from exc
+        head = value.get("object", {}).get("sha") if isinstance(value, dict) else None
+        if type(head) is not str or not _COMMIT.fullmatch(head):
+            raise WorkWorkspaceError("GitHub task branch response is invalid")
+        return head
+
+    def _open_task_pull_request(
+        self, profile: ProjectProfile, branch: str, head: str
+    ) -> dict[str, Any] | None:
+        result = self._gh(
+            "pr",
+            "list",
+            "--repo",
+            profile.repository,
+            "--state",
+            "open",
+            "--head",
+            branch,
+            "--json",
+            "number,url,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isDraft,title,body",
+        )
+        try:
+            values = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise WorkWorkspaceError("GitHub PR response is invalid") from exc
+        if not isinstance(values, list):
+            raise WorkWorkspaceError("GitHub PR state is ambiguous")
+        if not values:
+            return None
+        owner = profile.repository.split("/", 1)[0]
+        matching = [
+            value
+            for value in values
+            if isinstance(value, dict)
+            and value.get("baseRefName") == profile.base_branch
+            and value.get("headRefName") == branch
+            and value.get("headRefOid") == head
+            and value.get("isDraft") is False
+            and isinstance(value.get("headRepository"), dict)
+            and value["headRepository"].get("nameWithOwner") == profile.repository
+            and isinstance(value.get("headRepositoryOwner"), dict)
+            and value["headRepositoryOwner"].get("login") == owner
+            and type(value.get("number")) is int
+            and type(value.get("url")) is str
+        ]
+        if len(values) != 1 or len(matching) != 1:
+            raise WorkWorkspaceError(
+                "open PR does not match the approved repository, base, and task head"
+            )
+        return matching[0]
+
+    @staticmethod
+    def _pull_request_body(
+        workspace: TaskWorkspace,
+        issue_identifier: str,
+        branch: str,
+        body: Any,
+        evidence: list[dict[str, Any]],
+    ) -> str:
+        if (
+            type(body) is not str
+            or not 20 <= len(body) <= 2400
+            or "\x00" in body
+            or body.strip() != body
+        ):
+            raise WorkWorkspaceError("PR body must be bounded non-empty text")
+        validation = json.dumps(evidence, indent=2, sort_keys=True)
+        rendered = (
+            f"{body}\n\n"
+            "## Sanctum Work Mode provenance\n\n"
+            f"- Issue: `{issue_identifier}`\n"
+            f"- Project: `{workspace.project_id}`\n"
+            f"- Task: `{workspace.task_id}`\n"
+            f"- Repository: `{workspace.repository}`\n"
+            f"- Head: `{branch}`\n"
+            f"- Base: `{workspace.base_branch}`\n\n"
+            "## Validation evidence\n\n"
+            f"```json\n{validation}\n```"
+        )
+        if len(rendered) > 4000:
+            raise WorkWorkspaceError("PR body and validation evidence are too large")
+        return rendered
+
+    def ensure_pull_request(
+        self,
+        workspace: TaskWorkspace,
+        title: Any,
+        body: Any,
+        validation_receipts: Any,
+        operation_id: Any,
+    ) -> Mapping[str, Any]:
+        """Create or update one validated PR for the exact profiled task branch."""
+        if (
+            type(title) is not str
+            or not 8 <= len(title) <= 120
+            or title.strip() != title
+            or "\n" in title
+            or "\r" in title
+        ):
+            raise WorkWorkspaceError("PR title must be one bounded summary line")
+        with self._locked(workspace.task_id):
+            profile, branch = self._require_branch(workspace)
+            branch_state = self._private_state(self._branch_path(workspace.task_id))
+            issue_identifier = (
+                branch_state.get("issue_identifier")
+                if isinstance(branch_state, dict)
+                else None
+            )
+            if type(issue_identifier) is not str:
+                raise WorkWorkspaceError("task branch state mismatch")
+            evidence = self._validation_evidence(profile, validation_receipts)
+            rendered_body = self._pull_request_body(
+                workspace, issue_identifier, branch, body, evidence
+            )
+            repository = self._binding(profile)
+            if self._base_commit(repository, profile) != workspace.base_commit:
+                raise WorkWorkspaceError(
+                    "approved base branch advanced after task start"
+                )
+            head = self._git(workspace.root, "rev-parse", "HEAD").stdout.strip()
+            if self._remote_task_head(profile, branch) != head:
+                raise WorkWorkspaceError(
+                    "GitHub task branch does not match the local committed head"
+                )
+            receipt_path = self._pull_request_path(workspace.task_id, operation_id)
+            intent = {
+                "schema": PULL_REQUEST_STATE_SCHEMA,
+                "operation_id": operation_id,
+                "project_id": profile.project_id,
+                "task_id": workspace.task_id,
+                "issue_identifier": issue_identifier,
+                "repository": profile.repository,
+                "base_branch": profile.base_branch,
+                "branch": branch,
+                "head": head,
+                "title": title,
+                "body": rendered_body,
+                "validation": evidence,
+            }
+            prior = self._private_state(receipt_path)
+            if prior is not None:
+                if any(prior.get(key) != value for key, value in intent.items()):
+                    raise WorkWorkspaceError(
+                        "operation identifier was used for a different PR request"
+                    )
+                reconciled = self._open_task_pull_request(profile, branch, head)
+                if (
+                    reconciled is not None
+                    and reconciled.get("title") == title
+                    and reconciled.get("body") == rendered_body
+                ):
+                    prior.update(
+                        {
+                            "state": "applied",
+                            "number": reconciled["number"],
+                            "url": reconciled["url"],
+                            "reconciled": True,
+                        }
+                    )
+                    _atomic_private_json(receipt_path, prior)
+                    return {
+                        "status": "already_applied",
+                        "number": reconciled["number"],
+                        "url": reconciled["url"],
+                        "base": profile.base_branch,
+                        "head": branch,
+                    }
+                raise WorkWorkspaceError(
+                    "pull-request result is unknown and was not replayed; operator review required"
+                )
+            receipt = {**intent, "state": "pending"}
+            _atomic_private_json(receipt_path, receipt)
+            existing = self._open_task_pull_request(profile, branch, head)
+            status = "updated"
+            if existing is not None:
+                if (
+                    existing.get("title") != title
+                    or existing.get("body") != rendered_body
+                ):
+                    result = self._gh(
+                        "pr",
+                        "edit",
+                        str(existing["number"]),
+                        "--repo",
+                        profile.repository,
+                        "--title",
+                        title,
+                        "--body",
+                        rendered_body,
+                        check=False,
+                    )
+                    if self.fault_injector:
+                        self.fault_injector("after_pull_request_update")
+                    reconciled = self._open_task_pull_request(profile, branch, head)
+                    if (
+                        result.returncode != 0
+                        or reconciled is None
+                        or reconciled.get("title") != title
+                        or reconciled.get("body") != rendered_body
+                    ):
+                        raise WorkWorkspaceError(
+                            "PR update result is unknown and was not replayed; operator review required"
+                        )
+                    existing = reconciled
+            else:
+                status = "created"
+                result = self._gh(
+                    "pr",
+                    "create",
+                    "--repo",
+                    profile.repository,
+                    "--base",
+                    profile.base_branch,
+                    "--head",
+                    branch,
+                    "--title",
+                    title,
+                    "--body",
+                    rendered_body,
+                    check=False,
+                )
+                if self.fault_injector:
+                    self.fault_injector("after_pull_request_create")
+                existing = self._open_task_pull_request(profile, branch, head)
+                if result.returncode != 0 or existing is None:
+                    raise WorkWorkspaceError(
+                        "PR creation result is unknown and was not replayed; operator review required"
+                    )
+            receipt.update(
+                {
+                    "state": "applied",
+                    "number": existing["number"],
+                    "url": existing["url"],
+                    "reconciled": False,
+                }
+            )
+            _atomic_private_json(receipt_path, receipt)
+            return {
+                "status": status,
+                "number": existing["number"],
+                "url": existing["url"],
+                "base": profile.base_branch,
+                "head": branch,
+            }
 
     def cleanup(self, project_id: str, task_id: str) -> bool:
         """Remove only the exact profiled task worktree; return false if absent."""
