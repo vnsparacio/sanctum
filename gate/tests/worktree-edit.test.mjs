@@ -19,11 +19,21 @@ function run(rows,{invoke,observeRead,egressOverride}={}){
  const work=createWorkMode({manifest,reasoner:{async invoke(request){requests.push(request);return rows[i++]??{kind:'ESCALATION',reason:'DONE'};}},authorize:allow,egress:egressOverride??egress,observeRead,verifyProtectedEvidence:syntheticProtection,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:async({scope,workspace,turn})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',digest:'a'.repeat(64),bytes:1},status:{ok:true,executionState:'COMPLETED',digest:'b'.repeat(64),bytes:1}}),invoke:async({proposal})=>{calls.push(proposal);return invoke?invoke(proposal):{ok:true,executionState:'COMPLETED',data:{text:'old'}};},evaluate:async()=>({passed:true}),onEvent:(kind,value)=>events.push({kind,...value})});
  return work.run({task:'synthetic',scope,capabilities:names.filter(x=>x!=='source_first_research')}).then(result=>({result,requests,events,calls}));
 }
-test('normal registered and generation surfaces require no raw patches or whole-file fallback',()=>{
- assert.ok(names.includes('worktree_edit'));for(const name of ['worktree_patch','worktree_create','worktree_delete','worktree_replace_file'])assert.ok(!names.includes(name));
- const request=workIntentRequest(specs,{terminalKinds:['ESCALATION']});assert.ok(!JSON.stringify(request).includes('worktree_patch'));
- assert.equal(validateWorkIntent(intent('worktree_patch',{patch:'diff'}),options).ok,false);
+test('normal registered and generation surfaces expose bounded edit and patch operations without whole-file fallback',()=>{
+ assert.ok(names.includes('worktree_edit'));assert.ok(names.includes('worktree_patch'));for(const name of ['worktree_create','worktree_delete','worktree_replace_file'])assert.ok(!names.includes(name));
+ const request=workIntentRequest(specs,{terminalKinds:['ESCALATION']});assert.ok(JSON.stringify(request).includes('worktree_patch'));
+ assert.equal(validateWorkIntent(intent('worktree_patch',{patch:'diff'}),options).ok,true);
  assert.equal(manifest.byName.worktree_edit.policy.effect,'MUTATION');assert.deepEqual(manifest.byName.worktree_edit.policy.repairRules,[]);
+ assert.equal(manifest.byName.worktree_patch.policy.effect,'MUTATION');assert.deepEqual(manifest.byName.worktree_patch.policy.repairRules,[]);
+});
+test('bounded unified diff survives semantic transport and task binding exactly',()=>{
+ const patch='--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+added\n';
+ const checked=validateWorkIntent(intent('worktree_patch',{patch}),options);assert.equal(checked.ok,true);
+ const proposal=bindWorkIntent(checked,{scope,proposalId:'p',requestId:'r',turn:0,reasoner:'PRIVATE_LEAD',specDigests:{worktree_patch:manifest.byName.worktree_patch.digest}});
+ const validation=prepare('worktree_patch',proposal.arguments,compile(workModeTools));assert.equal(validation.ok,true);
+ assert.deepEqual(normalizeWorkspacePacket('worktree_patch',validation.params),{task_id:scope,patch});
+ assert.equal(validateWorkIntent(intent('worktree_patch',{patch:''}),options).ok,false);
+ assert.equal(validateWorkIntent(intent('worktree_patch',{patch:'x'.repeat(48001)}),options).ok,false);
 });
 test('semantic transport, binding, reliability and signed packet preserve exact strings',()=>{
  const args={path:'a.js',old_text:' \t{ "雪": "\\n" }\r\n\n',new_text:'\n\t  {"quote":"\\\""}\r\n '};

@@ -1546,6 +1546,29 @@
     }
   },
   {
+    "name": "worktree_patch",
+    "description": "Apply one bounded text-only unified diff across existing and new files. Context must match exactly once at the declared position; fuzzy matching, binary files, generated output, vendor trees, oversized files, deletes, and renames are refused. The Mac validates every path and candidate before mutation, generates the authority diff, and rolls back a partial commit.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "patch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48000
+        }
+      },
+      "required": [
+        "task_id",
+        "patch"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "worktree_command",
     "description": "Run one owner-profile command operation inside the pinned network-disabled Work Mode container. No command string, arguments, environment, path, mount or network setting is accepted.",
     "parameters": {
