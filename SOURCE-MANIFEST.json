@@ -365,6 +365,7 @@
   "sanctum_agents/supervisor.py": "0714f1065badb8b0a4ae904a67c66b881c7e6342a3a4f051d93edfa4f1ca0ab5",
   "sanctum_agents/symphony_supervisor.py": "baa87674d6a1fa9ed04c177c75e7704b099bb9afea6ea5e51e6af2effb8122d6",
   "sanctum_agents/validation.py": "104996fd8b5100533461140d3415925a5c5465d0e29321a3c68564809eeb318a",
+  "sanctum_agents/work_projects.py": "612027368be45e437896743465f9abe9847b50fbabf95065f4daa32f582ffaaf",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
   "scripts/audit.py": "f24198512c9b7b3f3c682a0a3d1e3b68b623575c3d7d30662c9e299d30bcbda1",
@@ -391,5 +392,6 @@
   "tests/test_git_control_plane.py": "ba93e39c60d46175c15907af6f99774299668d60fd50dec6301040ce3057f7b6",
   "tests/test_release.py": "78aa98e6f47a459d55044e97e4816df2b428b36c28f2b59cac214cc66ad3e769",
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332",
-  "tests/test_validation_runner.py": "7e75b0bd2f2b35d6c8a52262f3ccc180174e2e1aa496dd25c66eb3a2791ac660"
+  "tests/test_validation_runner.py": "7e75b0bd2f2b35d6c8a52262f3ccc180174e2e1aa496dd25c66eb3a2791ac660",
+  "tests/test_work_projects.py": "bed809de8737fe71e6730b977bc581333c2b6a0c17507aea387a3fdf6fd79e0a"
 }
