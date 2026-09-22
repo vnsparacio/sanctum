@@ -150,6 +150,35 @@ class HostValidationRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "not approved"):
             self.runner.run("TTE-14", "TTE-14", "shell", "validation-v1")
 
+    def test_operator_blocker_is_bounded_private_and_replayable(self):
+        first = self.runner.report_operator_blocker(
+            "TTE-14",
+            "TTE-14",
+            "owner_prerequisite_missing",
+            "owner-prerequisite-v1",
+        )
+        receipt_path = next((self.validation_state / "blockers").rglob("*.json"))
+        first_receipt = json.loads(receipt_path.read_text())
+        second = self.runner.report_operator_blocker(
+            "TTE-14",
+            "TTE-14",
+            "owner_prerequisite_missing",
+            "owner-prerequisite-v1",
+        )
+        second_receipt = json.loads(receipt_path.read_text())
+        self.assertEqual("reported", first["status"])
+        self.assertEqual(first["receipt_id"], second["receipt_id"])
+        self.assertEqual("operator_action_required", second_receipt["event"])
+        self.assertGreaterEqual(
+            second_receipt["reported_at"], first_receipt["reported_at"]
+        )
+        self.assertEqual(0o600, receipt_path.stat().st_mode & 0o777)
+        self.assertNotIn("details", second_receipt)
+        with self.assertRaisesRegex(ValidationError, "not approved"):
+            self.runner.report_operator_blocker(
+                "TTE-14", "TTE-14", "arbitrary", "different-operation"
+            )
+
     def test_operation_id_cannot_be_reused_after_workspace_changes(self):
         with patch.object(
             self.runner,

@@ -34,9 +34,11 @@ and the mandatory Human Review stop.
 `sanctum_agents.symphony_supervisor` launches the unmodified external Symphony
 engineering-preview binary behind a Sanctum-owned process-group supervisor. It
 uses Symphony's loopback state API while keeping a private persistent ledger of
-issue first-seen time and per-session high-water marks. This makes the limits
-span normal continuation sessions and service restarts rather than relying on
-Symphony's per-worker `max_turns` alone.
+issue first-seen time and per-attempt high-water marks. High-water marks avoid
+double-counting updates within one attempt, while counters are summed when
+Symphony starts a continuation attempt or the service restarts. This makes the
+limits span normal continuation attempts and service restarts rather than
+relying on Symphony's per-worker `max_turns` alone.
 
 The standard implementation envelope is one concurrent issue, six hours total
 elapsed time, 40 aggregate turns, 8,000,000 aggregate reported tokens, three
@@ -50,7 +52,10 @@ limit.
 
 Symphony's blocked state is also terminal for the current supervisor
 invocation. A deterministic environment/control-plane blocker is recorded
-once, requests operator input, and cannot consume continuation or retry loops.
+once in Linear and sent through the bounded `report_operator_blocker` host tool.
+The supervisor accepts only a content-minimized, fresh private receipt for the
+active issue, records `OWNER_ACTION_REQUIRED`, and terminates before Symphony
+can schedule another continuation loop.
 
 Start only through:
 

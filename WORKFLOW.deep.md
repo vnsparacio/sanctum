@@ -534,11 +534,13 @@ If reconciliation remains unknown, record one blocker and stop.
 # Deterministic blockers
 
 An unchanged environment or control-plane blocker is terminal for the current
-supervisor invocation. Record it once in the workpad, then request operator
-input with the exact blocking condition so Symphony enters its blocked state.
-Do not spend continuation turns or retry cycles repeating the same failed Git
-operation. The outer supervisor stops when Symphony reports operator action is
-required; only a later operator-started invocation may resume.
+supervisor invocation. Record the exact blocking condition once in the workpad,
+then call `report_operator_blocker` with a stable operation ID and the narrowest
+approved blocker code. Do not include free-form details in that host signal.
+After the tool reports success, stop. Do not spend continuation turns or retry
+cycles repeating the same prerequisite check or failed Git operation. The outer
+supervisor records `OWNER_ACTION_REQUIRED` and terminates the service; only a
+later operator-started invocation may resume.
 
 # Linear handoff
 

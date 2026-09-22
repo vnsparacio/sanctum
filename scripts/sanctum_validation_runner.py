@@ -17,7 +17,7 @@ from sanctum_agents.validation import (
     ValidationError,
 )  # noqa: E402
 
-TOOL = {
+VALIDATION_TOOL = {
     "name": "run_validation_profile",
     "description": "Run one reviewed validation profile in the leased issue workspace.",
     "inputSchema": {
@@ -43,6 +43,47 @@ TOOL = {
         "idempotentHint": True,
     },
 }
+
+BLOCKER_TOOL = {
+    "name": "report_operator_blocker",
+    "description": (
+        "Signal one deterministic owner, environment, or control-plane blocker "
+        "after recording it in the Linear workpad."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "issue_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[1-9][0-9]*$"},
+            "workspace_id": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9]*-[1-9][0-9]*$",
+            },
+            "blocker_code": {
+                "type": "string",
+                "enum": [
+                    "owner_prerequisite_missing",
+                    "environment_prerequisite_missing",
+                    "control_plane_reconciliation_required",
+                ],
+            },
+            "operation_id": {"type": "string", "minLength": 1, "maxLength": 80},
+        },
+        "required": [
+            "issue_id",
+            "workspace_id",
+            "blocker_code",
+            "operation_id",
+        ],
+        "additionalProperties": False,
+    },
+    "annotations": {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    },
+}
+
+TOOLS = [VALIDATION_TOOL, BLOCKER_TOOL]
 
 
 def runner() -> HostValidationRunner:
@@ -92,20 +133,29 @@ def serve_mcp() -> int:
             elif method == "ping":
                 response(identifier, {})
             elif method == "tools/list":
-                response(identifier, {"tools": [TOOL]})
+                response(identifier, {"tools": TOOLS})
             elif method == "tools/call":
                 params = request.get("params", {})
-                if params.get("name") != TOOL["name"] or not isinstance(
+                name = params.get("name")
+                if name not in {tool["name"] for tool in TOOLS} or not isinstance(
                     params.get("arguments"), dict
                 ):
                     raise ValidationError("unsupported validation tool request")
                 arguments = params["arguments"]
-                value = runner().run(
-                    arguments.get("issue_id"),
-                    arguments.get("workspace_id"),
-                    arguments.get("profile"),
-                    arguments.get("operation_id"),
-                )
+                if name == VALIDATION_TOOL["name"]:
+                    value = runner().run(
+                        arguments.get("issue_id"),
+                        arguments.get("workspace_id"),
+                        arguments.get("profile"),
+                        arguments.get("operation_id"),
+                    )
+                else:
+                    value = runner().report_operator_blocker(
+                        arguments.get("issue_id"),
+                        arguments.get("workspace_id"),
+                        arguments.get("blocker_code"),
+                        arguments.get("operation_id"),
+                    )
                 response(
                     identifier,
                     {

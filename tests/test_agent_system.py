@@ -94,6 +94,7 @@ from sanctum_agents.symphony_supervisor import (
     classify_termination,
     evaluate_snapshot,
     load_continuations,
+    operator_blocker_violations,
     preflight,
     resume_from_incident,
     supervise,
@@ -1040,6 +1041,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("stall_timeout_ms: 900000", workflow)
         self.assertIn("dashboard_enabled: false", workflow)
         self.assertIn("run_validation_profile", workflow)
+        self.assertIn("report_operator_blocker", workflow)
         self.assertIn('model="gpt-6-astra"', deep_workflow)
         self.assertIn("agent-deep", deep_workflow)
         self.assertIn("max_turns: 30", deep_workflow)
@@ -1065,13 +1067,20 @@ class ImplementationLifecycleTests(unittest.TestCase):
 
 
 class SymphonySupervisorTests(unittest.TestCase):
-    def running(self, session: str, turns: int, tokens: int) -> dict[str, object]:
+    def running(
+        self,
+        session: str,
+        turns: int,
+        tokens: int,
+        *,
+        started_at: str = "1970-01-01T00:01:40Z",
+    ) -> dict[str, object]:
         return {
             "issue_identifier": "SAN-7",
             "session_id": session,
             "turn_count": turns,
             "tokens": {"total_tokens": tokens},
-            "started_at": "1970-01-01T00:01:40Z",
+            "started_at": started_at,
             "last_event_at": "1970-01-01T00:03:15Z",
         }
 
@@ -1111,7 +1120,7 @@ class SymphonySupervisorTests(unittest.TestCase):
         self.assertEqual(["concurrency_budget"], [item.reason for item in violations])
         self.assertEqual("service", violations[0].issue_identifier)
 
-    def test_cumulative_counters_are_not_summed_across_continuation_sessions(self):
+    def test_cumulative_counters_use_high_water_within_one_attempt(self):
         ledger: dict[str, object] = {"issues": {}}
         first = self.evaluate(
             {"running": [self.running("one", 4, 300)], "retrying": []}, ledger
@@ -1124,6 +1133,44 @@ class SymphonySupervisorTests(unittest.TestCase):
         record = ledger["issues"]["SAN-7"]
         self.assertEqual(5, _ledger_totals(record, 200)["turn_count"])
         self.assertEqual(400, _ledger_totals(record, 200)["tokens"])
+
+    def test_cumulative_counters_sum_continuation_attempts_in_one_runtime(self):
+        ledger: dict[str, object] = {"issues": {}}
+        first = self.evaluate(
+            {
+                "running": [
+                    self.running(
+                        "one",
+                        4,
+                        300,
+                        started_at="1970-01-01T00:01:40Z",
+                    )
+                ],
+                "retrying": [],
+            },
+            ledger,
+        )
+        self.assertEqual([], first)
+        second = self.evaluate(
+            {
+                "running": [
+                    self.running(
+                        "two",
+                        5,
+                        300,
+                        started_at="1970-01-01T00:03:30Z",
+                    )
+                ],
+                "retrying": [],
+            },
+            ledger,
+        )
+        self.assertEqual(
+            {"turns_budget", "tokens_budget"}, {item.reason for item in second}
+        )
+        record = ledger["issues"]["SAN-7"]
+        self.assertEqual(9, _ledger_totals(record, 200)["turn_count"])
+        self.assertEqual(600, _ledger_totals(record, 200)["tokens"])
 
     def test_total_turn_and_token_caps_span_supervisor_runtimes(self):
         ledger: dict[str, object] = {"issues": {}}
@@ -1152,8 +1199,9 @@ class SymphonySupervisorTests(unittest.TestCase):
         }
         self.evaluate({"running": [entry], "retrying": []}, ledger)
         runtime = ledger["issues"]["SAN-7"]["runtimes"]["runtime-one"]
-        self.assertEqual(20, runtime["input_tokens"])
-        self.assertEqual(10, runtime["output_tokens"])
+        attempt = runtime["attempts"]["1970-01-01T00:01:40Z"]
+        self.assertEqual(20, attempt["input_tokens"])
+        self.assertEqual(10, attempt["output_tokens"])
 
     def test_legacy_session_ledger_uses_cumulative_high_water_marks(self):
         record = {
@@ -1284,6 +1332,34 @@ class SymphonySupervisorTests(unittest.TestCase):
             self.assertEqual(
                 [],
                 validation_environment_violations(
+                    Path(root), snapshot, launched_at=2_000_000_000
+                ),
+            )
+
+    def test_fresh_operator_blocker_stops_without_poisoning_later_runs(self):
+        with tempfile.TemporaryDirectory() as root:
+            blockers = Path(root) / "blockers" / "SAN-7"
+            blockers.mkdir(parents=True)
+            (blockers / "owner-prerequisite.json").write_text(
+                json.dumps(
+                    {
+                        "issue_id": "SAN-7",
+                        "event": "operator_action_required",
+                        "state": "reported",
+                        "reported_at": "2026-09-21T00:00:00+00:00",
+                    }
+                )
+            )
+            snapshot = {"running": [self.running("one", 1, 1)], "retrying": []}
+            violations = operator_blocker_violations(
+                Path(root), snapshot, launched_at=0
+            )
+            self.assertEqual(1, len(violations))
+            self.assertEqual("operator_action_required", violations[0].reason)
+            self.assertEqual("OWNER_ACTION_REQUIRED", violations[0].termination_class)
+            self.assertEqual(
+                [],
+                operator_blocker_violations(
                     Path(root), snapshot, launched_at=2_000_000_000
                 ),
             )
@@ -1914,6 +1990,7 @@ class SymphonyRecoveryTests(unittest.TestCase):
                     "issue_identifier": self.issue,
                     "turn_count": 43,
                     "tokens": {"total_tokens": 8100000},
+                    "started_at": "1970-01-01T00:00:01Z",
                 }
             ],
             "retrying": [],
