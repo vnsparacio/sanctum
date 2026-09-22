@@ -64,7 +64,7 @@ codex:
     -c "mcp_servers.sanctum_validation.command=\"$SANCTUM_VALIDATION_RUNNER_PYTHON\""
     -c "mcp_servers.sanctum_validation.args=[\"$SANCTUM_VALIDATION_RUNNER_SCRIPT\",\"mcp\"]"
     -c 'mcp_servers.sanctum_validation.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_VALIDATION_STATE"]'
-    -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile"]'
+    -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]'
     -c 'mcp_servers.sanctum_validation.default_tools_approval_mode="approve"'
     app-server
   approval_policy: never

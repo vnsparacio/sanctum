@@ -1042,6 +1042,10 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("dashboard_enabled: false", workflow)
         self.assertIn("run_validation_profile", workflow)
         self.assertIn("report_operator_blocker", workflow)
+        self.assertIn(
+            'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]',
+            workflow,
+        )
         self.assertIn('model="gpt-6-astra"', deep_workflow)
         self.assertIn("agent-deep", deep_workflow)
         self.assertIn("max_turns: 30", deep_workflow)
