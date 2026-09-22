@@ -26,6 +26,11 @@ export function normalizeWorkspacePacket(name,args){
  return {...args};
 }
 
+function commandEvidence(operation,response){
+ const value={operation,commandCode:response?.code,executionState:response?.executionState,outputDigest:response?.output_digest,outputBytes:response?.output_bytes,elapsedMs:response?.elapsed_ms,containerAbsent:response?.container_absent};
+ return Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined));
+}
+
 export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now()}={}){
  if(!api||!base||!settings||!Buffer.isBuffer(key)||typeof remote!=='function')throw Error('work_command_config');
  const sessions=new Map();let active=0;
@@ -95,8 +100,9 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      if(!operation)return {ok:false,error:{code:'UNADVERTISED_CAPABILITY'},executionState:'NOT_STARTED'};
      if(operation==='worktree_command'){
        const response=await commandBroker.execute({workspace:task.id,operation:args.operation,signal});
-       if(response?.ok!==true)return {ok:false,error:{code:response?.code??'COMMAND_FAILED',diagnostic:String(response?.output??'').slice(0,12000)},executionState:response?.executionState??'COMPLETED',verifier:'REJECTED',truncated:response?.code==='OUTPUT_LIMIT'};
-       return {ok:true,data:response,executionState:response.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};
+       const evidence=commandEvidence(args.operation,response);
+       if(response?.ok!==true)return {ok:false,error:{code:response?.code??'COMMAND_FAILED',diagnostic:String(response?.output??'').slice(0,12000)},executionState:response?.executionState??'COMPLETED',verifier:'REJECTED',truncated:response?.code==='OUTPUT_LIMIT',commandEvidence:evidence};
+       return {ok:true,data:response,executionState:response.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false,commandEvidence:evidence};
      }
      const packet=normalizeWorkspacePacket(name,args);
      const response=await call(task,operation,packet,signal);
