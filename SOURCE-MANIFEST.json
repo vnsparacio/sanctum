@@ -366,6 +366,7 @@
   "sanctum_agents/symphony_supervisor.py": "baa87674d6a1fa9ed04c177c75e7704b099bb9afea6ea5e51e6af2effb8122d6",
   "sanctum_agents/validation.py": "104996fd8b5100533461140d3415925a5c5465d0e29321a3c68564809eeb318a",
   "sanctum_agents/work_projects.py": "612027368be45e437896743465f9abe9847b50fbabf95065f4daa32f582ffaaf",
+  "sanctum_agents/work_validation.py": "a9c43d5e8281576f5a3e6a8fd7437d40e5815d4730760c93ae7098fa65f6fd7d",
   "sanctum_agents/work_workspaces.py": "fd13a7ac80cb7479c03b34ea869226a2fa751c14d18786a99baace0954d0232f",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
@@ -395,5 +396,6 @@
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332",
   "tests/test_validation_runner.py": "7e75b0bd2f2b35d6c8a52262f3ccc180174e2e1aa496dd25c66eb3a2791ac660",
   "tests/test_work_projects.py": "bed809de8737fe71e6730b977bc581333c2b6a0c17507aea387a3fdf6fd79e0a",
+  "tests/test_work_validation.py": "ec2c0990b10f5222de7ccc94974c8e2bb76d8604dba7e0c164bc69a280292bb3",
   "tests/test_work_workspaces.py": "65b363e7081d8f5e5c4f9f5950ef795e01a8a2d9f0cdfd43f707552a4fe645ac"
 }
