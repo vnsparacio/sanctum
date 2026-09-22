@@ -86,6 +86,7 @@ from sanctum_agents.symphony_supervisor import (
     preflight,
     resume_from_incident,
     supervise,
+    validation_environment_violations,
 )
 from sanctum_agents.triage import (
     capture_live_snapshot,
@@ -1179,6 +1180,37 @@ class SymphonySupervisorTests(unittest.TestCase):
         for expected, (reason, detail) in cases.items():
             with self.subTest(expected=expected):
                 self.assertEqual(expected, classify_termination(reason, detail))
+
+    def test_fresh_failed_validation_preflight_stops_supervisor_run(self):
+        with tempfile.TemporaryDirectory() as root:
+            receipts = Path(root) / "receipts" / "SAN-7"
+            receipts.mkdir(parents=True)
+            (receipts / "normal-code-check.json").write_text(
+                json.dumps(
+                    {
+                        "issue_id": "SAN-7",
+                        "state": "completed",
+                        "requested_at": "2026-09-21T00:00:00+00:00",
+                        "events": [
+                            "validation_requested",
+                            "environment_preflight_failed",
+                        ],
+                    }
+                )
+            )
+            snapshot = {"running": [self.running("one", 1, 1)], "retrying": []}
+            violations = validation_environment_violations(
+                Path(root), snapshot, launched_at=0
+            )
+            self.assertEqual(1, len(violations))
+            self.assertEqual("SANDBOX", violations[0].termination_class)
+            self.assertEqual("validation_environment_preflight", violations[0].reason)
+            self.assertEqual(
+                [],
+                validation_environment_violations(
+                    Path(root), snapshot, launched_at=2_000_000_000
+                ),
+            )
 
     def test_completed_issue_ledger_is_eventually_removed(self):
         ledger = {

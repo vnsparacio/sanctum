@@ -104,6 +104,47 @@ def _parse_time(value: Any) -> float | None:
         return None
 
 
+def validation_environment_violations(
+    validation_state: Path, snapshot: dict[str, Any], *, launched_at: float
+) -> list[SymphonyViolation]:
+    """Stop a run after its own host validation preflight fails."""
+    violations: list[SymphonyViolation] = []
+    active = snapshot.get("running", []) + snapshot.get("retrying", [])
+    for entry in active:
+        identifier = entry.get("issue_identifier")
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[A-Z][A-Z0-9]*-[1-9][0-9]*", identifier
+        ):
+            continue
+        receipt_dir = validation_state / "receipts" / identifier
+        for path in receipt_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                receipt = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(receipt, dict)
+                and isinstance(receipt.get("events"), list)
+                and receipt.get("issue_id") == identifier
+                and receipt.get("state") == "completed"
+                and (_parse_time(receipt.get("requested_at")) or 0) >= launched_at
+                and "environment_preflight_failed" in receipt.get("events", [])
+            ):
+                violations.append(
+                    SymphonyViolation(
+                        identifier,
+                        "validation_environment_preflight",
+                        1.0,
+                        0.0,
+                        TerminationClass.SANDBOX.value,
+                    )
+                )
+                break
+    return violations
+
+
 def evaluate_snapshot(
     snapshot: dict[str, Any],
     ledger: dict[str, Any],
@@ -776,6 +817,7 @@ def supervise(
             str(port),
             checked["workflow"],
         ]
+        launched_at = time.time()
         process = subprocess.Popen(
             command,
             cwd=repository,
@@ -846,6 +888,11 @@ def supervise(
                             max_turns=role.max_turns,
                             max_tokens=role.max_tokens,
                             max_retries=role.max_retries,
+                        )
+                        violations.extend(
+                            validation_environment_violations(
+                                validation_state, snapshot, launched_at=launched_at
+                            )
                         )
                         _save_json(ledger_path, ledger)
                         now = time.time()
