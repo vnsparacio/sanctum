@@ -802,6 +802,15 @@ def _fetch_state(port: int, timeout: float) -> dict[str, Any]:
     return payload
 
 
+def _state_api_grace_seconds(config: AgentConfig, state_api_ready: bool) -> float:
+    key = (
+        "state_stall_grace_seconds"
+        if state_api_ready
+        else "state_startup_grace_seconds"
+    )
+    return float(config.symphony[key])
+
+
 def _ensure_port_available(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
@@ -914,6 +923,7 @@ def supervise(
             reasoning_effort=checked["reasoning_effort"],
         )
         unavailable_since: float | None = None
+        state_api_ready = False
         warning_events: set[tuple[str, str]] = set()
         seen_sessions: set[tuple[str, str]] = set()
         turn_high_water: dict[str, int] = {}
@@ -936,16 +946,20 @@ def supervise(
                             port, config.symphony["state_timeout_seconds"]
                         )
                         unavailable_since = None
+                        state_api_ready = True
                     except RuntimeError:
                         unavailable_since = unavailable_since or time.monotonic()
-                        if time.monotonic() - unavailable_since <= 30:
+                        grace_seconds = _state_api_grace_seconds(
+                            config, state_api_ready
+                        )
+                        if time.monotonic() - unavailable_since <= grace_seconds:
                             continue
                         violations = [
                             SymphonyViolation(
                                 "service",
                                 "state_api_stall",
                                 time.monotonic() - unavailable_since,
-                                30,
+                                grace_seconds,
                                 TerminationClass.ENVIRONMENT.value,
                             )
                         ]

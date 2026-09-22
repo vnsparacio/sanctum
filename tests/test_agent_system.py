@@ -88,6 +88,7 @@ from sanctum_agents.symphony_supervisor import (
     _ledger_epoch_sha256,
     _ledger_totals,
     _sanitized_supervisor_environment,
+    _state_api_grace_seconds,
     classify_termination,
     evaluate_snapshot,
     load_continuations,
@@ -177,7 +178,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
         self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
         self.assertEqual(5, config.symphony["max_concurrency"])
+        self.assertEqual(120, config.symphony["state_startup_grace_seconds"])
+        self.assertEqual(30, config.symphony["state_stall_grace_seconds"])
         validate_model_catalog(config, catalog())
+
+    def test_state_api_startup_and_runtime_grace_are_separate(self):
+        config = load_config(CONFIG)
+
+        self.assertEqual(120, _state_api_grace_seconds(config, False))
+        self.assertEqual(30, _state_api_grace_seconds(config, True))
 
     def test_unavailable_model_has_no_fallback(self):
         with self.assertRaisesRegex(ConfigError, "configured model unavailable"):

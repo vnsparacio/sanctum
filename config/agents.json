@@ -115,6 +115,8 @@
     "state_port": 7788,
     "poll_seconds": 2,
     "state_timeout_seconds": 2,
+    "state_startup_grace_seconds": 120,
+    "state_stall_grace_seconds": 30,
     "output_limit_bytes": 67108864,
     "budget_warning_ratio": 0.8
   }
