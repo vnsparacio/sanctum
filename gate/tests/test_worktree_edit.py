@@ -33,7 +33,7 @@ class ExactEdit(unittest.TestCase):
             "protected": ["oracle.test.js"],
             "mutable": ["a.js", "b.js"],
             "mutable_tests": [],
-            "allow_new": False,
+            "allow_new": True,
             "acceptance": None,
         }
         self.initial = b"  const x = 10;\n\treturn x;\n"
@@ -75,6 +75,30 @@ class ExactEdit(unittest.TestCase):
             **kw,
         )
 
+    def fileop(self, operation, path, **arguments):
+        return editor.apply(
+            self.settings,
+            self.record,
+            {"operation": operation, "path": path, **arguments},
+        )
+
+    def assert_diff_receipt(self, result):
+        directory = evidence.store_root(self.settings) / self.record["workspace_id"]
+        diff = (
+            directory / f"edit-{result['receipt']['workspace_generation']}.diff"
+        ).read_bytes()
+        self.assertEqual(
+            result["receipt"]["canonical_diff_digest"], hashlib.sha256(diff).hexdigest()
+        )
+        subprocess.run(
+            ["/usr/bin/git", "apply", "--reverse", "--check", "-"],
+            cwd=self.root,
+            input=diff,
+            check=True,
+            capture_output=True,
+        )
+        return diff
+
     def rejected(self, code, **kwargs):
         before = {p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file()}
         result = self.edit(**kwargs)
@@ -106,6 +130,107 @@ class ExactEdit(unittest.TestCase):
         self.assertEqual(
             evidence.check(self.settings, self.record)["integrity"], "PASS"
         )
+
+    def test_create_delete_and_move_with_host_diffs(self):
+        created = self.fileop("create", "created.js", new_text="export const n = 1;\n")
+        self.assertTrue(created["ok"], created)
+        self.assertEqual(
+            (self.root / "created.js").read_text(), "export const n = 1;\n"
+        )
+        self.assertIn(b"created.js", self.assert_diff_receipt(created))
+
+        self.read("created.js")
+        moved = self.fileop("move", "created.js", destination="nested.js")
+        self.assertTrue(moved["ok"], moved)
+        self.assertFalse((self.root / "created.js").exists())
+        self.assertEqual((self.root / "nested.js").read_text(), "export const n = 1;\n")
+        move_diff = self.assert_diff_receipt(moved)
+        self.assertIn(b"created.js", move_diff)
+        self.assertIn(b"nested.js", move_diff)
+
+        self.read("nested.js")
+        deleted = self.fileop("delete", "nested.js")
+        self.assertTrue(deleted["ok"], deleted)
+        self.assertFalse((self.root / "nested.js").exists())
+        self.assertIn(b"nested.js", self.assert_diff_receipt(deleted))
+
+        empty = self.fileop("create", "empty.js", new_text="")
+        self.assertTrue(empty["ok"], empty)
+        self.assertEqual((self.root / "empty.js").read_bytes(), b"")
+        self.assert_diff_receipt(empty)
+
+    def test_file_operations_require_explicit_safe_paths_and_observations(self):
+        self.assertEqual(
+            self.fileop("delete", "a.js")["code"], "EDIT_SOURCE_NOT_OBSERVED"
+        )
+        self.assertEqual(
+            self.fileop("move", "a.js", destination="moved.js")["code"],
+            "EDIT_SOURCE_NOT_OBSERVED",
+        )
+        self.assertEqual(
+            self.fileop("create", "../escape.js", new_text="x")["code"],
+            "EDIT_PATH_INVALID",
+        )
+        self.assertEqual(
+            self.fileop("create", "oracle.test.js", new_text="x")["code"],
+            "EDIT_PROTECTED_INPUT",
+        )
+        self.read("oracle.test.js")
+        self.assertEqual(
+            self.fileop("delete", "oracle.test.js")["code"],
+            "EDIT_PROTECTED_INPUT",
+        )
+        self.assertEqual(
+            self.fileop("move", "oracle.test.js", destination="oracle-copy.test.js")[
+                "code"
+            ],
+            "EDIT_PROTECTED_INPUT",
+        )
+        outside = self.base / "outside-create"
+        outside.mkdir()
+        (self.root / "linked").symlink_to(outside)
+        self.assertEqual(
+            self.fileop("create", "linked/escape.js", new_text="x")["code"],
+            "EDIT_PROTECTED_INPUT",
+        )
+        self.assertFalse((outside / "escape.js").exists())
+
+    def test_file_operation_duplicate_destinations_never_overwrite(self):
+        before = (self.root / "b.js").read_bytes()
+        duplicate = self.fileop("create", "b.js", new_text="replacement")
+        self.assertEqual(duplicate["code"], "EDIT_DESTINATION_EXISTS")
+        case_duplicate = self.fileop("create", "B.JS", new_text="replacement")
+        self.assertEqual(case_duplicate["code"], "EDIT_PROTECTED_INPUT")
+        self.read("a.js")
+        duplicate = self.fileop("move", "a.js", destination="b.js")
+        self.assertEqual(duplicate["code"], "EDIT_DESTINATION_EXISTS")
+        self.assertEqual((self.root / "b.js").read_bytes(), before)
+        self.assertEqual((self.root / "a.js").read_bytes(), self.initial)
+
+    def test_case_alias_cannot_bypass_existing_file_scope(self):
+        self.assertTrue(
+            editor.protected_or_disallowed(
+                self.contract, {"private.js": {"kind": "file"}}, "PRIVATE.JS"
+            )
+        )
+
+    def test_file_operation_post_mutation_failure_is_unknown(self):
+        original = evidence.check
+        calls = 0
+
+        def fail_after_mutation(settings, record):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise OSError("synthetic private state failure")
+            return original(settings, record)
+
+        with patch.object(
+            editor.task_evidence, "check", side_effect=fail_after_mutation
+        ):
+            result = self.fileop("create", "uncertain.js", new_text="created\n")
+        self.assertEqual(result["executionState"], "COMPLETION_UNKNOWN")
+        self.assertTrue((self.root / "uncertain.js").exists())
 
     def test_multiline_and_exact_leading_trailing(self):
         self.read()
@@ -260,6 +385,10 @@ class ExactEdit(unittest.TestCase):
             {},
             {"path": "a.js", "old_text": "", "new_text": "x"},
             {"path": "a.js", "old_text": "10", "new_text": "x", "edits": []},
+            {"operation": "create", "path": "new.js"},
+            {"operation": "delete", "path": "a.js", "new_text": "x"},
+            {"operation": "move", "path": "a.js"},
+            {"operation": "unknown", "path": "a.js"},
         ]:
             self.assertEqual(
                 editor.apply(self.settings, self.record, args)["code"],

@@ -37,6 +37,23 @@ test('semantic transport, binding, reliability and signed packet preserve exact 
  assert.equal(validateWorkIntent(intent('worktree_edit',{...args,new_text:''}),options).ok,true);
  assert.equal(validateWorkIntent(intent('worktree_edit',{...args,edits:[]}),options).ok,false);
 });
+test('bounded create delete and move intents preserve only repository-relative inputs',()=>{
+ for(const args of [
+  {operation:'create',path:'src/new.js',new_text:'export const value = 1;\n'},
+  {operation:'delete',path:'src/old.js'},
+  {operation:'move',path:'src/old.js',destination:'test/old.test.js'},
+ ]){
+  const checked=validateWorkIntent(intent('worktree_edit',args),options);assert.equal(checked.ok,true);
+  const proposal=bindWorkIntent(checked,{scope,proposalId:'p',requestId:'r',turn:0,reasoner:'PRIVATE_LEAD',specDigests:{worktree_edit:manifest.byName.worktree_edit.digest}});
+  const validation=prepare('worktree_edit',proposal.arguments,compile(workModeTools));assert.equal(validation.ok,true);
+  assert.deepEqual(normalizeWorkspacePacket('worktree_edit',validation.params),{task_id:scope,...args});
+ }
+ for(const bad of [
+  {operation:'create',path:'../new.js',new_text:'x'},
+  {operation:'move',path:'/old.js',destination:'new.js'},
+  {operation:'move',path:'old.js',destination:'../new.js'},
+ ])assert.equal(validateWorkIntent(intent('worktree_edit',bad),options).ok,false);
+});
 test('semantic mismatches hide editing until successful same-path read, not list or another file',async()=>{
  let edits=0;
  const rows=[edit,intent('worktree_list',{}),intent('worktree_read',{path:'b.js'}),read,edit];
@@ -58,4 +75,14 @@ test('withheld and omitted read results never create observations or clear recov
 });
 test('successful mutation requires tests even when result egress is withheld',async()=>{
  const out=await run([edit],{egressOverride:()=>({})});assert.equal(out.result.state.tests.required,true);assert.equal(out.result.state.workspaceGeneration,1);assert.deepEqual(out.result.state.readRequired,['a.js']);
+});
+test('file operation completion tracks only paths that can be observed afterward',async()=>{
+ for(const [args,required] of [
+  [{operation:'create',path:'new.js',new_text:'x'},['new.js']],
+  [{operation:'delete',path:'old.js'},[]],
+  [{operation:'move',path:'old.js',destination:'new.js'},['new.js']],
+ ]){
+  const out=await run([intent('worktree_edit',args)],{egressOverride:()=>({})});
+  assert.equal(out.result.state.tests.required,true);assert.deepEqual(out.result.state.readRequired,required);
+ }
 });
