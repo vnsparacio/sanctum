@@ -373,7 +373,7 @@
   "sanctum_agents/work_workspaces.py": "fd13a7ac80cb7479c03b34ea869226a2fa751c14d18786a99baace0954d0232f",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
-  "scripts/audit.py": "35e46895efe455e53c0e38f0161f54937e5b37bcf6cf8492678e4d61c63eaeab",
+  "scripts/audit.py": "4636c17a082b8c85f836e1093009906767758ae5871e704f7b84e698bd32f698",
   "scripts/bootstrap.py": "d9f42e55374e4cffeee6ff0626ccb0b40706d72055bfc89c5b43859547468206",
   "scripts/build.py": "19bb21ceb403f619447648c6ae58c54473502e02efd4c83c100627c9efa763d2",
   "scripts/capability_manifest.mjs": "7263b8586e257a3d5a88a5bcfcd5352afe02aa71f17a13e3816399e0fd70821f",
