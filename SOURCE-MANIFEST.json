@@ -373,7 +373,7 @@
   "sanctum_agents/work_commands.py": "a0e3a60105555ee8b451efd28e2ad31bb4ceb35f5a552ee670b9d24c5782776c",
   "sanctum_agents/work_projects.py": "612027368be45e437896743465f9abe9847b50fbabf95065f4daa32f582ffaaf",
   "sanctum_agents/work_validation.py": "ff9be2fb6a368a1abb3f736bf931d36edc4481b2e54e71b3e2c6f12183ed3478",
-  "sanctum_agents/work_workspaces.py": "fd13a7ac80cb7479c03b34ea869226a2fa751c14d18786a99baace0954d0232f",
+  "sanctum_agents/work_workspaces.py": "cd7bfd4134b16f81c6a181f001a79fa0a7d56c230df13ea5c8ebc55c60511527",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
   "scripts/audit.py": "4636c17a082b8c85f836e1093009906767758ae5871e704f7b84e698bd32f698",
@@ -404,5 +404,5 @@
   "tests/test_work_commands.py": "5075ca99b57fe7f9ba1d01e4b097025b849c5b3891c452b308b47459f17fcd5a",
   "tests/test_work_projects.py": "bed809de8737fe71e6730b977bc581333c2b6a0c17507aea387a3fdf6fd79e0a",
   "tests/test_work_validation.py": "2533372b83fab08805f0315188f89f7c91e898a3ccafc0c515f4c2e2d2b31302",
-  "tests/test_work_workspaces.py": "65b363e7081d8f5e5c4f9f5950ef795e01a8a2d9f0cdfd43f707552a4fe645ac"
+  "tests/test_work_workspaces.py": "f7e2acbc764ea6b31eaa048e50514c26d77e650e928aac4236a83a36d70e669b"
 }

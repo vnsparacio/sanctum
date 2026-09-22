@@ -65,12 +65,13 @@ class WorkWorkspaceManagerTests(unittest.TestCase):
             check=True,
         )
 
-    def manager(self) -> WorkWorkspaceManager:
+    def manager(self, **values) -> WorkWorkspaceManager:
         return WorkWorkspaceManager(
             self.profiles,
             {"widget-repository": self.repository},
             self.workspaces,
             self.state,
+            **values,
         )
 
     def test_non_sanctum_profile_creates_isolated_task_workspace(self):
@@ -165,6 +166,87 @@ class WorkWorkspaceManagerTests(unittest.TestCase):
         recreated = restarted.create("widget", "TASK-4")
         self.assertFalse(recreated.resumed)
         self.assertTrue(recreated.root.exists())
+
+    def test_issue_branch_commit_selects_paths_and_reconciles_replay(self):
+        manager = self.manager()
+        workspace = manager.create("widget", "TASK-5")
+        protected_head = self._run("rev-parse", "refs/heads/main").stdout.strip()
+        branch = manager.establish_branch(workspace, "TTE-73")
+
+        self.assertEqual("symphony/tte-73", branch["branch"])
+        self.assertEqual(self.commit, branch["base_commit"])
+        self.assertEqual(
+            protected_head,
+            self._run("rev-parse", "refs/heads/main").stdout.strip(),
+        )
+        (workspace.root / "widget.txt").write_text("selected task change\n")
+        (workspace.root / "unselected.txt").write_text("leave for later\n")
+
+        committed = manager.commit(
+            workspace,
+            "Commit selected Work Mode path",
+            ["widget.txt"],
+            "stable-task-commit",
+        )
+        replay = self.manager().commit(
+            workspace,
+            "Commit selected Work Mode path",
+            ["widget.txt"],
+            "stable-task-commit",
+        )
+
+        self.assertEqual("applied", committed["status"])
+        self.assertEqual("already_applied", replay["status"])
+        self.assertEqual(committed["commit"], replay["commit"])
+        self.assertEqual(["widget.txt"], committed["paths"])
+        self.assertEqual(
+            "symphony/tte-73",
+            self._run("branch", "--show-current", cwd=workspace.root).stdout.strip(),
+        )
+        self.assertEqual(
+            protected_head,
+            self._run("rev-parse", "refs/heads/main").stdout.strip(),
+        )
+        self.assertEqual(
+            "synthetic widget\n", (self.repository / "widget.txt").read_text()
+        )
+        self.assertEqual(
+            "?? unselected.txt",
+            self._run("status", "--short", cwd=workspace.root).stdout.strip(),
+        )
+
+    def test_unknown_commit_result_reconciles_without_duplicate_commit(self):
+        workspace = self.manager().create("widget", "TASK-6")
+        self.manager().establish_branch(workspace, "TTE-73")
+        (workspace.root / "widget.txt").write_text("ambiguous task change\n")
+
+        def lose_reply(phase: str) -> None:
+            if phase == "after_commit":
+                raise RuntimeError("synthetic lost response")
+
+        with self.assertRaisesRegex(RuntimeError, "synthetic lost response"):
+            self.manager(fault_injector=lose_reply).commit(
+                workspace,
+                "Commit ambiguous Work Mode path",
+                ["widget.txt"],
+                "ambiguous-task-commit",
+            )
+        head = self._run("rev-parse", "HEAD", cwd=workspace.root).stdout.strip()
+        reconciled = self.manager().commit(
+            workspace,
+            "Commit ambiguous Work Mode path",
+            ["widget.txt"],
+            "ambiguous-task-commit",
+        )
+
+        self.assertEqual("reconciled", reconciled["status"])
+        self.assertEqual(head, reconciled["commit"])
+        self.assertEqual(
+            "1",
+            self._run(
+                "rev-list", "--count", f"{self.commit}..HEAD", cwd=workspace.root
+            ).stdout.strip(),
+        )
 
 
 if __name__ == "__main__":
