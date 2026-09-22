@@ -3,6 +3,7 @@
 Current contributor and operator material is organized by purpose:
 
 - [`architecture/`](architecture/) defines the current authority, privacy, capability, container and compatibility boundaries.
+- [`adr/`](adr/) records durable architectural decisions, their rationale and supersession history. Start with the [ADR guide](adr/README.md) and [template](adr/TEMPLATE.md).
 - [`guides/`](guides/) contains setup, configuration, operations, troubleshooting, release and migration procedures. The [Linear agent integration guide](guides/linear-agent-integration.md) reproduces the current V1.3 metadata and bounded management-agent setup.
 - [`development/`](development/) covers testing, dependency review, publication scope and the [secret-detection controls](development/secret-scanning.md). Start with the [testing guide](development/testing.md).
 - [`observability/`](observability/) documents the bounded Splunk application tracing and custom-metrics slice.
