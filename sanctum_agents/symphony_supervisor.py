@@ -146,6 +146,46 @@ def validation_environment_violations(
     return violations
 
 
+def operator_blocker_violations(
+    validation_state: Path, snapshot: dict[str, Any], *, launched_at: float
+) -> list[SymphonyViolation]:
+    """Stop only for blocker signals emitted during this supervisor invocation."""
+    violations: list[SymphonyViolation] = []
+    active = snapshot.get("running", []) + snapshot.get("retrying", [])
+    for entry in active:
+        identifier = entry.get("issue_identifier")
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[A-Z][A-Z0-9]*-[1-9][0-9]*", identifier
+        ):
+            continue
+        receipt_dir = validation_state / "blockers" / identifier
+        for path in receipt_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                receipt = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(receipt, dict)
+                and receipt.get("issue_id") == identifier
+                and receipt.get("event") == "operator_action_required"
+                and receipt.get("state") == "reported"
+                and (_parse_time(receipt.get("reported_at")) or 0) >= launched_at
+            ):
+                violations.append(
+                    SymphonyViolation(
+                        identifier,
+                        "operator_action_required",
+                        1.0,
+                        0.0,
+                        TerminationClass.OWNER_ACTION_REQUIRED.value,
+                    )
+                )
+                break
+    return violations
+
+
 def evaluate_snapshot(
     snapshot: dict[str, Any],
     ledger: dict[str, Any],
@@ -196,8 +236,13 @@ def evaluate_snapshot(
         )
         record["last_seen"] = now
         runtimes = _runtime_counters(record)
-        runtime_record = runtimes.setdefault(
-            runtime_id,
+        runtime_record = runtimes.setdefault(runtime_id, {"attempts": {}})
+        attempt_id = entry.get("started_at")
+        if _parse_time(attempt_id) is None:
+            raise ValueError("Symphony running attempt identity is malformed")
+        attempts = _runtime_attempt_counters(runtime_record)
+        attempt_record = attempts.setdefault(
+            attempt_id,
             {"turns": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0},
         )
         elapsed = max(0, now - float(record["first_seen"]))
@@ -221,13 +266,13 @@ def evaluate_snapshot(
         counters = (turns, tokens, input_tokens, output_tokens)
         if any(type(value) is not int or value < 0 for value in counters):
             raise ValueError("Symphony running counters are malformed")
-        runtime_record["turns"] = max(runtime_record.get("turns", 0), turns)
-        runtime_record["tokens"] = max(runtime_record.get("tokens", 0), tokens)
-        runtime_record["input_tokens"] = max(
-            runtime_record.get("input_tokens", 0), input_tokens
+        attempt_record["turns"] = max(attempt_record.get("turns", 0), turns)
+        attempt_record["tokens"] = max(attempt_record.get("tokens", 0), tokens)
+        attempt_record["input_tokens"] = max(
+            attempt_record.get("input_tokens", 0), input_tokens
         )
-        runtime_record["output_tokens"] = max(
-            runtime_record.get("output_tokens", 0), output_tokens
+        attempt_record["output_tokens"] = max(
+            attempt_record.get("output_tokens", 0), output_tokens
         )
         totals = _ledger_totals(record, now)
         total_turns = totals["turn_count"]
@@ -401,6 +446,41 @@ def _runtime_counters(record: dict[str, Any]) -> dict[str, Any]:
     return runtimes
 
 
+_COUNTER_NAMES = ("turns", "tokens", "input_tokens", "output_tokens")
+
+
+def _runtime_attempt_counters(runtime: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(runtime, dict):
+        raise ValueError("Symphony supervisor runtime counters are malformed")
+    attempts = runtime.get("attempts")
+    if attempts is not None:
+        if not isinstance(attempts, dict):
+            raise ValueError("Symphony supervisor attempt ledger is malformed")
+        return attempts
+    legacy = {name: runtime.pop(name, 0) for name in _COUNTER_NAMES}
+    if any(type(value) is not int or value < 0 for value in legacy.values()):
+        raise ValueError("Symphony supervisor runtime counters are malformed")
+    attempts = {"legacy": legacy} if any(legacy.values()) else {}
+    runtime["attempts"] = attempts
+    return attempts
+
+
+def _runtime_totals(runtime: Any) -> dict[str, int]:
+    totals = {name: 0 for name in _COUNTER_NAMES}
+    if not isinstance(runtime, dict):
+        return totals
+    attempts = runtime.get("attempts")
+    values = attempts.values() if isinstance(attempts, dict) else (runtime,)
+    for counters in values:
+        if not isinstance(counters, dict):
+            continue
+        for name in _COUNTER_NAMES:
+            value = counters.get(name, 0)
+            if type(value) is int and value >= 0:
+                totals[name] += value
+    return totals
+
+
 def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
     runtimes = record.get("runtimes")
     if runtimes is None:
@@ -434,16 +514,13 @@ def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
             "output_tokens": 0.0,
             "retry_count": 0.0,
         }
+    runtime_totals = [_runtime_totals(item) for item in runtimes.values()]
     return {
         "elapsed_ms": max(0.0, now - float(record.get("first_seen", now))) * 1000,
-        "turn_count": float(sum(item.get("turns", 0) for item in runtimes.values())),
-        "tokens": float(sum(item.get("tokens", 0) for item in runtimes.values())),
-        "input_tokens": float(
-            sum(item.get("input_tokens", 0) for item in runtimes.values())
-        ),
-        "output_tokens": float(
-            sum(item.get("output_tokens", 0) for item in runtimes.values())
-        ),
+        "turn_count": float(sum(item["turns"] for item in runtime_totals)),
+        "tokens": float(sum(item["tokens"] for item in runtime_totals)),
+        "input_tokens": float(sum(item["input_tokens"] for item in runtime_totals)),
+        "output_tokens": float(sum(item["output_tokens"] for item in runtime_totals)),
         "retry_count": float(record.get("max_retry", 0)),
     }
 
@@ -982,6 +1059,11 @@ def supervise(
                         )
                         violations.extend(
                             validation_environment_violations(
+                                validation_state, snapshot, launched_at=launched_at
+                            )
+                        )
+                        violations.extend(
+                            operator_blocker_violations(
                                 validation_state, snapshot, launched_at=launched_at
                             )
                         )
