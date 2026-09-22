@@ -47,6 +47,7 @@
   "docs/current/agent-system/V1.2-GIT-CONTROL-PLANE.md": "906c3464a565a3dbe18393bf6f2dbe71a4761e4e6a9511b48ba30951a54d4d85",
   "docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md": "d75ad61fb6d39f78d35e6d18d0d8653b11cc9d227f9cc222112149d335dfb2f9",
   "docs/current/agent-system/V1.3-SYMPHONY-RECOVERY.md": "ef447971bcbbda698123a41af98640c7677ff6dbb6abbbd403f66d90d73a98e0",
+  "docs/current/agent-system/V1.3-WORK-MODE-LINEAR.md": "4a5b4c7358d67818600d6470e081f7e9bd1acbfd269f0239546b36fda49122c5",
   "docs/current/agent-system/V1.3-WORKFLOW-RELIABILITY.md": "06dd084136c779ff08a768a4ca3d3598a9cfdc72fe7276653bd54f7b7e4196c7",
   "docs/current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md": "8de3ab3abfb6043f853c132c27b24126fb4925f53b43803c97b1cff20f0f7ef1",
   "docs/current/agent-system/agents/implementation-worker.md": "ad96f221ab697c3739410ec6e38de2aae14a1713244f12ceae6c20704508fc6d",
@@ -374,6 +375,7 @@
   "sanctum_agents/symphony_supervisor.py": "07a97e6ac42e72bcf6222f99490b80d855ec4ddfb469945a421a0db5482aaa91",
   "sanctum_agents/validation.py": "104996fd8b5100533461140d3415925a5c5465d0e29321a3c68564809eeb318a",
   "sanctum_agents/work_commands.py": "a0e3a60105555ee8b451efd28e2ad31bb4ceb35f5a552ee670b9d24c5782776c",
+  "sanctum_agents/work_linear.py": "b677af97e7ff49c034d25db8c58b69222633ce8da9a1366b6b49e9c81626e813",
   "sanctum_agents/work_projects.py": "612027368be45e437896743465f9abe9847b50fbabf95065f4daa32f582ffaaf",
   "sanctum_agents/work_validation.py": "ff9be2fb6a368a1abb3f736bf931d36edc4481b2e54e71b3e2c6f12183ed3478",
   "sanctum_agents/work_workspaces.py": "ed28bbf5d1e3cb46f48c2497b5411239b908fa751cd1dbfb48054ded6b05cf6b",
@@ -405,6 +407,7 @@
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332",
   "tests/test_validation_runner.py": "7e75b0bd2f2b35d6c8a52262f3ccc180174e2e1aa496dd25c66eb3a2791ac660",
   "tests/test_work_commands.py": "5075ca99b57fe7f9ba1d01e4b097025b849c5b3891c452b308b47459f17fcd5a",
+  "tests/test_work_linear.py": "4c4a8cc8a93805c105e220931c3c471c8de38c131f6d505c8e8fbea0bbbde87e",
   "tests/test_work_projects.py": "bed809de8737fe71e6730b977bc581333c2b6a0c17507aea387a3fdf6fd79e0a",
   "tests/test_work_validation.py": "2533372b83fab08805f0315188f89f7c91e898a3ccafc0c515f4c2e2d2b31302",
   "tests/test_work_workspaces.py": "75565b310eb56b790f23b9715f29b3ca7bcde4abbaa4e54de6ce28f418f52993"
