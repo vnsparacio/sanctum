@@ -290,6 +290,210 @@ class ConfigurationTests(unittest.TestCase):
             ):
                 load_config(path)
 
+    def test_work_mode_standard_and_deep_preflight_resolve_private_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_config = root / "source/config"
+            source_config.mkdir(parents=True)
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = source_config / "agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "vnsparacio/sanctum-work-mode-qualification",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            github_config = root / "github-config"
+            github_config.mkdir(mode=0o700)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\nexit 0\n")
+            gh.chmod(0o700)
+            environment = {
+                "LINEAR_API_KEY": "synthetic-test-token",
+                "SANCTUM_AGENT_PREFIX": str(prefix),
+                "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            }
+
+            standard = preflight(config, ROOT, environment)
+            deep = preflight(config, ROOT, environment, worker_class="deep")
+
+            self.assertEqual("work-mode", standard["implementation_backend"])
+            self.assertEqual(str(ROOT / "WORKFLOW.work-mode.md"), standard["workflow"])
+            self.assertEqual(str(ROOT / "WORKFLOW.work-mode.deep.md"), deep["workflow"])
+            self.assertEqual(
+                {
+                    "app_server": str(app_server.resolve()),
+                    "profiles_file": str(profile_path.resolve()),
+                    "project_id": "v13-qualification",
+                    "repository": "vnsparacio/sanctum-work-mode-qualification",
+                    "integration_branch": "main",
+                    "validation_operations": ["build", "lint", "test"],
+                },
+                standard["work_mode"],
+            )
+
+    def test_work_mode_preflight_rejects_profile_drift_and_public_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_config = root / "source/config"
+            source_config.mkdir(parents=True)
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = source_config / "agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "attacker/redirected",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            environment = {
+                "LINEAR_API_KEY": "synthetic-test-token",
+                "SANCTUM_AGENT_PREFIX": str(prefix),
+                "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+            }
+            with self.assertRaisesRegex(ConfigError, "does not match reviewed"):
+                preflight(config, ROOT, environment)
+
+            profile = json.loads(profile_path.read_text())
+            profile["profiles"][0][
+                "repository"
+            ] = "vnsparacio/sanctum-work-mode-qualification"
+            profile_path.write_text(json.dumps(profile))
+            profile_path.chmod(0o644)
+            with self.assertRaisesRegex(ConfigError, "owner-private"):
+                preflight(config, ROOT, environment)
+
+    def test_work_mode_configuration_and_workflow_binding_drift_fail_closed(self):
+        raw = json.loads(CONFIG.read_text())
+        raw["symphony"]["work_mode_app_server_env"] = "ATTACKER_SELECTED_SERVER"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agents.json"
+            path.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(ConfigError, "environment binding"):
+                load_config(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "source"
+            (repository / "config").mkdir(parents=True)
+            for name in ("WORKFLOW.work-mode.md", "WORKFLOW.work-mode.deep.md"):
+                (repository / name).write_text((ROOT / name).read_text())
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = repository / "config/agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            workflow = repository / "WORKFLOW.work-mode.md"
+            workflow.write_text(
+                workflow.read_text().replace(
+                    '    "$SANCTUM_WORK_MODE_APP_SERVER"', '    "/tmp/unreviewed"'
+                )
+            )
+
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "vnsparacio/sanctum-work-mode-qualification",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            with self.assertRaisesRegex(
+                ConfigError, "workflow does not match reviewed routing configuration"
+            ):
+                preflight(
+                    config,
+                    repository,
+                    {
+                        "LINEAR_API_KEY": "synthetic-test-token",
+                        "SANCTUM_AGENT_PREFIX": str(prefix),
+                        "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                        "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                    },
+                )
+
 
 class AuthorityTests(unittest.TestCase):
     def test_eligibility_requires_both_gate_conditions(self):
@@ -1068,6 +1272,21 @@ class ImplementationLifecycleTests(unittest.TestCase):
             )
         )
         self.assertEqual(standard, normalized)
+
+        work_mode_standard = (ROOT / "WORKFLOW.work-mode.md").read_text()
+        work_mode_deep = (ROOT / "WORKFLOW.work-mode.deep.md").read_text()
+        normalized_work_mode = (
+            work_mode_deep.replace("    - agent-deep\n", "    - agent-standard\n")
+            .replace("max_turns: 30", "max_turns: 20")
+            .replace(
+                "Worker class: deep (`agent-deep`).",
+                "Worker class: standard (`agent-standard`).",
+            )
+        )
+        self.assertEqual(work_mode_standard, normalized_work_mode)
+        self.assertIn('"$SANCTUM_WORK_MODE_APP_SERVER"', work_mode_standard)
+        self.assertIn("`v13-qualification`", work_mode_standard)
+        self.assertNotIn("git pr merge", work_mode_standard)
 
 
 class SymphonySupervisorTests(unittest.TestCase):
