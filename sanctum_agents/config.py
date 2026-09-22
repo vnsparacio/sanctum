@@ -190,6 +190,8 @@ def load_config(path: str | Path) -> AgentConfig:
         "state_port",
         "poll_seconds",
         "state_timeout_seconds",
+        "state_startup_grace_seconds",
+        "state_stall_grace_seconds",
         "output_limit_bytes",
     ):
         _positive(symphony, key)
