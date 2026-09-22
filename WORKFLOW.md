@@ -436,6 +436,14 @@ another tool.
 Select the smallest validation profile that covers the changed risk, and record
 the selection in the workpad:
 
+Before running a full profile, inspect the changed source files against
+`SOURCE-MANIFEST.json`. For each intentional source change, review the exact
+diff and update only its corresponding manifest entry; add a new entry only for
+an intended publication file. Record the reason and changed entries in the
+workpad. Never regenerate the whole manifest or refresh a hash to conceal
+unexplained drift. Run `make verify-source` before expensive validation; if it
+fails, resolve the source discrepancy before trying a profile.
+
 - `docs-config`: documentation or declarative configuration only; run focused
   format/schema/reference checks, `git diff --check`, the source-freeze check
   when applicable, and `make audit`.
@@ -476,6 +484,11 @@ the current leased issue workspace and returns a structured receipt. It is not
 an arbitrary shell escape. Record the receipt identity and results in the
 workpad. Do not delegate a source failure, retry an unchanged failing profile,
 or ask the owner to run an approved profile manually.
+
+The host code profiles first check whether their own environment can inspect a
+process with `/bin/ps`, then verify source integrity before long builds/tests.
+If the preflight fails, record the receipt and stop with an environment
+blocker; do not retry the unchanged profile or report the task as validated.
 
 Record the exact commands and outcomes in the Linear workpad.
 

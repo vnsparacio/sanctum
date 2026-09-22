@@ -106,13 +106,43 @@ class HostValidationRunnerTests(unittest.TestCase):
         self.assertTrue(first["passed"])
         self.assertEqual("already_completed", second["status"])
         self.assertEqual(
-            [item.name for item in VALIDATION_PROFILES["architecture-security"]],
+            ["process_inspection_preflight"]
+            + [item.name for item in VALIDATION_PROFILES["architecture-security"]],
             calls,
         )
         receipt = next((self.validation_state / "receipts").rglob("*.json"))
         self.assertEqual(0o600, receipt.stat().st_mode & 0o777)
         self.assertNotIn("LINEAR_API_KEY", self.runner._environment("TTE-14"))
         self.assertNotIn("GH_TOKEN", self.runner._environment("TTE-14"))
+
+    def test_failed_process_inspection_preflight_stops_before_expensive_validation(
+        self,
+    ):
+        calls = []
+
+        def blocked(command, _environment):
+            calls.append(command.name)
+            return {
+                "name": command.name,
+                "arguments": list(command.arguments),
+                "exit_code": 1,
+                "timed_out": False,
+                "duration_ms": 1,
+                "stdout": "",
+                "stderr": "ps: Operation not permitted",
+                "output_truncated": False,
+            }
+
+        with patch.object(self.runner, "_run_command", side_effect=blocked):
+            result = self.runner.run(
+                "TTE-14", "TTE-14", "normal-code", "sandbox-preflight"
+            )
+        self.assertFalse(result["passed"])
+        self.assertEqual(["process_inspection_preflight"], calls)
+        receipt = json.loads(
+            next((self.validation_state / "receipts").rglob("*.json")).read_text()
+        )
+        self.assertIn("environment_preflight_failed", receipt["events"])
 
     def test_workspace_mismatch_and_arbitrary_profile_fail_closed(self):
         with self.assertRaisesRegex(ValidationError, "workspace_id"):

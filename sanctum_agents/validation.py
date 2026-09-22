@@ -33,20 +33,23 @@ class ValidationCommand:
     timeout_seconds: int
 
 
+_SOURCE = ValidationCommand("verify_source", ("/usr/bin/make", "verify-source"), 600)
+
 _COMMON = (
     ValidationCommand("git_diff_check", ("/usr/bin/git", "diff", "--check"), 300),
     ValidationCommand("audit", ("/usr/bin/make", "audit"), 1200),
-    ValidationCommand("verify_source", ("/usr/bin/make", "verify-source"), 600),
 )
 
 VALIDATION_PROFILES: dict[str, tuple[ValidationCommand, ...]] = {
-    "docs-config": _COMMON,
+    "docs-config": (_SOURCE, *_COMMON),
     "normal-code": (
+        _SOURCE,
         ValidationCommand("build", ("/usr/bin/make", "build"), 1800),
         ValidationCommand("test", ("/usr/bin/make", "test"), 7200),
         *_COMMON,
     ),
     "architecture-security": (
+        _SOURCE,
         ValidationCommand("deps", ("/usr/bin/make", "deps"), 1800),
         ValidationCommand("build", ("/usr/bin/make", "build"), 1800),
         ValidationCommand("test", ("/usr/bin/make", "test"), 7200),
@@ -300,16 +303,28 @@ class HostValidationRunner:
         }
         _atomic_private_json(receipt_path, receipt)
         environment = self._environment(issue_id)
-        for command in VALIDATION_PROFILES[profile]:
+        preflight = ValidationCommand(
+            "process_inspection_preflight",
+            ("/bin/ps", "-p", str(os.getpid()), "-o", "pid="),
+            10,
+        )
+        commands = (
+            (preflight, *VALIDATION_PROFILES[profile])
+            if profile != "docs-config"
+            else VALIDATION_PROFILES[profile]
+        )
+        for command in commands:
             result = self._run_command(command, environment)
             receipt["commands"].append(result)
             if result["exit_code"] != 0 or result["timed_out"]:
+                if command.name == preflight.name:
+                    receipt["events"].append("environment_preflight_failed")
                 break
         completed_status = self._identity(issue_id, workspace_id)
         completed_fingerprint = self._workspace_fingerprint(completed_status)
         workspace_stable = completed_fingerprint == fingerprint
         receipt["passed"] = (
-            len(receipt["commands"]) == len(VALIDATION_PROFILES[profile])
+            len(receipt["commands"]) == len(commands)
             and all(
                 item["exit_code"] == 0 and not item["timed_out"]
                 for item in receipt["commands"]

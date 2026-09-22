@@ -15,8 +15,8 @@
   "README.md": "910a26435c70ca654cf4b7d7b5779e2b4d2d4474c487edd1c36b34079a63c5d5",
   "SECURITY.md": "45867a43b1c7e4eacf6caaf0f50171a11741274bc7038e00fd816dd609db342d",
   "THIRD-PARTY-NOTICES.md": "c39854666cc0b95697d2270e5c4eac47efc48a733e6f2d3c6d9ad5100f0dcd43",
-  "WORKFLOW.deep.md": "887aae8df6bc4d41355d90f6eb092532fe5ebe4a308f2807bda8f5157e474082",
-  "WORKFLOW.md": "816dddb9fdff8b898138d572ad0bc326076950ce93494fec0b092d11dab8f15d",
+  "WORKFLOW.deep.md": "40eab426ae35d1188ed124c82ef336a8c81c84126e616050699b3473948107c7",
+  "WORKFLOW.md": "ed2e0cf2d65ef3868a2c1c072393e6678acedf7aa5df9af28b74d212b36f7cb2",
   "assets/sanctum-logo.png": "62f5c3ef337196201f79c67d39deb46d6a4f7ee7a9d5150a88ebe9d5cc892abc",
   "compose.yaml": "d3b4babed10ed5a65b7f88dfd0b4c429a7c3d080ddc33a4a91645f08b04cca0d",
   "config/agents.json": "f706fa7c8248764bbe79719d41b11deaf8f3ff1c6dea79b950b094e19d157a36",
@@ -363,7 +363,7 @@
   "sanctum_agents/scheduler.py": "6eaf95af51295a2df01f419d45ed26f4002823a902fe32b57fec5d213065a2a0",
   "sanctum_agents/supervisor.py": "0714f1065badb8b0a4ae904a67c66b881c7e6342a3a4f051d93edfa4f1ca0ab5",
   "sanctum_agents/symphony_supervisor.py": "43221542ce4e9f9057e2590a899049f12a0c5d9a55316b37e11ef4b171f79c78",
-  "sanctum_agents/validation.py": "03ce33fc2936b3593c55af9fabbc78659d9f4a1f2ea9ee6d1f849a08e77005d7",
+  "sanctum_agents/validation.py": "104996fd8b5100533461140d3415925a5c5465d0e29321a3c68564809eeb318a",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
   "scripts/agents.py": "c67ababf28c0292e6a5e11afa05d1f991aa84b753c5b924f8b5f9d0f9b27e23d",
   "scripts/audit.py": "f24198512c9b7b3f3c682a0a3d1e3b68b623575c3d7d30662c9e299d30bcbda1",
@@ -388,5 +388,5 @@
   "tests/test_git_control_plane.py": "ba93e39c60d46175c15907af6f99774299668d60fd50dec6301040ce3057f7b6",
   "tests/test_release.py": "78aa98e6f47a459d55044e97e4816df2b428b36c28f2b59cac214cc66ad3e769",
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332",
-  "tests/test_validation_runner.py": "757a302e27893e0dbe5f1081351180170946007f171ef997c7486d0a66a7c94f"
+  "tests/test_validation_runner.py": "7e75b0bd2f2b35d6c8a52262f3ccc180174e2e1aa496dd25c66eb3a2791ac660"
 }
