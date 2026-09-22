@@ -1,6 +1,7 @@
 {
   ".codex/skills/linear/SKILL.md": "b05f8d06b9f71eae2beadeb322c985799b511904b0670caedb0dd97fb8cd02f0",
   ".dockerignore": "d6120a6bf6c224e4592f017946f041a1d02f48174628cca1e646b8e64d8d71dc",
+  ".editorconfig": "74b815a26aba54bfe0cb33ccccd4576faaf67a800f5f724752d519eb07fe7abb",
   ".env.example": "4404f1a199b4bc492142867d22672be310dce3565d12ef2cf961ea82d8a953d7",
   ".github/dependabot.yml": "1e57414b57182c22924ff393cc4b390cd53b0daa63253dee60c48d99ce5067cd",
   ".github/pull_request_template.md": "4819beff46b10d9c045061c070719580e4d9e1e88cd44ac96461fe08dfed3df7",
@@ -9,7 +10,7 @@
   ".gitignore": "cab7162cce2afaae4b55770abb4bea812549fa0d33c20db3064b68e3454322f6",
   "AGENTS.md": "c6b2633fe3b30de56f3562683ee3657a96e55674117f6609ce609c7ef3f9f40e",
   "CHANGELOG.md": "ecfb38a581086ba20007bb924bdd377ce3ca16ec30f57b3bf246d4437aaa7f84",
-  "CONTRIBUTING.md": "9a670af0da5d54a90fcdc2b2e0c722f4be9e182e3cf03f774ed021a3abb1e458",
+  "CONTRIBUTING.md": "fb25233922e18dd8fc49b53385803cbab807b476fa4124b89dc5f9fbc4fe122a",
   "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
   "Makefile": "06de87d4f1eb0ddede5d6609b12a6ae6086246f7fe6f27d7cd2ccf8d7db948de",
   "NOTICE": "58fe608e116242c5e7c0f91073b8f77512105214bd806a7feeeea2316942a413",
