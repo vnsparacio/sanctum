@@ -5,6 +5,8 @@
   "state_directory": "@STATE@/gate",
   "local_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
   "approval_expiry_seconds": 300,
+  "audit_session_grant_expiry_seconds": 900,
+  "audit_session_grant_max_calls": 8,
   "max_context_bytes": 32768,
   "max_messages": 128,
   "max_answer_tokens": 4096,
