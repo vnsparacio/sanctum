@@ -1,5 +1,91 @@
 # Release checklist and publication commands
 
+## Semantic versioning policy
+
+Sanctum release versions use `MAJOR.MINOR.PATCH` as defined by Semantic
+Versioning 2.0.0. The compatibility contract covers the reviewed public source:
+documented configuration and migration formats, supported commands and APIs,
+request and result schemas, and documented authority and security guarantees.
+Private owner state, credentials, receipts, model caches and live evidence are
+outside the source release. A version describes reviewed compatibility; it does
+not authorize a deployment, private-runtime migration or provider spend.
+
+Classify a release by its highest-impact included change:
+
+- **MAJOR**: an owner must take action because a supported contract is removed
+  or changed incompatibly. Examples include rejecting a previously valid
+  configuration without an automated or documented compatibility path,
+  changing an API or result schema incompatibly, or moving an authentication,
+  approval, egress, disclosure, tool-permission or resource-ownership decision
+  across the Mac authority boundary. A migration guide and rollback plan are
+  required; the major number does not excuse weakening a boundary.
+- **MINOR**: backward-compatible capability or policy is added. Examples include
+  a new opt-in provider adapter, a new optional configuration field, a new
+  command, or a stricter authority/security check that preserves supported
+  inputs and has no new owner migration requirement. Deprecations are announced
+  in a minor release before a later major removal whenever a safe transition is
+  possible.
+- **PATCH**: a backward-compatible correction that adds no supported
+  capability. Examples include documentation corrections, compatible bug
+  fixes, test or audit improvements, and security fixes that restore the
+  documented boundary without changing supported interfaces or requiring a
+  private migration.
+
+Security and authority changes require an explicit compatibility analysis in
+the release record. A change that weakens a privacy floor, grants new standing
+authority, broadens egress, makes approval optional, or transfers ownership
+away from the Mac is not an ordinary versioning decision and must not ship
+without a separately reviewed design. If such a reviewed design changes the
+documented contract incompatibly, it requires a major release. Compatible
+boundary hardening is normally minor when it changes supported behavior or
+patch when it only repairs behavior that already violated the contract.
+
+### Pins and private-runtime migrations
+
+A model, provider, dependency or tool pin does not determine the release number
+by itself. Classify the observable source contract after the pin changes:
+
+| Change | Normal classification |
+| --- | --- |
+| Pin refresh with the same supported behavior and interfaces | Patch |
+| New optional model/provider or backward-compatible capability | Minor |
+| Pin change that removes a supported target or requires incompatible configuration, schemas or operator steps | Major |
+| Emergency compatible pin rollback that restores the documented contract | Patch |
+
+Every pin change still requires its normal qualification, source/runtime pin
+review and rollback evidence. A provider's own marketing version, model name or
+calendar version is evidence about that dependency, not Sanctum's version.
+
+Private-runtime migration is a separately authorized operation. A source
+release that merely supports an optional, backward-compatible migration is
+minor; a compatible correction to migration tooling is patch; and a release
+that requires owners to migrate or discard supported private state is major.
+Cutting a release never migrates the private prefix automatically. Migration
+and rollback continue to follow the [migration guide](migration.md).
+
+### Development lines and pre-releases
+
+Stable releases are immutable tags such as `v1.2.0`. Opening `v1.3-dev`, adding
+the `v1.3.0` milestone, or merging a `v1.3/project-*` branch does not change the
+package version or create a release. V1.3 work starts from the latest reviewed
+`origin/v1.3-dev`, returns through pull requests, and accumulates until a
+separate release-completion change sets all authoritative release metadata.
+
+When owner testing needs a published candidate, use SemVer pre-release forms in
+order: `1.3.0-alpha.N` for incomplete integration, `1.3.0-beta.N` for a
+feature-complete candidate still under qualification, and `1.3.0-rc.N` for a
+candidate intended to become `1.3.0` if validation finds no release-blocking
+change. Pre-releases have lower precedence than the matching stable release and
+carry no compatibility promise to other pre-releases. Branch names and Linear
+milestones are never substituted for version strings.
+
+Version selection and metadata updates remain manual. The release-completion
+PR must list included changes, apply the rules above, update all authoritative
+version fields together, and explain any security, authority, pin or migration
+impact. The owner reviews the proposed version before merge and separately
+approves publication. Do not add automated version bumping, tag creation or
+release publication until this policy has been exercised and reviewed.
+
 ## V1.2.0 release completion and promotion
 
 V1.2.0 is a backward-compatible release that preserves the Mac authority
