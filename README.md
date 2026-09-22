@@ -81,6 +81,6 @@ V1.2 does not promise full autonomy, universal factual accuracy, full Linux prod
 - [Configuration](docs/guides/configuration.md), [operations](docs/guides/operations.md), [troubleshooting](docs/guides/troubleshooting.md)
 - [Capabilities](docs/architecture/capabilities.md), [limitations](docs/current/limitations.md), [container boundary](docs/architecture/containerization.md)
 - [Testing](docs/development/testing.md), [contributing](CONTRIBUTING.md), [roadmap](docs/current/roadmap.md)
-- [Release procedure](docs/guides/release.md), [separately approved migration and rollback](docs/guides/migration.md)
+- [Release qualification checklist and publication procedure](docs/guides/release.md#release-qualification-checklist), [separately approved migration and rollback](docs/guides/migration.md)
 
 The project report is canonical for history and intent. The qualified source and acceptance records govern current implementation behavior where historical narrative differs.
