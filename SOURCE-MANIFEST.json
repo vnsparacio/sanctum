@@ -50,7 +50,7 @@
   "docs/current/agent-system/V1.2-GIT-CONTROL-PLANE.md": "906c3464a565a3dbe18393bf6f2dbe71a4761e4e6a9511b48ba30951a54d4d85",
   "docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md": "d75ad61fb6d39f78d35e6d18d0d8653b11cc9d227f9cc222112149d335dfb2f9",
   "docs/current/agent-system/V1.3-SYMPHONY-RECOVERY.md": "46930d2bd9ec172c2e66ef3caadbb51f506a0b217135e70974d12ee23e6c3208",
-  "docs/current/agent-system/V1.3-WORK-MODE-LINEAR.md": "26cc0ab36d6fb63e1388958538d2a4f7f895f496ee087d0ba9406af9d54d874a",
+  "docs/current/agent-system/V1.3-WORK-MODE-LINEAR.md": "c1184be86f2e03acedaabacd4fc05cfb0adbbc1712d1fe5837e0da7037074e83",
   "docs/current/agent-system/V1.3-WORKFLOW-RELIABILITY.md": "d8954c822032940ce822ee7ce543d892017cccd6ab495e1f0a88547df89376c2",
   "docs/current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md": "8de3ab3abfb6043f853c132c27b24126fb4925f53b43803c97b1cff20f0f7ef1",
   "docs/current/agent-system/agents/implementation-worker.md": "50f2fc4c1518f2a4da3a985e44d4db39971aa0c4e87c5132ac62452fd71a09eb",
@@ -381,6 +381,7 @@
   "sanctum_agents/work_commands.py": "a0e3a60105555ee8b451efd28e2ad31bb4ceb35f5a552ee670b9d24c5782776c",
   "sanctum_agents/work_linear.py": "35d4dc1e6b185c77f7d138ebf3360ec4ceb67c3d64ec2cec851afb9aea8eda27",
   "sanctum_agents/work_projects.py": "612027368be45e437896743465f9abe9847b50fbabf95065f4daa32f582ffaaf",
+  "sanctum_agents/work_review.py": "7fdb1bf309c5fecf021bdc44e77f9bcde1339b5ef8da590e00560754b3235a80",
   "sanctum_agents/work_validation.py": "ff9be2fb6a368a1abb3f736bf931d36edc4481b2e54e71b3e2c6f12183ed3478",
   "sanctum_agents/work_workspaces.py": "ed28bbf5d1e3cb46f48c2497b5411239b908fa751cd1dbfb48054ded6b05cf6b",
   "sanctum_agents/triage.py": "a816f56c5eb10dfaa0cc214c5320d1d5922ef63cdb7b74340edb225894628618",
@@ -397,7 +398,7 @@
   "scripts/retire_private80.py": "2ad1823b8e981bfcdde024b295517b89d433d367f8717dbc6cba2632a9b5fac8",
   "scripts/sanctum_git_broker.py": "a187306dd93712625230c3fd9866ac1d44616ee800208bd2079c0bd20fe9743f",
   "scripts/sanctum_validation_runner.py": "f7903addc16b5fe67be3d2330930940d24a8a01405848a4f658b3d555a0d3c51",
-  "scripts/test.py": "a375b0c6f0e4d50866161bdfc029c21edc9642b2867dc1d4bfc6e0c2ddadbfc7",
+  "scripts/test.py": "8bd56b4ce1e71d3b59dbf7a5d67d97e1a59c2c1d4def22a39c9fc23039387c58",
   "scripts/upgrade_private_lead.py": "1fbfd18706347ad01da68dd2bccef287570a611e87448b1b4102d21d6b99b9ae",
   "scripts/upgrade_source_first.py": "33dc12a70c4ca35bd6b02eb3c7bd543a4c64908e0951b18efc134b3745ae587b",
   "scripts/upgrade_work_mode.py": "900b05530eaecdb12dd5d9dd1eaeebe84bc1c593132c73b765611fab15bff4e1",
@@ -414,6 +415,7 @@
   "tests/test_work_commands.py": "5075ca99b57fe7f9ba1d01e4b097025b849c5b3891c452b308b47459f17fcd5a",
   "tests/test_work_linear.py": "be2388978efd4019791752b00a10f13bc821ffa6601ebf72c7d935a40d9113b2",
   "tests/test_work_projects.py": "bed809de8737fe71e6730b977bc581333c2b6a0c17507aea387a3fdf6fd79e0a",
+  "tests/test_work_review.py": "15b22807399a9d7261b8aa5601569d487578017f1f31ef2425d8dbf4c50a70ed",
   "tests/test_work_validation.py": "2533372b83fab08805f0315188f89f7c91e898a3ccafc0c515f4c2e2d2b31302",
   "tests/test_work_workspaces.py": "75565b310eb56b790f23b9715f29b3ca7bcde4abbaa4e54de6ce28f418f52993"
 }

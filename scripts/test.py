@@ -99,6 +99,7 @@ def agents(env: dict[str, str]) -> None:
             "tests.test_rework_workflow",
             "tests.test_work_bridge",
             "tests.test_work_commands",
+            "tests.test_work_review",
         ],
         ".",
         env,
