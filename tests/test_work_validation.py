@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from subprocess import CompletedProcess
 
+from sanctum_agents.work_commands import (
+    IsolatedCommandRunner,
+    OciRunnerProfile,
+    command_request,
+)
 from sanctum_agents.work_projects import parse_project_profiles
 from sanctum_agents.work_validation import WorkValidationError, WorkValidationRunner
 from sanctum_agents.work_workspaces import TaskWorkspace
@@ -39,22 +46,46 @@ class WorkValidationRunnerTests(unittest.TestCase):
         )
         self.calls: list[tuple[str, Path, str]] = []
 
-        def backend(profile: str, workspace: Path, command: str):
-            self.calls.append((profile, workspace, command))
-            return {
-                "ok": True,
-                "code": "OK",
-                "executionState": "COMPLETED",
-                "output_digest": "0" * 64,
-            }
+        runtime = self.root / "docker"
+        runtime.write_text("synthetic runtime\n")
+        runtime.chmod(0o700)
 
-        self.runner = WorkValidationRunner(self.profiles, backend)
+        def invoke(arguments: list[str], _environment: Mapping[str, str]):
+            if arguments[1:3] == ["image", "inspect"]:
+                return CompletedProcess(arguments, 0, "sha256:" + "a" * 64 + "\n", "")
+            mount = arguments[arguments.index("--mount") + 1]
+            workspace = Path(mount.split("source=", 1)[1].split(",", 1)[0])
+            command = arguments[-1]
+            self.calls.append(("selected-validation", workspace, command))
+            return CompletedProcess(arguments, 0, "passed\n", "")
+
+        runner = IsolatedCommandRunner(
+            {
+                "widget-validation": OciRunnerProfile(
+                    runtime,
+                    "unix:///synthetic/docker.sock",
+                    "sha256:" + "a" * 64,
+                    "1000:1000",
+                    {"test": ("test",)},
+                ),
+                "service-validation": OciRunnerProfile(
+                    runtime,
+                    "unix:///synthetic/docker.sock",
+                    "sha256:" + "a" * 64,
+                    "1000:1000",
+                    {"lint": ("lint",), "build": ("build",)},
+                ),
+            },
+            self.root,
+            invoke=invoke,
+        )
+        self.runner = WorkValidationRunner(self.profiles, runner)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def workspace(self, project_id: str, repository: str) -> TaskWorkspace:
-        root = self.root / project_id
+        root = self.root / f"TASK-{project_id}"
         root.mkdir(exist_ok=True)
         return TaskWorkspace(
             project_id=project_id,
@@ -67,15 +98,17 @@ class WorkValidationRunnerTests(unittest.TestCase):
         )
 
     def test_projects_select_distinct_validation_profiles_and_commands(self):
-        widget = self.runner.run(self.workspace("widget", "synthetic/widget"), "test")
+        widget = self.runner.run(
+            self.workspace("widget", "synthetic/widget"), command_request("test")
+        )
         service = self.runner.run(
-            self.workspace("service", "synthetic/service"), "lint"
+            self.workspace("service", "synthetic/service"), command_request("lint")
         )
 
         self.assertEqual(
             [
-                ("widget-validation", self.root / "widget", "test"),
-                ("service-validation", self.root / "service", "lint"),
+                ("selected-validation", self.root / "TASK-widget", "test"),
+                ("selected-validation", self.root / "TASK-service", "lint"),
             ],
             self.calls,
         )
@@ -86,7 +119,7 @@ class WorkValidationRunnerTests(unittest.TestCase):
 
     def test_receipt_identifies_project_profile_command_and_result(self):
         receipt = self.runner.run(
-            self.workspace("service", "synthetic/service"), "build"
+            self.workspace("service", "synthetic/service"), command_request("build")
         ).as_dict()
 
         self.assertEqual("sanctum-work-mode-validation-receipt/v1", receipt["schema"])
@@ -98,20 +131,33 @@ class WorkValidationRunnerTests(unittest.TestCase):
 
     def test_unsupported_or_mismatched_requests_never_reach_backend(self):
         widget = self.workspace("widget", "synthetic/widget")
-        for operation in ("lint", "shell", ["test"], None):
+        for operation in ("lint", "shell"):
             with self.subTest(operation=operation):
                 with self.assertRaisesRegex(WorkValidationError, "not allowed"):
-                    self.runner.run(widget, operation)
+                    self.runner.run(widget, command_request(operation))
+        for request in (["test"], None):
+            with self.subTest(request=request):
+                with self.assertRaises(WorkValidationError):
+                    self.runner.run(widget, request)
 
         mismatched = self.workspace("service", "synthetic/other")
         with self.assertRaisesRegex(WorkValidationError, "does not match"):
-            self.runner.run(mismatched, "lint")
+            self.runner.run(mismatched, command_request("lint"))
         self.assertEqual([], self.calls)
 
     def test_invalid_backend_result_fails_closed(self):
-        runner = WorkValidationRunner(self.profiles, lambda *_: {"ok": True})
+        class InvalidRunner(IsolatedCommandRunner):
+            def run(self, *_args, **_kwargs):
+                return {"ok": True}
+
+        runner = WorkValidationRunner(
+            self.profiles,
+            InvalidRunner(self.runner.runner.profiles, self.root),
+        )
         with self.assertRaisesRegex(WorkValidationError, "invalid result"):
-            runner.run(self.workspace("widget", "synthetic/widget"), "test")
+            runner.run(
+                self.workspace("widget", "synthetic/widget"), command_request("test")
+            )
 
 
 if __name__ == "__main__":
