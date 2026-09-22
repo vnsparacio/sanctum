@@ -205,7 +205,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      const executionState=executed?.executionState??(executed?.ok?'COMPLETED':'COMPLETION_UNKNOWN');
      state.executionStateKnown=executionState!=='COMPLETION_UNKNOWN';
      const completed=executionState==='COMPLETED',successful=completed&&executed?.ok===true;
-     if(checked.spec.name==='worktree_edit'&&successful){state.tests={passed:null,required:true};if(!state.readRequired.includes(candidate.arguments.path))state.readRequired.push(candidate.arguments.path);}
+     if(checked.spec.name==='worktree_edit'&&successful){state.tests={passed:null,required:true};const observedPath=candidate.arguments.operation==='move'?candidate.arguments.destination:candidate.arguments.operation==='delete'?null:candidate.arguments.path;if(observedPath&&!state.readRequired.includes(observedPath))state.readRequired.push(observedPath);}
      if(checked.spec.policy.effect==='MUTATION'&&successful)state.workspaceGeneration++;
      const explicitTest=checked.spec.name==='worktree_command'&&candidate.arguments.operation==='test';
      if(explicitTest)state.tests={passed:successful,required:false};

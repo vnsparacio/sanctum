@@ -1500,7 +1500,7 @@
   },
   {
     "name": "worktree_edit",
-    "description": "Exactly replace one observed, unique nonempty old_text in one existing mutable UTF-8 file with your new_text (which may be empty). Read the source first and again after mismatch or mutation. Preserve all whitespace and newlines exactly. Keep edits small: old_text at most 4096 UTF-8 bytes, new_text at most 8192 UTF-8 bytes; prefer under 768 generated tokens. The Mac validates and renders the Git diff.",
+    "description": "Perform one bounded file action in the isolated workspace. Omit operation to exactly replace one observed unique old_text, or set operation to create, delete, or move. Create uses new_text as the complete UTF-8 file and refuses an existing path. Delete and move require reading the source first; move also requires destination and refuses an existing destination. The Mac checks protected paths, symlinks, and scope, then generates the exact Git diff.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1508,7 +1508,21 @@
           "type": "string",
           "pattern": "^[a-f0-9]{32}$"
         },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "create",
+            "delete",
+            "move"
+          ]
+        },
         "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
+        },
+        "destination": {
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
@@ -1526,9 +1540,7 @@
       },
       "required": [
         "task_id",
-        "path",
-        "old_text",
-        "new_text"
+        "path"
       ],
       "additionalProperties": false
     }

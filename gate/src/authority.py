@@ -188,7 +188,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
             "worktree_acceptance": {"task_id", "profile"},
             "worktree_create": {"task_id", "profile"},
             "worktree_list": {"task_id", "path", "max_entries"},
-            "worktree_edit": {"task_id", "path", "old_text", "new_text"},
+            "worktree_edit": None,
             "worktree_observe": {"task_id", "path", "observation"},
             "worktree_read": {"task_id", "path", "max_chars"},
             "worktree_patch": {"task_id", "patch"},
@@ -196,7 +196,10 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
             "worktree_cleanup": {"task_id", "profile"},
             "work_source_policy": {"task_id", "prompt", "source_need"},
         }
-        if set(packet) != contracts[b["operation"]]:
+        if (
+            contracts[b["operation"]] is not None
+            and set(packet) != contracts[b["operation"]]
+        ):
             raise Refused(
                 "EDIT_SCHEMA_INVALID"
                 if b["operation"] == "worktree_edit"
