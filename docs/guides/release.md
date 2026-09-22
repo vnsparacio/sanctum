@@ -1,5 +1,119 @@
 # Release checklist and publication commands
 
+## Release qualification checklist
+
+Use this checklist for every release candidate. Copy it into the candidate's
+release record or pull request and attach the evidence named below. The labels
+have these meanings:
+
+- **REQUIRED**: must pass for every candidate. A failure, missing result or
+  unexplained exception blocks qualification.
+- **REQUIRED WHEN APPLICABLE — MANUAL/PRIVATE**: must pass when the stated
+  condition applies. Record `N/A` with a reason when it does not. These checks
+  use owner-controlled accounts, permissions or private runtime state; keep
+  secrets and private evidence outside Git and record only safe result
+  summaries and private evidence locators.
+- **OPTIONAL**: useful additional evidence. Failure should be investigated and
+  documented, but optional evidence cannot replace or override a required
+  check.
+
+Do not call a candidate qualified while any required item is failed, pending,
+unexplained or unreviewed. Rerun affected checks after every candidate change.
+
+### Candidate identity and clean source
+
+- [ ] **REQUIRED** Record the version, exact 40-character candidate commit,
+  integration base commit, branch, included change/issue inventory and proposed
+  release notes. Confirm the version follows the policy below and every
+  authoritative version field agrees.
+- [ ] **REQUIRED** Start from a fresh clone or source-only extraction of the
+  exact candidate with no untracked or modified files. Record the checkout or
+  extraction method and the clean `git status --short` result when Git metadata
+  is present. Do not qualify a developer workspace with unrelated state.
+- [ ] **REQUIRED** Review the complete candidate diff and tracked publication
+  inventory. Explain every source, dependency, runtime-pin and generated-file
+  change; reject unrelated files, owner paths, credentials, private runtime
+  data, logs, model weights and unsupported claims.
+
+### Reproducible build and automated gates
+
+- [ ] **REQUIRED** Inspect an existing dependency environment before changing
+  it, then run `make deps` from the clean candidate using the pinned Node,
+  Python and uv versions. Record tool versions and the command result.
+- [ ] **REQUIRED** Run `make format-check` and `make lint`. Run any additional
+  formatter, linter, type checker or static analyzer introduced by the
+  candidate. A waived applicable check needs a reviewed explanation; a tool
+  failure is not a waiver.
+- [ ] **REQUIRED** Run `make build` and `make test`. Record the complete suite
+  result and test count. No failed, unexpectedly skipped or silently omitted
+  required suite is acceptable; use the groups in the
+  [testing guide](../development/testing.md) to diagnose failures.
+- [ ] **REQUIRED** Run `make audit`, `make verify-source` and
+  `git diff --check`. Run `docker compose config --quiet` when the candidate
+  includes or claims the optional container definition. Record exact command
+  outcomes.
+- [ ] **REQUIRED** Review every intentional `SOURCE-MANIFEST.json` change
+  against the exact file diff. Add only intended publication files and update
+  only changed entries. Any missing file, unexpected file, runtime-pin
+  mismatch, unexplained digest change or source verification failure blocks
+  qualification. Never refresh hashes to bless drift.
+- [ ] **REQUIRED** Require all checks configured for the release-completion and
+  promotion pull requests to pass on the exact candidate. A local pass does not
+  excuse failed, missing or stale CI evidence.
+
+### Platform and private-runtime qualification
+
+- [ ] **REQUIRED** State the supported platform claims for this release and
+  map each claim to current evidence. Full operation requires macOS on Apple
+  Silicon; portable Linux CI covers only its documented contract surfaces and
+  must not be reported as full Linux product qualification.
+- [ ] **REQUIRED WHEN APPLICABLE — MANUAL/PRIVATE** On the owner-controlled Mac,
+  run `make doctor PREFIX=/absolute/private/prefix` after setup or a supported
+  amendment and record only the result and private evidence locator. This is
+  required for release changes that affect setup, configuration, pins,
+  installation, migration or runtime integrity. Do not print credentials or
+  private contents.
+- [ ] **REQUIRED WHEN APPLICABLE — MANUAL/PRIVATE** Requalify every affected
+  host-native or live boundary, including macOS permissions, UI enrollment,
+  personal-source brokers, MLX inference, model/provider policy, approval and
+  disclosure flows, or GPU allocation/lease cleanup. Use synthetic public
+  inputs where possible, distinguish newly observed behavior from historical
+  evidence and retain detailed receipts outside Git.
+- [ ] **REQUIRED WHEN APPLICABLE — MANUAL/PRIVATE** For GPU-capable releases,
+  confirm provider-side zero ownership, no active request or unresolved lease,
+  and independent janitor operation before stopping supervision. Keep GPU
+  autostart off until private resource references and cleanup are validated;
+  preserve persistent volumes.
+
+### Artifact, rollback and approval
+
+- [ ] **REQUIRED** Build the proposed source artifact from the exact candidate,
+  record its filename, byte size and SHA-256 digest, and compare its inventory
+  with the reviewed publication inventory. From a fresh extraction, rerun
+  source verification plus the build, test and audit gates above. A digest or
+  inventory mismatch blocks qualification.
+- [ ] **REQUIRED** Document source rollback before publication as a reviewed
+  revert with no force-push. After publication, preserve the immutable tag and
+  release and fix defects in a later version rather than retagging.
+- [ ] **REQUIRED WHEN APPLICABLE — MANUAL/PRIVATE** Review the separate runtime
+  rollback procedure for each affected amendment or migration. Confirm the
+  gateway stop boundary, matching rollback transaction, process/resource
+  identity checks and preservation of private state, receipts, cleanup and
+  volumes. Publication alone never authorizes migration or rollback.
+- [ ] **OPTIONAL** Record additional reproducibility, performance, extended
+  platform or live-provider evidence, clearly bounded so it does not broaden
+  the supported release claims.
+- [ ] **REQUIRED — OWNER APPROVAL** After all evidence is current, the owner
+  explicitly approves the exact commit, version/tag, artifact SHA-256 and
+  complete release notes. PR approval, CI success or an agent recommendation
+  is not publication approval. Only the owner may merge, tag or publish, and
+  deployment or private-runtime migration requires its own approval.
+
+The release record must end with an explicit `QUALIFIED` or `BLOCKED` result,
+the owner decision, and links or safe locators for every required item. A
+`QUALIFIED` result is invalid if any required item above is not demonstrably
+passed or justifiably `N/A` under its stated applicability condition.
+
 ## Semantic versioning policy
 
 Sanctum release versions use `MAJOR.MINOR.PATCH` as defined by Semantic
