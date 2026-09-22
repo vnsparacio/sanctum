@@ -20,7 +20,7 @@ function clean(value){
  if(value===null||typeof value==='boolean'||typeof value==='number')return value;
  if(typeof value==='string')return value.length<=160&&/^[A-Za-z0-9_.:@/+ -]*$/.test(value)?value:digest({value});
  if(Array.isArray(value))return value.slice(0,32).map(clean);
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key])=>!/(?:^goal$|prompt|content|output|text|body|secret|token|path)/i.test(key)).map(([key,item])=>[key,clean(item)]));
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key])=>!/(?:^goal$|prompt|content|^output$|outputText|text|body|secret|token|path|diagnostic)/i.test(key)).map(([key,item])=>[key,clean(item)]));
  return null;
 }
 export function sanitizeSemanticSurface(value){

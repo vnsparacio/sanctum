@@ -60,11 +60,47 @@ def _call(docker, args, profile, timeout=20, check=True):
             text=True,
             timeout=timeout,
         )
+    except Refused:
+        raise
     except Exception:
         raise Refused("runner_unavailable") from None
     if check and r.returncode:
         raise Refused("runner_unavailable")
     return r
+
+
+def _remaining(deadline, now, maximum):
+    remaining = deadline - now()
+    if remaining <= 0:
+        raise Refused("command_timeout")
+    return max(0.001, min(maximum, remaining))
+
+
+def _stop_client(child):
+    if child is None:
+        return
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        child.wait(timeout=2)
+    except Exception:
+        pass
+
+
+def _remove_container(docker, name, profile, child=None):
+    """Best-effort bounded cleanup with an explicit three-state absence proof."""
+    _stop_client(child)
+    try:
+        _call(docker, ["rm", "-f", name], profile, timeout=10, check=False)
+    except Refused:
+        pass
+    try:
+        inspected = _call(docker, ["inspect", name], profile, timeout=5, check=False)
+    except Refused:
+        return None
+    return inspected.returncode != 0
 
 
 def verify_runner(settings, profile_name):
@@ -151,6 +187,9 @@ def run(
     timeout = min(
         int(profile.get("timeout_seconds", policy["timeout_seconds"])), MAX_TIMEOUT
     )
+    output_limit = min(int(policy.get("output_bytes", MAX_OUTPUT)), MAX_OUTPUT)
+    if timeout < 1 or output_limit < 1:
+        raise Refused("runner_descriptor")
     name = "sanctum-work-" + uuid.uuid4().hex
     runner_user = profile.get("runner_user")
     if type(runner_user) is not str or not re.fullmatch(
@@ -209,17 +248,28 @@ def run(
             "type=volume,destination=/sanctum-acceptance,volume-nocopy",
         ]
     started = now()
+    deadline = started + timeout
     created = False
+    child = None
     try:
-        _call(docker, args, profile, timeout=30)
+        _call(
+            docker,
+            args,
+            profile,
+            timeout=_remaining(deadline, now, 30),
+        )
         created = True
         # Docker Desktop cannot reliably bind nested APFS sparse-image mounts.
         # Copy a point-in-time workspace snapshot into the stopped container;
         # repository code receives no live host mount and all changes vanish.
         _call(
-            docker, ["cp", str(root) + "/.", name + ":/workspace"], profile, timeout=120
+            docker,
+            ["cp", str(root) + "/.", name + ":/workspace"],
+            profile,
+            timeout=_remaining(deadline, now, 120),
         )
         if acceptance is not None:
+            _remaining(deadline, now, 20)
             _copy_acceptance_driver(docker, name, profile)
         child = subprocess.Popen(
             [
@@ -238,9 +288,21 @@ def run(
         if acceptance is not None:
             child.stdin.write(proof_key.hex().encode() + b"\n")
             child.stdin.close()
+    except Refused as error:
+        if created:
+            absent = _remove_container(docker, name, profile, child)
+            if absent is not True:
+                raise Refused("runner_cleanup_uncertain") from None
+        if str(error) == "operation_cancelled":
+            raise
+        if str(error) == "command_timeout" or now() >= deadline:
+            raise Refused("command_timeout") from None
+        raise Refused("runner_unavailable") from None
     except Exception:
         if created:
-            _call(docker, ["rm", "-f", name], profile, timeout=20, check=False)
+            absent = _remove_container(docker, name, profile, child)
+            if absent is not True:
+                raise Refused("runner_cleanup_uncertain") from None
         raise Refused("runner_unavailable") from None
     selector = selectors.DefaultSelector()
     selector.register(child.stdout, selectors.EVENT_READ, "stdout")
@@ -249,9 +311,11 @@ def run(
     proof_output = bytearray()
     code = "COMMAND_FAILED"
     unknown = False
+    cancelled = False
+    execution_error = None
     try:
         while child.poll() is None:
-            if now() - started > timeout:
+            if now() >= deadline:
                 code = "COMMAND_TIMEOUT"
                 unknown = True
                 break
@@ -260,57 +324,63 @@ def run(
                 output.extend(chunk)
                 if key.data == "stderr":
                     proof_output.extend(chunk)
-                if len(output) > MAX_OUTPUT:
+                if len(output) > output_limit:
                     code = "OUTPUT_LIMIT"
                     unknown = True
                     break
             if unknown:
                 break
         if unknown:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            _call(docker, ["rm", "-f", name], profile, timeout=20, check=False)
-            try:
-                child.wait(timeout=5)
-            except Exception:
-                pass
+            _stop_client(child)
         else:
             child.wait(timeout=5)
             for label, stream in (("stdout", child.stdout), ("stderr", child.stderr)):
-                chunk = stream.read(MAX_OUTPUT - len(output) + 1)
+                chunk = stream.read(output_limit - len(output) + 1)
                 output.extend(chunk)
                 if label == "stderr":
                     proof_output.extend(chunk)
-            if len(output) > MAX_OUTPUT:
+            if len(output) > output_limit:
                 code = "OUTPUT_LIMIT"
                 unknown = True
             else:
                 code = "OK" if child.returncode == 0 else "COMMAND_FAILED"
+    except Refused as error:
+        if str(error) != "operation_cancelled":
+            execution_error = error
+        else:
+            code = "COMMAND_CANCELLED"
+            cancelled = True
+    except BaseException as error:
+        execution_error = error
     finally:
         selector.close()
         child.stdout.close()
         child.stderr.close()
-    absent = (
-        _call(docker, ["inspect", name], profile, timeout=10, check=False).returncode
-        != 0
-    )
-    if not absent:
-        raise Refused("runner_cleanup_uncertain")
+    absent = _remove_container(docker, name, profile, child)
+    if execution_error is not None:
+        if absent is not True:
+            raise Refused("runner_cleanup_uncertain") from None
+        raise Refused("runner_unavailable") from None
+    if absent is not True:
+        code = "CLEANUP_UNKNOWN"
+        unknown = True
+        cancelled = False
     elapsed = now() - started
-    raw = bytes(output[:MAX_OUTPUT])
+    raw = bytes(output[:output_limit])
+    execution_state = (
+        "COMPLETION_UNKNOWN" if unknown else "CANCELLED" if cancelled else "COMPLETED"
+    )
     result = {
         "ok": code == "OK",
         "code": code,
-        "executionState": "COMPLETION_UNKNOWN" if unknown else "COMPLETED",
+        "executionState": execution_state,
         "output": raw.decode("utf-8", "replace"),
         "output_digest": hashlib.sha256(raw).hexdigest(),
         "output_bytes": len(raw),
         "elapsed_ms": round(elapsed * 1000, 3),
         "runner": identity,
         "limits": policy,
-        "container_absent": absent,
+        "container_absent": absent is True,
     }
 
     if acceptance is not None:
