@@ -3,6 +3,7 @@
   ".dockerignore": "d6120a6bf6c224e4592f017946f041a1d02f48174628cca1e646b8e64d8d71dc",
   ".editorconfig": "74b815a26aba54bfe0cb33ccccd4576faaf67a800f5f724752d519eb07fe7abb",
   ".env.example": "4404f1a199b4bc492142867d22672be310dce3565d12ef2cf961ea82d8a953d7",
+  ".github/CODEOWNERS": "0f40accc42680ed5d427002cbe0272062d7ec350a41cee730beb16f56772a4d2",
   ".github/dependabot.yml": "1e57414b57182c22924ff393cc4b390cd53b0daa63253dee60c48d99ce5067cd",
   ".github/pull_request_template.md": "4819beff46b10d9c045061c070719580e4d9e1e88cd44ac96461fe08dfed3df7",
   ".github/rulesets/protected-branches.json": "75b806a826f89986076b9e38fd242f4b140f7dcf3e8fc034078c2a2025b12ab2",
