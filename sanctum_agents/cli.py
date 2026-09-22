@@ -19,13 +19,11 @@ from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
 from .runtime import RunMode
 from .scheduler import load_schedule_plan
+from .symphony_recovery import run_with_recovery
 from .symphony_supervisor import (
     preflight as symphony_preflight,
 )
 from .symphony_supervisor import resume_from_incident
-from .symphony_supervisor import (
-    supervise as supervise_symphony,
-)
 from .triage import capture_live_snapshot, run_triage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "symphony-run":
-            return supervise_symphony(config, ROOT, worker_class=args.worker_class)
+            return run_with_recovery(config, ROOT, worker_class=args.worker_class)
         if args.command == "symphony-resume":
             print(
                 json.dumps(

@@ -160,8 +160,9 @@ def load_config(path: str | Path) -> AgentConfig:
         raise ConfigError("human_review_status must remain Human Review")
     if raw["project"].get("integration_branch") != "v1.3-dev":
         raise ConfigError("integration_branch must remain v1.3-dev")
-    if raw["symphony"].get("max_concurrency") != 1:
-        raise ConfigError("initial Symphony concurrency must remain 1")
+    concurrency = _positive(raw["symphony"], "max_concurrency")
+    if concurrency > 5:
+        raise ConfigError("Symphony concurrency may not exceed 5")
     symphony = raw["symphony"]
     if symphony.get("engineering_preview_acknowledged") is not True:
         raise ConfigError(

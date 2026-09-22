@@ -76,6 +76,13 @@ from sanctum_agents.runtime import (
 )
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
 from sanctum_agents.supervisor import BoundedProcess
+from sanctum_agents.symphony_recovery import (
+    _candidate,
+    _grant,
+    _notify,
+    _report,
+    run_with_recovery,
+)
 from sanctum_agents.symphony_supervisor import (
     TerminationClass,
     _ledger_epoch_sha256,
@@ -83,6 +90,7 @@ from sanctum_agents.symphony_supervisor import (
     _sanitized_supervisor_environment,
     classify_termination,
     evaluate_snapshot,
+    load_continuations,
     preflight,
     resume_from_incident,
     supervise,
@@ -168,7 +176,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-luna", config.model_for("triage").model)
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
         self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
-        self.assertEqual(1, config.symphony["max_concurrency"])
+        self.assertEqual(5, config.symphony["max_concurrency"])
         validate_model_catalog(config, catalog())
 
     def test_unavailable_model_has_no_fallback(self):
@@ -1035,6 +1043,30 @@ class SymphonySupervisorTests(unittest.TestCase):
             max_retries=2,
         )
 
+    def test_five_workers_are_allowed_but_a_sixth_stops_the_service(self):
+        running = []
+        for index in range(6):
+            entry = self.running(f"session-{index}", 1, 1)
+            entry["issue_identifier"] = f"SAN-{index + 1}"
+            running.append(entry)
+        arguments = dict(
+            runtime_id="five-worker-service",
+            now=200,
+            wall_clock_seconds=100,
+            max_turns=8,
+            max_tokens=500,
+            max_retries=2,
+            max_concurrency=5,
+        )
+        self.assertEqual(
+            [], evaluate_snapshot({"running": running[:5]}, {"issues": {}}, **arguments)
+        )
+        violations = evaluate_snapshot(
+            {"running": running}, {"issues": {}}, **arguments
+        )
+        self.assertEqual(["concurrency_budget"], [item.reason for item in violations])
+        self.assertEqual("service", violations[0].issue_identifier)
+
     def test_cumulative_counters_are_not_summed_across_continuation_sessions(self):
         ledger: dict[str, object] = {"issues": {}}
         first = self.evaluate(
@@ -1741,6 +1773,224 @@ class SchedulePlanTests(unittest.TestCase):
             path.write_text(json.dumps(raw))
             with self.assertRaisesRegex(ScheduleError, "blocked"):
                 load_schedule_plan(path)
+
+
+class SymphonyRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.prefix = (Path(self.temporary.name) / "private").resolve()
+        (self.prefix / "incidents").mkdir(parents=True)
+        (self.prefix / "state").mkdir()
+        self.config = load_config(CONFIG)
+        self.issue = "SAN-7"
+        self.record = {
+            "first_seen": 1,
+            "last_seen": 2,
+            "runtimes": {"test": {"turns": 40, "tokens": 8000001}},
+            "max_retry": 0,
+        }
+        self.incident = self.prefix / "incidents" / "implementation-test.json"
+        self._write_incident()
+        (self.prefix / "state" / "symphony-ledger.json").write_text(
+            json.dumps({"schema_version": 1, "issues": {self.issue: self.record}})
+        )
+
+    def _write_incident(self, reason="tokens_budget", turns=40, observed=8000001):
+        self.incident.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "linear_state_changed": False,
+                    "violations": [
+                        {
+                            "issue_identifier": self.issue,
+                            "reason": reason,
+                            "observed": observed,
+                            "limit": 8000000,
+                        }
+                    ],
+                    "issue_metrics": {
+                        self.issue: {
+                            "turn_count": turns,
+                            "tokens": 8000001,
+                            "retry_count": 0,
+                            "ledger_epoch_sha256": _ledger_epoch_sha256(self.record),
+                        }
+                    },
+                }
+            )
+        )
+
+    def test_one_time_extension_is_bound_to_existing_epoch(self):
+        self.assertEqual(
+            (self.issue, "eligible"), _candidate(self.prefix, self.incident)
+        )
+        _grant(self.config, self.prefix, self.incident, self.issue)
+        self.assertEqual(6, load_continuations(self.prefix)[self.issue]["max_turns"])
+        self.assertEqual(
+            (self.issue, "already_continued"), _candidate(self.prefix, self.incident)
+        )
+        with self.assertRaisesRegex(ConfigError, "continuation gate closed"):
+            _grant(self.config, self.prefix, self.incident, self.issue)
+
+    def test_deterministic_blockers_never_consult_advisor(self):
+        self._write_incident(reason="validation_environment_preflight")
+        self.assertEqual("ineligible_stop", _candidate(self.prefix, self.incident)[1])
+        self._write_incident(turns=0)
+        self.assertEqual("no_turn_progress", _candidate(self.prefix, self.incident)[1])
+        self._write_incident(observed=8300000)
+        self.assertEqual(
+            "extension_exhausted", _candidate(self.prefix, self.incident)[1]
+        )
+        self._write_incident()
+        operations = (
+            self.prefix / "state" / "git-control-plane" / "operations" / self.issue
+        )
+        operations.mkdir(parents=True)
+        (operations / "push-test.json").write_text(json.dumps({"state": "pending"}))
+        self.assertEqual(
+            "uncertain_git_state", _candidate(self.prefix, self.incident)[1]
+        )
+
+    def test_extension_is_cumulative_and_a_second_stop_remains_enforced(self):
+        ledger = {
+            "issues": {
+                self.issue: {
+                    "first_seen": 1,
+                    "last_seen": 1,
+                    "runtimes": {},
+                    "max_retry": 0,
+                }
+            }
+        }
+        snapshot = {
+            "running": [
+                {
+                    "issue_identifier": self.issue,
+                    "turn_count": 43,
+                    "tokens": {"total_tokens": 8100000},
+                }
+            ],
+            "retrying": [],
+            "blocked": [],
+        }
+        base = evaluate_snapshot(
+            snapshot,
+            ledger,
+            now=2,
+            wall_clock_seconds=100,
+            max_turns=40,
+            max_tokens=8000000,
+            max_retries=3,
+        )
+        self.assertTrue(base)
+        continued = evaluate_snapshot(
+            snapshot,
+            ledger,
+            now=2,
+            wall_clock_seconds=100,
+            max_turns=40,
+            max_tokens=8000000,
+            max_retries=3,
+            continuations={
+                self.issue: {
+                    "wall_clock_seconds": 1800,
+                    "max_turns": 6,
+                    "max_tokens": 250000,
+                }
+            },
+        )
+        self.assertEqual([], continued)
+        snapshot["running"][0]["turn_count"] = 47
+        stopped = evaluate_snapshot(
+            snapshot,
+            ledger,
+            now=2,
+            wall_clock_seconds=100,
+            max_turns=40,
+            max_tokens=8000000,
+            max_retries=3,
+            continuations={
+                self.issue: {
+                    "wall_clock_seconds": 1800,
+                    "max_turns": 6,
+                    "max_tokens": 250000,
+                }
+            },
+        )
+        self.assertEqual("turns_budget", stopped[0].reason)
+
+    def test_wrapper_restarts_at_most_once(self):
+        with (
+            patch.dict(
+                os.environ, {self.config.runtime["prefix_env"]: str(self.prefix)}
+            ),
+            patch("sanctum_agents.symphony_recovery.supervise") as supervisor,
+            patch(
+                "sanctum_agents.symphony_recovery._workspace_progress",
+                return_value={"changed_paths": 2, "commits_ahead": 0},
+            ),
+            patch(
+                "sanctum_agents.symphony_recovery._advise", return_value="CONTINUE_ONCE"
+            ),
+            patch("sanctum_agents.symphony_recovery._report") as report,
+        ):
+
+            def stopped(_config, _repository, *, incident_sink, **_kwargs):
+                incident_sink.append(self.incident)
+                return 75
+
+            supervisor.side_effect = stopped
+            self.assertEqual(75, run_with_recovery(self.config, ROOT))
+            self.assertEqual(2, supervisor.call_count)
+            self.assertEqual("continuation_stopped", report.call_args.args[-1])
+
+    def test_gmail_delivery_uses_starttls_and_keychain(self):
+        binding = self.prefix / "config" / "symphony-notifications.json"
+        binding.parent.mkdir()
+        binding.write_text(
+            json.dumps(
+                {"sender": "owner@gmail.com", "recipient": "owner+alert@gmail.com"}
+            )
+        )
+        binding.chmod(0o600)
+        with (
+            patch("sanctum_agents.symphony_recovery.subprocess.run") as keychain,
+            patch("sanctum_agents.symphony_recovery.smtplib.SMTP") as smtp,
+        ):
+            keychain.return_value.returncode = 0
+            keychain.return_value.stdout = "synthetic-app-password\n"
+            self.assertEqual(
+                "owner+alert@gmail.com",
+                _notify(self.prefix, self.incident, self.issue, "needs_owner"),
+            )
+            keychain.assert_called_once()
+            self.assertEqual("/usr/bin/security", keychain.call_args.args[0][0])
+            client = smtp.return_value.__enter__.return_value
+            client.starttls.assert_called_once()
+            client.login.assert_called_once_with(
+                "owner@gmail.com", "synthetic-app-password"
+            )
+            client.send_message.assert_called_once()
+
+    def test_email_attempt_is_not_repeated_after_failure(self):
+        with patch(
+            "sanctum_agents.symphony_recovery._notify",
+            side_effect=ConfigError("missing"),
+        ) as notify:
+            _report(self.prefix, self.incident, self.issue, "blocked")
+            _report(self.prefix, self.incident, self.issue, "blocked")
+            self.assertEqual(1, notify.call_count)
+            receipt = json.loads(
+                (
+                    self.prefix
+                    / "state"
+                    / "symphony-recovery"
+                    / "implementation-test.json"
+                ).read_text()
+            )
+            self.assertEqual("failed", receipt["email"])
 
 
 if __name__ == "__main__":

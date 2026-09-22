@@ -111,12 +111,11 @@ def _hard_runtime_control_gaps(repository: Path) -> list[tuple[str, str]]:
                 "the supervisor does not persist the first-seen runtime ledger",
             )
         )
-    if not all(
-        phrase in supervisor
-        for phrase in (
-            '("wall_clock_budget", elapsed, wall_clock_seconds)',
-            "elapsed > wall_clock_seconds",
-        )
+    if not (
+        supervisor.count('wall_clock_seconds + extension.get("wall_clock_seconds", 0)')
+        >= 2
+        and '"wall_clock_budget"' in supervisor
+        and "elapsed > wall_limit" in supervisor
     ):
         gaps.append(
             (

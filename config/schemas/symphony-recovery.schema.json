@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "reason_code"],
+  "properties": {
+    "decision": {"enum": ["CONTINUE_ONCE", "NEEDS_OWNER"]},
+    "reason_code": {"enum": ["near_completion", "bounded_progress", "insufficient_progress", "repeated_failure", "uncertain_state"]}
+  }
+}

@@ -155,6 +155,8 @@ def evaluate_snapshot(
     max_turns: int,
     max_tokens: int,
     max_retries: int,
+    max_concurrency: int = 1,
+    continuations: dict[str, dict[str, int]] | None = None,
 ) -> list[SymphonyViolation]:
     if not isinstance(snapshot, dict):
         raise ValueError("Symphony snapshot must be an object")
@@ -169,6 +171,16 @@ def evaluate_snapshot(
         raise ValueError("Symphony snapshot collections are malformed")
     issues = ledger.setdefault("issues", {})
     violations: list[SymphonyViolation] = []
+    if len(running) > max_concurrency:
+        violations.append(
+            SymphonyViolation(
+                "service",
+                "concurrency_budget",
+                float(len(running)),
+                float(max_concurrency),
+                TerminationClass.ENVIRONMENT.value,
+            )
+        )
     active_identifiers: set[str] = set()
     for entry in running:
         if not isinstance(entry, dict) or not isinstance(
@@ -219,10 +231,19 @@ def evaluate_snapshot(
         totals = _ledger_totals(record, now)
         total_turns = totals["turn_count"]
         total_tokens = totals["tokens"]
+        extension = (continuations or {}).get(identifier, {})
         checks = [
-            ("wall_clock_budget", elapsed, wall_clock_seconds),
-            ("turns_budget", total_turns, max_turns),
-            ("tokens_budget", total_tokens, max_tokens),
+            (
+                "wall_clock_budget",
+                elapsed,
+                wall_clock_seconds + extension.get("wall_clock_seconds", 0),
+            ),
+            ("turns_budget", total_turns, max_turns + extension.get("max_turns", 0)),
+            (
+                "tokens_budget",
+                total_tokens,
+                max_tokens + extension.get("max_tokens", 0),
+            ),
         ]
         for reason, observed, limit in checks:
             if type(observed) in {int, float} and observed > limit:
@@ -252,13 +273,15 @@ def evaluate_snapshot(
         record["last_seen"] = now
         record["max_retry"] = max(record.get("max_retry", 0), attempt)
         elapsed = max(0, now - float(record["first_seen"]))
-        if elapsed > wall_clock_seconds:
+        extension = (continuations or {}).get(identifier, {})
+        wall_limit = wall_clock_seconds + extension.get("wall_clock_seconds", 0)
+        if elapsed > wall_limit:
             violations.append(
                 SymphonyViolation(
                     identifier,
                     "wall_clock_budget",
                     elapsed,
-                    float(wall_clock_seconds),
+                    float(wall_limit),
                     TerminationClass.TIME_BUDGET.value,
                 )
             )
@@ -310,6 +333,46 @@ def _save_json(path: Path, value: dict[str, Any]) -> None:
     temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
     temporary.chmod(0o600)
     temporary.replace(path)
+
+
+def load_continuations(prefix: Path) -> dict[str, dict[str, int]]:
+    """Read host-issued, one-time extensions; malformed private state fails closed."""
+    root = prefix / "state" / "symphony-continuations"
+    if not root.exists():
+        return {}
+    if root.is_symlink() or not root.is_dir():
+        raise ConfigError("Symphony continuation state is unsafe")
+    result: dict[str, dict[str, int]] = {}
+    for path in root.iterdir():
+        identifier = path.stem
+        if (
+            path.suffix != ".json"
+            or not re.fullmatch(r"[A-Z][A-Z0-9]*-[1-9][0-9]*", identifier)
+            or path.is_symlink()
+            or not path.is_file()
+        ):
+            raise ConfigError("Symphony continuation entry is unsafe")
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigError("Symphony continuation entry is unreadable") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("issue_identifier") != identifier
+            or value.get("schema_version") != 1
+            or not isinstance(value.get("incident"), str)
+        ):
+            raise ConfigError("Symphony continuation entry is malformed")
+        limits = value.get("limits")
+        if (
+            not isinstance(limits, dict)
+            or limits.get("wall_clock_seconds") != 1800
+            or limits.get("max_turns") != 6
+            or limits.get("max_tokens") != 250000
+        ):
+            raise ConfigError("Symphony continuation limits are unreviewed")
+        result[identifier] = limits
+    return result
 
 
 def _runtime_counters(record: dict[str, Any]) -> dict[str, Any]:
@@ -508,7 +571,7 @@ def preflight(
         f"    - {route}\n",
         f'model="{model.model}"',
         f'model_reasoning_effort="{model.reasoning}"',
-        "max_concurrent_agents: 1",
+        f"max_concurrent_agents: {config.symphony['max_concurrency']}",
     )
     if any(fragment not in workflow_text for fragment in required_fragments):
         raise ConfigError(
@@ -659,6 +722,9 @@ def resume_from_incident(
             / f"{source.stem}.json"
         )
         resume_path = prefix / "state" / "symphony-resumes" / f"{source.stem}.json"
+        continuation_path = (
+            prefix / "state" / "symphony-continuations" / f"{issue_identifier}.json"
+        )
         prior = None
         if resume_path.exists():
             try:
@@ -671,6 +737,8 @@ def resume_from_incident(
             ):
                 raise ConfigError("resume receipt conflicts with requested issue")
             if prior.get("state") == "applied":
+                if continuation_path.exists():
+                    continuation_path.unlink()
                 return {"status": "already_applied", **prior}
         if record is not None and _ledger_epoch_sha256(record) != expected_epoch:
             raise ConfigError("resume incident does not match the current ledger epoch")
@@ -716,6 +784,8 @@ def resume_from_incident(
             _save_json(ledger_path, ledger)
         value.update({"state": "applied", "resumed_at": datetime.now(UTC).isoformat()})
         _save_json(resume_path, value)
+        if continuation_path.exists():
+            continuation_path.unlink()
         return {"status": "applied", **value}
 
 
@@ -757,6 +827,7 @@ def supervise(
     environ: dict[str, str] | None = None,
     *,
     worker_class: str = "standard",
+    incident_sink: list[Path] | None = None,
 ) -> int:
     supplied = dict(os.environ if environ is None else environ)
     checked = preflight(config, repository, supplied, worker_class=worker_class)
@@ -775,6 +846,7 @@ def supervise(
     workspace_root.chmod(0o700)
     prefix = config.runtime_prefix(values)
     ensure_private_prefix(prefix)
+    continuations = load_continuations(prefix)
     broker_state = prefix / "state" / "git-control-plane"
     broker_state.mkdir(parents=True, exist_ok=True, mode=0o700)
     broker_state.chmod(0o700)
@@ -888,6 +960,8 @@ def supervise(
                             max_turns=role.max_turns,
                             max_tokens=role.max_tokens,
                             max_retries=role.max_retries,
+                            max_concurrency=config.symphony["max_concurrency"],
+                            continuations=continuations,
                         )
                         violations.extend(
                             validation_environment_violations(
@@ -929,9 +1003,19 @@ def supervise(
                                     output_tokens=int(totals["output_tokens"]),
                                 )
                             limits = {
-                                "elapsed_ms": role.wall_clock_seconds * 1000,
-                                "turn_count": role.max_turns,
-                                "tokens": role.max_tokens,
+                                "elapsed_ms": (
+                                    role.wall_clock_seconds
+                                    + continuations.get(identifier, {}).get(
+                                        "wall_clock_seconds", 0
+                                    )
+                                )
+                                * 1000,
+                                "turn_count": role.max_turns
+                                + continuations.get(identifier, {}).get("max_turns", 0),
+                                "tokens": role.max_tokens
+                                + continuations.get(identifier, {}).get(
+                                    "max_tokens", 0
+                                ),
                             }
                             for name, limit in limits.items():
                                 warning = (identifier, name)
@@ -980,6 +1064,8 @@ def supervise(
                     }
                     incident_path = prefix / "incidents" / f"{run_id}.json"
                     _save_json(incident_path, incident)
+                    if incident_sink is not None:
+                        incident_sink.append(incident_path)
                     log.emit(
                         "agent_budget_exhausted",
                         violations=incident["violations"],
