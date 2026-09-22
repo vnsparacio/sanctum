@@ -23,8 +23,10 @@ from sanctum_agents.authority import (
 )
 from sanctum_agents.config import ConfigError, load_config, validate_model_catalog
 from sanctum_agents.implementation import (
+    ImplementationBackendDispatch,
     LifecycleError,
     PullRequestHandoff,
+    implementation_backend_dispatch,
     issue_branch,
     validate_dispatch,
     validate_handoff,
@@ -177,7 +179,19 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
         self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
         self.assertEqual(5, config.symphony["max_concurrency"])
+        self.assertEqual("codex", config.symphony["implementation_backend"])
         validate_model_catalog(config, catalog())
+
+    def test_unknown_implementation_backend_is_rejected(self):
+        raw = json.loads(CONFIG.read_text())
+        raw["symphony"]["implementation_backend"] = "issue-selected"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agents.json"
+            path.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(
+                ConfigError, "implementation backend must be codex or work-mode"
+            ):
+                load_config(path)
 
     def test_unavailable_model_has_no_fallback(self):
         with self.assertRaisesRegex(ConfigError, "configured model unavailable"):
@@ -236,6 +250,8 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(1800, config.roles["implementation"].wall_clock_seconds)
             self.assertEqual(1800, status["wall_clock_timeout_seconds"])
             self.assertEqual("standard", status["worker_class"])
+            self.assertEqual("codex", status["implementation_backend"])
+            self.assertEqual(str(ROOT / "WORKFLOW.md"), status["workflow"])
 
     def test_implementation_wall_clock_timeout_rejects_malformed_value(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -949,6 +965,25 @@ class TriageTests(unittest.TestCase):
 
 
 class ImplementationLifecycleTests(unittest.TestCase):
+    def test_implementation_backend_dispatch_is_bounded_and_config_only(self):
+        symphony = load_config(CONFIG).symphony
+        self.assertEqual(
+            ImplementationBackendDispatch("codex", "implementation", "WORKFLOW.md"),
+            implementation_backend_dispatch(symphony, "standard"),
+        )
+        selected = {**symphony, "implementation_backend": "work-mode"}
+        self.assertEqual(
+            ImplementationBackendDispatch(
+                "work-mode", "implementation_deep", "WORKFLOW.work-mode.deep.md"
+            ),
+            implementation_backend_dispatch(selected, "deep"),
+        )
+        with self.assertRaisesRegex(LifecycleError, "codex or work-mode"):
+            implementation_backend_dispatch(
+                {**symphony, "implementation_backend": "from-issue-text"},
+                "standard",
+            )
+
     def test_branch_name_dispatch_gate_and_human_review_stop(self):
         self.assertEqual("symphony/san-123", issue_branch("SAN-123"))
         validate_dispatch("Ready for Agent", ["security", "symphony", "agent-standard"])

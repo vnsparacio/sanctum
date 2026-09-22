@@ -105,11 +105,14 @@
     }
   },
   "symphony": {
+    "implementation_backend": "codex",
     "binary_env": "SANCTUM_SYMPHONY_BIN",
     "default_binary": "symphony",
     "engineering_preview_acknowledged": true,
     "workflow": "WORKFLOW.md",
     "deep_workflow": "WORKFLOW.deep.md",
+    "work_mode_workflow": "WORKFLOW.work-mode.md",
+    "work_mode_deep_workflow": "WORKFLOW.work-mode.deep.md",
     "max_concurrency": 5,
     "shutdown_grace_seconds": 10,
     "state_port": 7788,
