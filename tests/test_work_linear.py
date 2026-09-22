@@ -5,13 +5,22 @@ from sanctum_agents.work_linear import (
     ATTACH_PULL_REQUEST,
     CREATE_COMMENT,
     UPDATE_COMMENT,
+    UPDATE_ISSUE_STATE,
+    GitHubFeedback,
     WorkIssueScope,
+    WorkLifecycleScope,
     WorkLinearError,
     WorkLinearOperations,
+    WorkPullRequest,
 )
 
 ISSUE_ID = "39256548-ce7a-4289-8af6-dedbd6b9e67a"
 PROJECT_ID = "82dc74d8-21e6-4d09-92f5-3f9d12b0948a"
+OWNER_ID = "1a930744-bdc1-4e24-b56e-4b17d33df3fd"
+READY_ID = "284277da-72c0-4d58-bddf-c8d1a6106518"
+PROGRESS_ID = "3c9ab5d9-f1e1-49fd-a2fe-e1f558afce70"
+REVIEW_ID = "93d66584-6fd7-48fa-bf9e-87a605677c3e"
+REWORK_ID = "50353ed0-d82c-4890-9c61-2f9e01b45e32"
 BODY = "## Codex Workpad\n\n### Plan\n- Keep scope fixed.\n\n### Review checkpoint\n- none\n\n### Validation\n- pending"
 
 
@@ -26,6 +35,13 @@ class FakeLinear:
             "url": "https://linear.example/TTE-76",
             "description": "Acceptance: bounded evidence.",
             "state": {"id": "state", "name": "In Progress", "type": "started"},
+            "labels": {
+                "nodes": [
+                    {"id": "s", "name": "symphony"},
+                    {"id": "w", "name": "agent-standard"},
+                ],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            },
             "project": {"id": PROJECT_ID, "name": "Sanctum V1.3"},
             "parent": None,
             "children": {"nodes": []},
@@ -59,6 +75,9 @@ class FakeLinear:
                 }
             )
             result = {"attachmentLinkGitHubPR": {"success": True}}
+        elif query == UPDATE_ISSUE_STATE:
+            self.issue["state"]["id"] = variables["stateId"]
+            result = {"issueUpdate": {"success": True}}
         else:
             result = {"issue": copy.deepcopy(self.issue)}
         if self.fail_after == query:
@@ -77,6 +96,26 @@ class WorkLinearTests(unittest.TestCase):
             repository="vnsparacio/sanctum",
         )
         self.operations = WorkLinearOperations(self.client, self.scope)
+        self.lifecycle = WorkLifecycleScope(
+            ready_state_id=READY_ID,
+            in_progress_state_id=PROGRESS_ID,
+            human_review_state_id=REVIEW_ID,
+            rework_state_id=REWORK_ID,
+            owner_linear_user_id=OWNER_ID,
+            owner_github_login="owner",
+        )
+        self.lifecycle_operations = WorkLinearOperations(
+            self.client, self.scope, self.lifecycle
+        )
+
+    def current_pr(self):
+        return WorkPullRequest(
+            url="https://github.com/vnsparacio/sanctum/pull/76",
+            base_branch="v1.3-dev",
+            head_branch="symphony/tte-76",
+            open=True,
+            merged=False,
+        )
 
     def test_fetch_is_fixed_to_internal_issue_and_project(self):
         issue = self.operations.fetch_issue()
@@ -168,12 +207,135 @@ class WorkLinearTests(unittest.TestCase):
     def test_surface_has_no_issue_creation_state_or_label_mutation(self):
         public = {name for name in dir(self.operations) if not name.startswith("_")}
         self.assertEqual(
-            {"attach_pull_request", "fetch_issue", "scope", "upsert_workpad"},
+            {
+                "attach_pull_request",
+                "begin_implementation",
+                "fetch_issue",
+                "handoff_human_review",
+                "pending_rework_feedback",
+                "scope",
+                "upsert_workpad",
+            },
             public,
         )
         mutation_text = CREATE_COMMENT + UPDATE_COMMENT + ATTACH_PULL_REQUEST
         for forbidden in ("issueCreate", "issueUpdate", "label", "stateId"):
             self.assertNotIn(forbidden, mutation_text)
+
+    def test_begin_consumes_exact_owner_gate_and_reconciles_retry(self):
+        self.client.issue["state"] = {
+            "id": READY_ID,
+            "name": "Ready for Agent",
+            "type": "unstarted",
+        }
+        result = self.lifecycle_operations.begin_implementation("standard")
+        replay = self.lifecycle_operations.begin_implementation("standard")
+        self.assertEqual("updated", result["status"])
+        self.assertEqual("unchanged", replay["status"])
+        self.assertEqual(PROGRESS_ID, self.client.issue["state"]["id"])
+
+    def test_begin_cannot_set_its_gate_or_use_wrong_worker_route(self):
+        self.client.issue["state"]["id"] = READY_ID
+        self.client.issue["labels"]["nodes"] = [
+            {"id": "s", "name": "symphony"},
+            {"id": "d", "name": "agent-deep"},
+        ]
+        with self.assertRaisesRegex(WorkLinearError, "owner-set"):
+            self.lifecycle_operations.begin_implementation("standard")
+        mutations = [
+            call for call in self.client.calls if call[0] == UPDATE_ISSUE_STATE
+        ]
+        self.assertEqual([], mutations)
+
+    def test_handoff_allows_only_same_open_issue_pr_and_human_review(self):
+        self.client.issue["state"]["id"] = PROGRESS_ID
+        self.lifecycle_operations.attach_pull_request(
+            self.current_pr().url, "Synthetic PR"
+        )
+        result = self.lifecycle_operations.handoff_human_review(self.current_pr())
+        replay = self.lifecycle_operations.handoff_human_review(self.current_pr())
+        self.assertEqual("updated", result["status"])
+        self.assertEqual("unchanged", replay["status"])
+        self.assertEqual(REVIEW_ID, self.client.issue["state"]["id"])
+        attempted_states = [
+            variables["stateId"]
+            for query, variables in self.client.calls
+            if query == UPDATE_ISSUE_STATE
+        ]
+        self.assertEqual([REVIEW_ID], attempted_states)
+
+    def test_handoff_rejects_stale_or_other_issue_pr(self):
+        self.client.issue["state"]["id"] = PROGRESS_ID
+        self.lifecycle_operations.attach_pull_request(
+            self.current_pr().url, "Synthetic PR"
+        )
+        stale = WorkPullRequest(**{**self.current_pr().__dict__, "open": False})
+        with self.assertRaisesRegex(WorkLinearError, "unusable"):
+            self.lifecycle_operations.handoff_human_review(stale)
+        other = WorkPullRequest(
+            **{**self.current_pr().__dict__, "head_branch": "symphony/tte-77"}
+        )
+        with self.assertRaisesRegex(WorkLinearError, "unusable"):
+            self.lifecycle_operations.handoff_human_review(other)
+
+    def test_rework_requires_explicit_state_and_filters_checkpointed_or_bot_feedback(
+        self,
+    ):
+        self.client.issue["state"]["id"] = REWORK_ID
+        self.lifecycle_operations.attach_pull_request(
+            self.current_pr().url, "Synthetic PR"
+        )
+        workpad = BODY.replace(
+            "- none",
+            "- Linear comment `seen` -> INCREMENTAL -> commit `abc`\n"
+            "- GitHub review comment `22` -> INCREMENTAL -> commit `abc`",
+        )
+        self.client.issue["comments"]["nodes"] = [
+            {"id": "workpad", "body": workpad, "user": {"id": OWNER_ID}},
+            {"id": "seen", "body": "old", "user": {"id": OWNER_ID}},
+            {"id": "new", "body": "fix this", "user": {"id": OWNER_ID}},
+            {"id": "bot", "body": "ignore", "user": {"id": "integration"}},
+        ]
+        pending = self.lifecycle_operations.pending_rework_feedback(
+            self.current_pr(),
+            [
+                GitHubFeedback("review comment", "22", "old", "owner"),
+                GitHubFeedback("review", "22", "distinct review", "owner"),
+                GitHubFeedback("review", "23", "new review", "owner"),
+                GitHubFeedback("issue comment", "24", "bot", "owner", is_bot=True),
+                GitHubFeedback("review", "25", "unknown", "someone-else"),
+            ],
+        )
+        self.assertEqual(
+            [
+                {"provider": "linear", "id": "new", "body": "fix this"},
+                {
+                    "provider": "github",
+                    "kind": "review",
+                    "id": "22",
+                    "body": "distinct review",
+                },
+                {
+                    "provider": "github",
+                    "kind": "review",
+                    "id": "23",
+                    "body": "new review",
+                },
+            ],
+            pending,
+        )
+        self.client.issue["state"]["id"] = REVIEW_ID
+        with self.assertRaisesRegex(WorkLinearError, "explicit Rework"):
+            self.lifecycle_operations.pending_rework_feedback(self.current_pr())
+
+    def test_state_timeout_reconciles_without_replaying_transition(self):
+        self.client.issue["state"]["id"] = READY_ID
+        self.client.fail_after = UPDATE_ISSUE_STATE
+        result = self.lifecycle_operations.begin_implementation("standard")
+        self.assertEqual("reconciled", result["status"])
+        self.assertEqual(
+            1, sum(query == UPDATE_ISSUE_STATE for query, _ in self.client.calls)
+        )
 
 
 if __name__ == "__main__":
