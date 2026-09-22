@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .implementation import LifecycleError, implementation_backend_dispatch
+
 
 class ConfigError(ValueError):
     """Configuration is missing, malformed, or unsafe."""
@@ -168,9 +170,21 @@ def load_config(path: str | Path) -> AgentConfig:
         raise ConfigError(
             "Symphony engineering preview must be explicitly acknowledged"
         )
-    for key in ("binary_env", "default_binary", "workflow", "deep_workflow"):
+    for key in (
+        "binary_env",
+        "default_binary",
+        "workflow",
+        "deep_workflow",
+        "work_mode_workflow",
+        "work_mode_deep_workflow",
+    ):
         if not isinstance(symphony.get(key), str) or not symphony[key]:
             raise ConfigError(f"symphony.{key} must be non-empty")
+    try:
+        implementation_backend_dispatch(symphony, "standard")
+        implementation_backend_dispatch(symphony, "deep")
+    except LifecycleError as exc:
+        raise ConfigError(str(exc)) from exc
     for key in (
         "shutdown_grace_seconds",
         "state_port",
