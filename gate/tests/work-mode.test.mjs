@@ -291,10 +291,12 @@ test('SEMANTIC_SURFACE telemetry is allowlisted, redacts escalation text, and pr
  const root=mkdtempSync(join(tmpdir(),'sanctum-ledger-')),taskId='b'.repeat(32),secret='PRIVATE_SECRET_VALUE';
  try{
    const ledger=createWorkLedger({root,taskId,key:Buffer.alloc(32,7),metadata:{goal:'private goal',profile:'synthetic',reasonerRelease:'test',manifestDigest:'a'.repeat(64)},now:()=>1});
+   ledger.event('EXECUTION',{capability:'worktree_command',executionState:'COMPLETION_UNKNOWN',resultDigest:'f'.repeat(64),verifier:'REJECTED',operation:'test',commandCode:'COMMAND_TIMEOUT',outputDigest:'e'.repeat(64),outputBytes:32,elapsedMs:1000,containerAbsent:true,output:secret,diagnostic:secret});
    const result=await createWorkMode(workConfig({reasoner:reasoner([{kind:'ESCALATION',reason:secret}]),manifest,workspaceState:async({scope,workspace,turn})=>workspaceEvidence({scope,workspace,turn,diffBytes:0,statusBytes:0}),invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true}),onEvent:(kind,value)=>ledger.event(kind,value)})).run({task:'private goal',scope:taskId,requestId});
    ledger.finish({status:result.status,reason:result.reason,metrics:result.metrics});
    const raw=readFileSync(join(root,taskId,'events.jsonl'),'utf8');assert.ok(!raw.includes(secret));assert.ok(!raw.includes('private goal'));
    const rows=raw.trim().split('\n').map(JSON.parse),surfaces=rows.filter(x=>x.kind==='SEMANTIC_SURFACE');assert.equal(surfaces.length,2);
+   const command=rows.find(x=>x.kind==='EXECUTION');assert.equal(command.commandCode,'COMMAND_TIMEOUT');assert.equal(command.outputDigest,'e'.repeat(64));assert.equal(command.output,undefined);assert.equal(command.diagnostic,undefined);
    const allowed=new Set(['schema','taskId','sequence','time','kind','previousDigest','eventDigest','phase','iteration','modelCalls','stage','decisionState','completionEligible','eligibilityReason','completionPolicy','schemaVersion','schemaDigest','semanticSchemaDigest','terminalKinds','visibleCapabilities','workspaceGeneration','snapshotDigest','postPatchTestOutstanding','latestTestState','evaluatorState','evaluationTrigger','selectedResultKind','validationCode','reviewDisposition']);
    for(const row of surfaces)assert.deepEqual(Object.keys(row).filter(key=>!allowed.has(key)),[]);
    let previous='0'.repeat(64);for(const row of rows){const {eventDigest,...base}=row;assert.equal(base.previousDigest,previous);assert.equal(digest(base),eventDigest);previous=eventDigest;}

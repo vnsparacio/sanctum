@@ -5,12 +5,58 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .authority import implementation_eligible
 
 
 class LifecycleError(ValueError):
     """An implementation lifecycle invariant was not satisfied."""
+
+
+@dataclass(frozen=True)
+class ImplementationBackendDispatch:
+    """One reviewed worker backend selected before issue dispatch."""
+
+    backend: str
+    role_name: str
+    workflow: str
+
+
+def implementation_backend_dispatch(
+    symphony: dict[str, Any], worker_class: str
+) -> ImplementationBackendDispatch:
+    """Resolve one bounded backend/workflow pair from central configuration."""
+
+    role_name = {
+        "standard": "implementation",
+        "deep": "implementation_deep",
+    }.get(worker_class)
+    workflow_key = {
+        "standard": "workflow",
+        "deep": "deep_workflow",
+    }.get(worker_class)
+    if role_name is None or workflow_key is None:
+        raise LifecycleError("worker class must be standard or deep")
+
+    backend = symphony.get("implementation_backend")
+    backend_prefix = {
+        "codex": "",
+        "work-mode": "work_mode_",
+    }.get(backend)
+    if backend_prefix is None:
+        raise LifecycleError("implementation backend must be codex or work-mode")
+    workflow = symphony.get(f"{backend_prefix}{workflow_key}")
+    if not isinstance(workflow, str) or not workflow:
+        raise LifecycleError(
+            f"{backend} implementation backend workflow must be configured"
+        )
+    path = Path(workflow)
+    if path.is_absolute() or ".." in path.parts:
+        raise LifecycleError(
+            "implementation backend workflow must be repository-relative"
+        )
+    return ImplementationBackendDispatch(backend, role_name, workflow)
 
 
 def issue_branch(identifier: str) -> str:

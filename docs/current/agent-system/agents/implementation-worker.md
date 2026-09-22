@@ -17,6 +17,18 @@ Review, or weaken privacy, security, authority, validation, or egress
 boundaries. Rework resumes the existing issue branch and PR only after human
 feedback.
 
+## Implementation backend selection
+
+The reviewed `config/agents.json` `symphony.implementation_backend` value
+selects exactly `codex` or `work-mode`. `codex` retains `WORKFLOW.md` and
+`WORKFLOW.deep.md`. `work-mode` resolves only the separately configured
+`work_mode_workflow` and `work_mode_deep_workflow` paths; those workflows are
+not selected by issue content, labels, or model output. Unknown values and
+unsafe workflow paths fail configuration loading. Backend selection changes
+only the worker workflow. Symphony continues to own the execution gate,
+workspace preparation, aggregate budgets, validation and Git control planes,
+and the mandatory Human Review stop.
+
 ## Hard governor
 
 `sanctum_agents.symphony_supervisor` launches the unmodified external Symphony

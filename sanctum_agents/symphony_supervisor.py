@@ -19,6 +19,7 @@ from typing import Any
 from urllib import error, request
 
 from .config import AgentConfig, ConfigError
+from .implementation import LifecycleError, implementation_backend_dispatch
 from .runtime import (
     ExclusiveRoleLock,
     JsonlRunLog,
@@ -543,14 +544,6 @@ def _sanitized_supervisor_environment(
     return {key: value for key, value in values.items() if key in allowed}
 
 
-def _worker_settings(config: AgentConfig, worker_class: str) -> tuple[str, str]:
-    if worker_class == "standard":
-        return "implementation", config.symphony["workflow"]
-    if worker_class == "deep":
-        return "implementation_deep", config.symphony["deep_workflow"]
-    raise ConfigError("worker class must be standard or deep")
-
-
 def preflight(
     config: AgentConfig,
     repository: Path,
@@ -559,7 +552,11 @@ def preflight(
     worker_class: str = "standard",
 ) -> dict[str, Any]:
     values = os.environ if environ is None else environ
-    role_name, workflow_name = _worker_settings(config, worker_class)
+    try:
+        dispatch = implementation_backend_dispatch(config.symphony, worker_class)
+    except LifecycleError as exc:
+        raise ConfigError(str(exc)) from exc
+    role_name, workflow_name = dispatch.role_name, dispatch.workflow
     binary = _resolve_binary(config, values)
     workflow = repository / workflow_name
     if not workflow.is_file():
@@ -567,12 +564,17 @@ def preflight(
     workflow_text = workflow.read_text()
     route = config.project["worker_routing"][f"{worker_class}_label"]
     model = config.model_for(role_name)
-    required_fragments = (
+    required_fragments = [
         f"    - {route}\n",
-        f'model="{model.model}"',
-        f'model_reasoning_effort="{model.reasoning}"',
         f"max_concurrent_agents: {config.symphony['max_concurrency']}",
-    )
+    ]
+    if dispatch.backend == "codex":
+        required_fragments.extend(
+            (
+                f'model="{model.model}"',
+                f'model_reasoning_effort="{model.reasoning}"',
+            )
+        )
     if any(fragment not in workflow_text for fragment in required_fragments):
         raise ConfigError(
             "worker workflow does not match reviewed routing configuration"
@@ -647,6 +649,7 @@ def preflight(
         "binary": binary,
         "launch_prefix": _launch_prefix(binary),
         "workflow": str(workflow),
+        "implementation_backend": dispatch.backend,
         "workspace_root": str(workspace_root),
         "git_broker_python": broker_python,
         "git_broker_script": broker_script,
