@@ -28,7 +28,7 @@ def sources(root=ROOT):
         for n in sorted(
             name
             for name in files
-            if not (exclude_finder_metadata and name == ".DS_Store")
+            if name != ".git" and not (exclude_finder_metadata and name == ".DS_Store")
         ):
             yield Path(base) / n
 
