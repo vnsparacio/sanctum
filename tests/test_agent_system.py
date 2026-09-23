@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -114,6 +115,37 @@ REVIEW_FIXTURE = ROOT / "tests" / "fixtures" / "reviewer-packet.json"
 LINEAR_METADATA_FIXTURE = ROOT / "tests" / "fixtures" / "linear-metadata.json"
 SCHEDULES = ROOT / "config" / "schedules.json"
 PROTECTED_BRANCH_RULESET = ROOT / ".github" / "rulesets" / "protected-branches.json"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def ci_check_names() -> set[str]:
+    workflow = CI_WORKFLOW.read_text()
+    jobs = workflow.split("\njobs:\n", maxsplit=1)[1]
+    starts = list(re.finditer(r"^  ([a-z0-9_-]+):\n", jobs, re.MULTILINE))
+    names: set[str] = set()
+
+    for index, start in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(jobs)
+        block = jobs[start.end() : end]
+        job_name_match = re.search(r"^    name: (.+)$", block, re.MULTILINE)
+        if job_name_match is None:
+            raise AssertionError(
+                f"CI job {start.group(1)!r} has no explicit check name"
+            )
+        job_name = job_name_match.group(1)
+        if "${{ matrix.name }}" in job_name:
+            matrix_names = re.findall(r"^          - name: (.+)$", block, re.MULTILINE)
+            if not matrix_names:
+                raise AssertionError(
+                    f"matrix CI job {start.group(1)!r} has no explicit names"
+                )
+            names.update(
+                job_name.replace("${{ matrix.name }}", name) for name in matrix_names
+            )
+        else:
+            names.add(job_name)
+
+    return names
 
 
 def catalog() -> list[dict[str, object]]:
@@ -147,7 +179,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual([], ruleset["conditions"]["ref_name"]["exclude"])
 
         rules = {rule["type"]: rule for rule in ruleset["rules"]}
-        self.assertEqual({"deletion", "non_fast_forward", "pull_request"}, set(rules))
+        self.assertEqual(
+            {
+                "deletion",
+                "non_fast_forward",
+                "pull_request",
+                "required_status_checks",
+            },
+            set(rules),
+        )
         pull_requests = rules["pull_request"]["parameters"]
         self.assertEqual(0, pull_requests["required_approving_review_count"])
         self.assertTrue(pull_requests["required_review_thread_resolution"])
@@ -165,6 +205,18 @@ class ConfigurationTests(unittest.TestCase):
                 }
             ],
             ruleset["bypass_actors"],
+        )
+
+        status_checks = rules["required_status_checks"]["parameters"]
+        self.assertFalse(status_checks["do_not_enforce_on_create"])
+        self.assertFalse(status_checks["strict_required_status_checks_policy"])
+        required_checks = status_checks["required_status_checks"]
+        self.assertEqual(
+            ci_check_names(), {check["context"] for check in required_checks}
+        )
+        self.assertEqual(len(required_checks), len(ci_check_names()))
+        self.assertEqual(
+            {15368}, {check["integration_id"] for check in required_checks}
         )
 
     def write_timeout_config(self, directory: str, value: object) -> Path:
