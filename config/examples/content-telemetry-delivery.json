@@ -1,0 +1,13 @@
+{
+  "schema": "sanctum.content-delivery/v1",
+  "enabled": false,
+  "aws_cli": "/opt/homebrew/bin/aws",
+  "aws_profile": "sanctum-content-writer",
+  "region": "us-west-2",
+  "bucket": "replace-with-private-content-bucket",
+  "prefix": "content/",
+  "max_batches_per_run": 100,
+  "max_attempts": 3,
+  "base_backoff_ms": 1000,
+  "max_backoff_ms": 30000
+}

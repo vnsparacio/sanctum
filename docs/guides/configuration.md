@@ -14,9 +14,18 @@ reviewed `content_telemetry` settings contain only `enabled`,
 the external private state directory at `telemetry/content`. It is separate
 from the metadata-only operational `ops/` spool and cannot be selected by a
 request, model response, or environment-provided destination. Enabling or
-changing this policy requires an owner-reviewed stopped-gateway settings
-amendment and a new private source freeze; there is no content export in this
-slice.
+changing collection policy requires an owner-reviewed stopped-gateway settings
+amendment and a new private source freeze.
+
+Content delivery has a second, private configuration file based on
+`config/examples/content-telemetry-delivery.json`. Copy it beneath the external
+private prefix, keep it owner-owned mode `0600`, replace the bucket, region,
+AWS CLI and profile bindings locally, and enable it only after the IAM and
+prefix review in the content telemetry runbook. Never put AWS access keys,
+session tokens, account IDs, bucket names, or a rendered delivery file in Git.
+The profile must resolve through the owner's external AWS credential store.
+The content destination must not be `ops/`; the delivery validator rejects an
+operational prefix and unknown fields, including embedded credential fields.
 
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 

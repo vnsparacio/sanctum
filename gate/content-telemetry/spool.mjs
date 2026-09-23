@@ -26,7 +26,7 @@ export const CONTENT_TELEMETRY_SPOOL_DEFAULTS=Object.freeze({
  max_bytes:64*1024*1024,
 });
 
-const AREAS=Object.freeze(['pending','failed','quarantine','staging']);
+const AREAS=Object.freeze(['pending','failed','quarantine','staging','uploading']);
 const PRIVATE_DIRECTORY_MODE=0o700;
 const PRIVATE_FILE_MODE=0o600;
 const OPEN_EXCLUSIVE=constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0);
@@ -168,12 +168,12 @@ export function createContentTelemetrySpool({config,root,limits}={}){
   if(!enabled||!valid)return Object.freeze(summary);
   try{
    return withLock(()=>{
-    for(const area of ['staging','pending','failed']){
+    for(const area of ['staging','uploading','pending','failed']){
      for(const name of readdirSync(paths[area])){
       const file=join(paths[area],name);
       let complete=false;
       try{complete=canonicalSegment(file)!==null;}catch{}
-      if(area==='staging'&&complete){move(paths,file,'pending','jsonl');continue;}
+      if(['staging','uploading'].includes(area)&&complete){move(paths,file,'pending','jsonl');continue;}
       if(!complete){move(paths,file,'quarantine','bad');summary.quarantined+=1;continue;}
      }
     }

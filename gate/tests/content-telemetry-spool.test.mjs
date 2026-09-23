@@ -44,7 +44,7 @@ test('valid redacted records rotate atomically into the separate private pending
  try{
   const spool=createContentTelemetrySpool({config:enabled,root:f.root});
   assert.equal(spool.append({...base(),user_query:'Authorization: Bearer do-not-persist'}),true);
-  for(const directory of [f.root,'pending','failed','quarantine','staging'].map(name=>name===f.root?name:join(f.root,name)))assert.equal(lstatSync(directory).mode&0o777,0o700);
+  for(const directory of [f.root,'pending','failed','quarantine','staging','uploading'].map(name=>name===f.root?name:join(f.root,name)))assert.equal(lstatSync(directory).mode&0o777,0o700);
   const pending=readdirSync(join(f.root,'pending'));assert.equal(pending.length,1);
   const file=join(f.root,'pending',pending[0]);assert.equal(lstatSync(file).mode&0o777,0o600);
   const stored=readFileSync(file,'utf8');assert.equal(stored.endsWith('\n'),true);assert.equal(stored.includes('do-not-persist'),false);assert.match(stored,/REDACTED/);
@@ -67,16 +67,17 @@ test('recovery preserves complete staged and failed records and quarantines part
  const f=fixture();
  try{
   const spool=createContentTelemetrySpool({config:enabled,root:f.root});assert.equal(spool.append(base()),true);
-  const pendingDir=join(f.root,'pending'),failedDir=join(f.root,'failed'),stagingDir=join(f.root,'staging');
+  const pendingDir=join(f.root,'pending'),failedDir=join(f.root,'failed'),stagingDir=join(f.root,'staging'),uploadingDir=join(f.root,'uploading');
   const first=readdirSync(pendingDir)[0];renameSync(join(pendingDir,first),join(failedDir,first));
   const complete=JSON.stringify(prepareContentTelemetryRecord({...base(),event_id:'event-2'}))+'\n';
   writeFileSync(join(stagingDir,'complete.partial'),complete,{mode:0o600,flag:'wx'});
+  writeFileSync(join(uploadingDir,'interrupted.jsonl'),JSON.stringify(prepareContentTelemetryRecord({...base(),event_id:'event-3'}))+'\n',{mode:0o600,flag:'wx'});
   writeFileSync(join(stagingDir,'partial.partial'),complete.slice(0,-8),{mode:0o644,flag:'wx'});
   writeFileSync(join(pendingDir,'malformed.jsonl'),'{"schema_version":"bad"}\n',{mode:0o600,flag:'wx'});
   writeFileSync(join(f.root,'.writer.lock'),JSON.stringify({pid:2147483647})+'\n',{mode:0o600,flag:'wx'});
   const recovered=spool.recover();
-  assert.deepEqual(recovered,{pending:1,failed:1,quarantined:2});
-  assert.equal(readdirSync(failedDir).length,1);assert.equal(readdirSync(pendingDir).length,1);
+  assert.deepEqual(recovered,{pending:2,failed:1,quarantined:2});
+  assert.equal(readdirSync(failedDir).length,1);assert.equal(readdirSync(pendingDir).length,2);
   const quarantined=readdirSync(join(f.root,'quarantine'));assert.equal(quarantined.length,2);assert.equal(readdirSync(stagingDir).length,0);
   for(const name of quarantined)assert.equal(lstatSync(join(f.root,'quarantine',name)).mode&0o777,0o600);
   assert.equal(existsSync(join(f.root,'.writer.lock')),false);

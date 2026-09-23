@@ -6,8 +6,9 @@
 content-bearing interaction and evaluation stream. The authenticated gate
 records one terminal outcome for each owner-enabled conversational interaction
 and its local persistence adapter stores validated and redacted records in a
-separate private spool. This slice does not upload records or make an S3 or
-Splunk change.
+separate private spool. A separately configured delivery process may upload
+only sealed canonical batches to a dedicated S3 content prefix. Live AWS IAM,
+bucket, scheduler and Splunk changes remain explicit later owner actions.
 
 This stream is separate from the existing metadata-only operational telemetry
 under `ops/` and from manual Observability Cloud traces and metrics. Content
@@ -62,12 +63,12 @@ The contract exposes three validated, non-secret policy hooks:
 - `access_policy`: `owner_only` by default, or
   `owner_authorized_reviewers` after explicit owner configuration.
 
-These hooks define policy intent only. They contain no credentials, endpoints,
-bucket names, indexes, account bindings, or private infrastructure values. The
-local root is derived from the private rendered state directory as
-`telemetry/content`; it is not model- or request-selectable. Adding export
-requires a separate reviewed change with private runtime binding, access
-enforcement, deletion behavior, and live validation.
+These hooks define collection policy intent only. They contain no credentials,
+endpoints, bucket names, indexes, account bindings, or private infrastructure
+values. The local root is derived from the private rendered state directory as
+`telemetry/content`; it is not model- or request-selectable. Delivery uses a
+distinct owner-only private file with the destination and AWS profile name;
+credential values remain solely in the external AWS credential store.
 
 ## Durable local spool
 
@@ -78,7 +79,7 @@ deployment should bind the root beneath its external private prefix (for
 example, `telemetry/content`), never beneath the source tree or the operational
 `ops/` spool.
 
-The root and its `pending`, `failed`, `quarantine`, and `staging` directories
+The root and its `pending`, `failed`, `quarantine`, `staging`, and `uploading` directories
 must be owner-owned mode `0700`; record and lock files are created exclusively
 at mode `0600` without following a final-component symlink. Existing unsafe
 permissions, ownership, file types, or symlinks cause a best-effort failure and
@@ -91,8 +92,8 @@ later immutable delivery. The default spool limits are 1,000 files and 64 MiB;
 configured limits are bounded and reject a new append instead of deleting any
 pending, failed, quarantined, or staged state.
 
-Recovery revalidates canonical redacted records. A complete staged record is
-promoted to `pending`; valid `pending` and `failed` files remain recoverable;
+Recovery revalidates canonical redacted records. A complete staged or interrupted
+upload record is promoted to `pending`; valid `pending` and `failed` files remain recoverable;
 partial, malformed, unredacted, oversized, or otherwise invalid files move to
 `quarantine` with private file mode enforced. A later process may reclaim the
 exclusive writer lock only when its recorded writer PID no longer exists, so a
@@ -101,6 +102,31 @@ uploaded or silently expired. Spool,
 permission, validation, lock, and I/O failures return a content-free failure
 signal, emit no raw exception/log fallback, and have no authority, routing,
 egress, response-delivery, evaluator, verifier, or completion effect.
+
+## Immutable S3 delivery
+
+`gate/content-telemetry/delivery.mjs` is a standalone, owner-scheduled process;
+it is not part of request handling and cannot affect a Sanctum response. A run
+claims at most the configured number of `pending` and `failed` files. It
+revalidates private ownership, permissions, canonical serialization, schema,
+redaction and size before any network call. Invalid, partial or malformed
+files move to private quarantine and are never uploaded.
+
+Each canonical one-record batch maps deterministically to
+`PREFIX/YYYY/MM/DD/EVENT_ID-SHA256.jsonl`. The AWS CLI adapter sends
+`PutObject` with `If-None-Match: *`, content type `application/x-ndjson`, and
+the batch digest as non-secret object metadata. A successful write removes the
+claimed local copy. An HTTP 412/`PreconditionFailed` on the same digest-bound
+key reconciles a prior or duplicate successful write without replacing it.
+Other ambiguous failures receive exponential backoff only up to the configured
+attempt bound, then return the intact batch to `failed` for a later run. A
+crash in `uploading` is recovered to `pending` before another run.
+
+The adapter suppresses AWS CLI output and exposes only bounded counts. It does
+not log batch content, destination values, profile contents, process
+environment, or provider diagnostics. The writer credential needs only
+conditional `s3:PutObject` for the content object prefix; it does not need
+`GetObject`, `ListBucket`, overwrite, delete, or any permission under `ops/`.
 
 ## Authenticated interaction lifecycle
 
