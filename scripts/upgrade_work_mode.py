@@ -59,6 +59,7 @@ FILES = (
     "content-telemetry/contract.mjs",
     "content-telemetry/interaction.mjs",
     "content-telemetry/spool.mjs",
+    "content-telemetry/delivery.mjs",
     "plugin/index.mjs",
     "plugin/core.mjs",
     "plugin/observability.mjs",
