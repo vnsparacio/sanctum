@@ -3,7 +3,6 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "splunk/sanctum_content"
 
@@ -78,7 +77,10 @@ class SplunkContentAssets(unittest.TestCase):
             "output_tokens",
         ):
             self.assertIn(field, detail)
-        self.assertIn("semantic_failure_category", searches["Sanctum Content - Quality Signals"]["search"])
+        self.assertIn(
+            "semantic_failure_category",
+            searches["Sanctum Content - Quality Signals"]["search"],
+        )
         correlation = searches["Sanctum Content - Trace Correlation"]["search"]
         self.assertIn("index=sanctum_content", correlation)
         self.assertIn("index=sanctum_ops", correlation)

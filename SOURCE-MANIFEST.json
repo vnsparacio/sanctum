@@ -440,7 +440,7 @@
   "tests/test_git_control_plane.py": "28772d6819958666d2bd151e8327d6e13034bba2c1db5828d5c015114fb1dc10",
   "tests/test_release.py": "78aa98e6f47a459d55044e97e4816df2b428b36c28f2b59cac214cc66ad3e769",
   "tests/test_rework_workflow.py": "e7e6d4c2a1d53735ca19cb6e98eb0bbfc56bde39b70586ddded3f5f0e7487332",
-  "tests/test_splunk_content_assets.py": "84723eda4fec5b72ec22c25e0954ab2c858f7c210dfb08948f906e81f0ddd504",
+  "tests/test_splunk_content_assets.py": "061449aa849ff2ebc32b9ebcc289298e88e5eb6d2a690b53aac65dd9c9d278d8",
   "tests/test_validation_runner.py": "6b2639b54bd6ab77489fd0d44c5b2711da6955a560576a745f0b9be59284ce4f",
   "tests/test_work_bridge.py": "0a267b13b148a07bccfee0aa76f93d8c54aa0cd96a9f626c129361d9cfe2779f",
   "tests/test_work_commands.py": "5075ca99b57fe7f9ba1d01e4b097025b849c5b3891c452b308b47459f17fcd5a",
