@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sanctum.local/schemas/content-telemetry-v1.schema.json",
+  "title": "Sanctum restricted AI interaction telemetry record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "interaction_id",
+    "timestamp",
+    "correlation",
+    "user_query",
+    "delivered_response",
+    "outcome",
+    "failure",
+    "model"
+  ],
+  "properties": {
+    "schema_version": {"const": "sanctum.ai-interaction/v1"},
+    "event_id": {"$ref": "#/definitions/id"},
+    "interaction_id": {"$ref": "#/definitions/id"},
+    "timestamp": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "run_id": {"$ref": "#/definitions/id"},
+        "session_id": {"$ref": "#/definitions/id"},
+        "trace_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"}
+      }
+    },
+    "user_query": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "delivered_response": {"type": ["string", "null"], "maxLength": 32768},
+    "outcome": {"enum": ["success", "failure", "blocked", "denied", "unknown"]},
+    "failure": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stage", "category", "code"],
+          "properties": {
+            "stage": {"$ref": "#/definitions/code"},
+            "category": {"$ref": "#/definitions/code"},
+            "code": {"$ref": "#/definitions/code"}
+          }
+        }
+      ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "model", "revision", "provider"],
+      "properties": {
+        "role": {"$ref": "#/definitions/id"},
+        "model": {"$ref": "#/definitions/id"},
+        "revision": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@+-]*$"},
+        "provider": {"$ref": "#/definitions/id"}
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "latency_ms": {"type": "integer", "minimum": 0, "maximum": 86400000},
+        "input_tokens": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "output_tokens": {"type": "integer", "minimum": 0, "maximum": 10000000}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "owner_rating": {"type": "integer", "minimum": 1, "maximum": 5},
+        "evaluator_id": {"$ref": "#/definitions/id"},
+        "evaluator_version": {"$ref": "#/definitions/id"},
+        "evaluator_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "evaluator_label": {"$ref": "#/definitions/code"},
+        "benchmark_id": {"$ref": "#/definitions/id"},
+        "benchmark_version": {"$ref": "#/definitions/id"},
+        "test_case_id": {"$ref": "#/definitions/id"},
+        "test_case_version": {"$ref": "#/definitions/id"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "delivered_response": {"type": "string", "minLength": 1},
+          "failure": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"outcome": {"enum": ["failure", "blocked", "denied"]}}},
+      "then": {
+        "properties": {
+          "failure": {"type": "object"}
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@+-]*$"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    }
+  }
+}
