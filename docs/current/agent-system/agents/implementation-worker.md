@@ -157,6 +157,10 @@ The workflow parses under the inspected Symphony schema with the intended
 model, timeouts, concurrency, retry backoff, and active states. Synthetic
 integration tests prove process-group termination, incidents, explicit resume,
 validation isolation, and Git/PR reconciliation. Live TTE-9/TTE-14 history is
-diagnostic evidence, not post-change qualification. A new controlled smoke
-must reach Human Review before enabling continuous implementation; until then,
-implementation `write_enabled` stays false.
+diagnostic evidence, not post-change qualification. The owner-gated TTE-90
+smoke completed the non-Sanctum Qwen-to-PR path and stopped at Human Review;
+the exact evidence and limits are recorded in
+[V1.3 Qwen lifecycle qualification](../V1.3-QWEN-LIFECYCLE-QUALIFICATION.md).
+That bounded result does not itself enable continuous implementation. The
+source default keeps implementation `write_enabled` false pending a separate
+reviewed owner decision.
