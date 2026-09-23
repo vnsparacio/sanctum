@@ -385,7 +385,13 @@ class GitControlPlane:
             self._lease_path(identity), self._lease_value(identity, base_head)
         )
 
-    def _require_lease(self, identity: WorkspaceIdentity) -> dict[str, Any]:
+    def _legacy_lease_value(self, identity: WorkspaceIdentity) -> dict[str, Any]:
+        value = self._lease_value(identity, "0" * 40)
+        value["schema_version"] = 1
+        value.pop("base_head")
+        return value
+
+    def _read_lease(self, identity: WorkspaceIdentity) -> dict[str, Any]:
         path = self._lease_path(identity)
         try:
             value = json.loads(path.read_text())
@@ -393,6 +399,45 @@ class GitControlPlane:
             raise GitControlError(
                 "workspace_not_prepared", "host workspace lease is missing or invalid"
             ) from exc
+        if not isinstance(value, dict):
+            raise GitControlError(
+                "workspace_not_prepared", "host workspace lease is missing or invalid"
+            )
+        return value
+
+    def _legacy_base_head(self, identity: WorkspaceIdentity) -> str:
+        if self._current_branch() != identity.branch:
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        result = self._git(
+            "merge-base",
+            "HEAD",
+            f"refs/remotes/origin/{INTEGRATION_BASE}",
+            check=False,
+        )
+        base_head = result.stdout.strip()
+        if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", base_head):
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        return base_head
+
+    def _require_lease(
+        self, identity: WorkspaceIdentity, *, migrate_legacy: bool = False
+    ) -> dict[str, Any]:
+        value = self._read_lease(identity)
+        if migrate_legacy and value.get("schema_version") == 1:
+            if value != self._legacy_lease_value(identity):
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
+            base_head = self._legacy_base_head(identity)
+            self._write_lease(identity, base_head)
+            return self._lease_value(identity, base_head)
         base_head = value.get("base_head") if isinstance(value, dict) else None
         if not isinstance(base_head, str) or not re.fullmatch(
             r"[0-9a-f]{40,64}", base_head
@@ -408,6 +453,60 @@ class GitControlPlane:
             )
         return value
 
+    def _operation_receipts_exist(self, identity: WorkspaceIdentity) -> bool:
+        operations = self.state_root / "operations" / identity.issue_identifier
+        try:
+            if operations.is_symlink():
+                return True
+            if not operations.exists():
+                return False
+            if not operations.is_dir():
+                return True
+            return any(operations.iterdir())
+        except OSError:
+            return True
+
+    def _validate_stale_lease_binding(
+        self, identity: WorkspaceIdentity, value: dict[str, Any]
+    ) -> None:
+        schema = value.get("schema_version")
+        allowed = set(self._legacy_lease_value(identity))
+        if schema == 2:
+            allowed.add("base_head")
+            base_head = value.get("base_head")
+            if not isinstance(base_head, str) or not re.fullmatch(
+                r"[0-9a-f]{40,64}", base_head
+            ):
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
+        elif schema != 1:
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        if set(value) != allowed:
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        expected = self._legacy_lease_value(identity)
+        for key in (
+            "workspace",
+            "workspace_root",
+            "git_dir",
+            "issue_identifier",
+            "branch",
+            "base",
+            "remote",
+        ):
+            if value.get(key) != expected[key]:
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
+
     def _current_branch(self) -> str:
         return self._git("branch", "--show-current").stdout.strip()
 
@@ -417,14 +516,35 @@ class GitControlPlane:
     def _clean(self) -> bool:
         return not self._git("status", "--porcelain=v1", "--untracked-files=all").stdout
 
-    def prepare(self, requested_base: str = INTEGRATION_BASE) -> dict[str, Any]:
+    def prepare(
+        self,
+        requested_base: str = INTEGRATION_BASE,
+        *,
+        fresh_workspace: bool = False,
+    ) -> dict[str, Any]:
         if requested_base != INTEGRATION_BASE:
             raise GitControlError("base_rejected", "only origin/v1.3-dev is permitted")
         identity = self.identity()
         lease_exists = self._lease_path(identity).exists()
         lease = None
+        stale_lease = None
         if lease_exists:
-            lease = self._require_lease(identity)
+            try:
+                lease = self._require_lease(identity, migrate_legacy=True)
+            except GitControlError as exc:
+                if not fresh_workspace or exc.code != "workspace_identity_changed":
+                    raise
+                stale_lease = self._read_lease(identity)
+                self._validate_stale_lease_binding(identity, stale_lease)
+                if (
+                    self._current_branch() != INTEGRATION_BASE
+                    or not self._clean()
+                    or self._operation_receipts_exist(identity)
+                ):
+                    raise GitControlError(
+                        "workspace_rebind_rejected",
+                        "fresh workspace cannot safely replace the existing lease",
+                    )
         self._git(
             "fetch",
             "--no-tags",
@@ -435,10 +555,29 @@ class GitControlPlane:
             "rev-parse", f"refs/remotes/origin/{INTEGRATION_BASE}"
         ).stdout.strip()
         if lease and lease["base_head"] != base_head:
-            raise GitControlError(
-                "base_advanced",
-                "accepted origin/v1.3-dev advanced after workspace preparation",
-            )
+            if (
+                self._current_branch() == identity.branch
+                and self._clean()
+                and self._head() == lease["base_head"]
+                and not self._operation_receipts_exist(identity)
+            ):
+                self._git(
+                    "merge",
+                    "--ff-only",
+                    f"refs/remotes/origin/{INTEGRATION_BASE}",
+                )
+                if self._head() != base_head:
+                    raise GitControlError(
+                        "base_refresh_failed",
+                        "untouched issue workspace did not reach the accepted base",
+                    )
+                self._write_lease(identity, base_head)
+                lease = self._lease_value(identity, base_head)
+            else:
+                raise GitControlError(
+                    "base_advanced",
+                    "accepted origin/v1.3-dev advanced after workspace preparation",
+                )
         current = self._current_branch()
         if current == INTEGRATION_BASE:
             if not self._clean():
@@ -473,7 +612,18 @@ class GitControlPlane:
                     "branch_base_rejected",
                     "unleased issue branch does not descend from accepted origin/v1.3-dev",
                 )
-        if not lease_exists:
+        if stale_lease is not None:
+            if (
+                not self._clean()
+                or self._head() != base_head
+                or self._operation_receipts_exist(identity)
+            ):
+                raise GitControlError(
+                    "workspace_rebind_rejected",
+                    "fresh workspace cannot safely replace the existing lease",
+                )
+            self._write_lease(identity, base_head)
+        elif not lease_exists:
             self._write_lease(identity, base_head)
         return {
             "issue_identifier": identity.issue_identifier,

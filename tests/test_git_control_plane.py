@@ -123,6 +123,99 @@ class GitControlPlaneTests(unittest.TestCase):
         with self.assertRaisesRegex(GitControlError, "reviewed repository remote"):
             self.broker().status()
 
+    def test_exact_legacy_lease_migrates_and_refreshes_untouched_branch(self):
+        broker = self.broker()
+        broker.prepare()
+        identity = broker.identity()
+        lease_path = broker._lease_path(identity)
+        legacy = json.loads(lease_path.read_text())
+        legacy["schema_version"] = 1
+        legacy.pop("base_head")
+        lease_path.write_text(json.dumps(legacy))
+
+        (self.seed / "README.md").write_text("advanced accepted base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+        expected = self._run(["git", "rev-parse", "HEAD"], cwd=self.seed).stdout.strip()
+
+        value = broker.prepare()
+
+        self.assertEqual(expected, value["head"])
+        migrated = json.loads(lease_path.read_text())
+        self.assertEqual(2, migrated["schema_version"])
+        self.assertEqual(expected, migrated["base_head"])
+
+    def test_fresh_workspace_hook_rebinds_only_static_stale_lease(self):
+        broker = self.broker()
+        identity = broker.identity()
+        base_head = broker._head()
+        stale = broker._lease_value(identity, base_head)
+        stale["workspace_inode"] += 1
+        path = broker._lease_path(identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(stale))
+
+        value = broker.prepare(fresh_workspace=True)
+
+        self.assertEqual("symphony/tte-9", value["branch"])
+        self.assertEqual(
+            broker._lease_value(identity, base_head), json.loads(path.read_text())
+        )
+
+    def test_fresh_workspace_hook_preserves_lease_when_receipts_exist(self):
+        broker = self.broker()
+        identity = broker.identity()
+        stale = broker._lease_value(identity, broker._head())
+        stale["git_dir_inode"] += 1
+        path = broker._lease_path(identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(stale))
+        operations = self.state / "operations" / identity.issue_identifier
+        operations.mkdir(parents=True)
+        (operations / "preserve.json").write_text("{}")
+
+        with self.assertRaisesRegex(GitControlError, "cannot safely replace"):
+            broker.prepare(fresh_workspace=True)
+
+    def test_advanced_base_preserves_workspace_with_operation_receipts(self):
+        broker = self.broker()
+        broker.prepare()
+        operations = self.state / "operations" / "TTE-9"
+        operations.mkdir(parents=True)
+        (operations / "preserve.json").write_text("{}")
+        (self.seed / "README.md").write_text("advanced accepted base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+
+        with self.assertRaisesRegex(GitControlError, "advanced"):
+            broker.prepare()
+
     def test_workspace_symlink_and_git_pointer_are_rejected(self):
         link = self.root / "TTE-10"
         link.symlink_to(self.workspace, target_is_directory=True)

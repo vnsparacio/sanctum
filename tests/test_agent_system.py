@@ -1307,6 +1307,8 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("max_turns: 30", deep_workflow)
         self.assertIn("Human Review` is a hard stopping point", workflow)
         self.assertIn("github_ensure_issue_pull_request", workflow)
+        self.assertIn("prepare --fresh-workspace", workflow)
+        self.assertEqual(1, workflow.count("prepare --fresh-workspace"))
         self.assertNotIn(" gh ", workflow)
         self.assertNotIn("gh pr merge", workflow)
 
