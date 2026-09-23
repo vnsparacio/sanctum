@@ -215,6 +215,7 @@ def configure(prefix, proposal):
         "work_integrity",
         "work_editing",
         "observability",
+        "content_telemetry",
     }:
         raise ValueError("Unknown configuration field")
     changes = {}
@@ -265,6 +266,41 @@ def configure(prefix, proposal):
         else:
             raise ValueError("Observability enabled must be boolean")
         changes["config/environment.json"] = json.dumps(env, indent=2) + "\n"
+    if "content_telemetry" in proposal:
+        if set(proposal) != {"content_telemetry"}:
+            raise ValueError(
+                "Content telemetry amendment cannot combine configuration changes"
+            )
+        item = proposal["content_telemetry"]
+        if type(item) is not dict or set(item) != {
+            "enabled",
+            "retention_days",
+            "access_policy",
+        }:
+            raise ValueError("Invalid content telemetry amendment")
+        enabled = item["enabled"]
+        retention_days = item["retention_days"]
+        access_policy = item["access_policy"]
+        if type(enabled) is not bool:
+            raise ValueError("Content telemetry enabled must be boolean")
+        if retention_days is not None and (
+            type(retention_days) is not int or not 1 <= retention_days <= 3650
+        ):
+            raise ValueError("Invalid content telemetry retention policy")
+        if enabled and retention_days is None:
+            raise ValueError(
+                "Enabled content telemetry requires an explicit retention policy"
+            )
+        if access_policy not in ("owner_only", "owner_authorized_reviewers"):
+            raise ValueError("Invalid content telemetry access policy")
+        settings = json.loads((prefix / "gate/SETTINGS.json").read_text())
+        settings["content_telemetry"] = item
+        changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
+        freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
+        freeze["SETTINGS.json"] = hashlib.sha256(
+            changes["gate/SETTINGS.json"].encode()
+        ).hexdigest()
+        changes["gate/FREEZE.json"] = json.dumps(freeze, indent=2) + "\n"
     if "work_editing" in proposal:
         if set(proposal) != {"work_editing"}:
             raise ValueError("Editing amendment cannot combine configuration changes")
