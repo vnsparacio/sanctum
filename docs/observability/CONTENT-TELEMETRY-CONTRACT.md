@@ -2,10 +2,11 @@
 
 ## Status and boundary
 
-`sanctum.ai-interaction/v1` is the source contract for a future restricted,
-content-bearing interaction and evaluation stream. This slice defines and
-tests the record boundary only. It does not collect, persist, spool, upload, or
-export records and makes no S3 or Splunk change.
+`sanctum.ai-interaction/v1` is the source contract for a restricted,
+content-bearing interaction and evaluation stream. Its local persistence
+adapter stores validated and redacted records in a separate private spool. It
+does not collect interactions at a call site, upload records, or make an S3 or
+Splunk change.
 
 This stream is separate from the existing metadata-only operational telemetry
 under `ops/` and from manual Observability Cloud traces and metrics. Content
@@ -61,5 +62,38 @@ The contract reserves three validated, non-secret policy hooks:
 
 These hooks define policy intent only. They contain no credentials, endpoints,
 bucket names, indexes, account bindings, or private infrastructure values.
-Adding persistence or export requires a separate reviewed change with private
+Adding collection or export requires a separate reviewed change with private
 runtime binding, access enforcement, deletion behavior, and live validation.
+
+## Durable local spool
+
+The synchronous `gate/content-telemetry/spool.mjs` adapter requires both an
+explicitly enabled validated policy and an absolute owner-bound root. Disabled
+or invalid configuration creates no directories and writes nothing. A private
+deployment should bind the root beneath its external private prefix (for
+example, `telemetry/content`), never beneath the source tree or the operational
+`ops/` spool.
+
+The root and its `pending`, `failed`, `quarantine`, and `staging` directories
+must be owner-owned mode `0700`; record and lock files are created exclusively
+at mode `0600` without following a final-component symlink. Existing unsafe
+permissions, ownership, file types, or symlinks cause a best-effort failure and
+are never repaired by broadening access.
+
+Each append prepares the object through the contract, writes one bounded JSONL
+record to a uniquely named staging file, flushes it, and atomically renames it
+into `pending`. Thus each pending file is a sealed one-record rotation unit for
+later immutable delivery. The default spool limits are 1,000 files and 64 MiB;
+configured limits are bounded and reject a new append instead of deleting any
+pending, failed, quarantined, or staged state.
+
+Recovery revalidates canonical redacted records. A complete staged record is
+promoted to `pending`; valid `pending` and `failed` files remain recoverable;
+partial, malformed, unredacted, oversized, or otherwise invalid files move to
+`quarantine` with private file mode enforced. A later process may reclaim the
+exclusive writer lock only when its recorded writer PID no longer exists, so a
+crash does not strand recoverable staged state. No state in this slice is
+uploaded or silently expired. Spool,
+permission, validation, lock, and I/O failures return a content-free failure
+signal, emit no raw exception/log fallback, and have no authority, routing,
+egress, response-delivery, evaluator, verifier, or completion effect.
