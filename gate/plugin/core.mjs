@@ -5,6 +5,7 @@ import {CONTRACT_VERSION,digest as contractDigest,egressMatches,validateEgressDe
 import {presentEvidence,validateGroundedAnswer} from '../foundation/evidence.mjs';
 import {createObservability} from './observability.mjs';
 import {emitOperational} from './telemetry-client.mjs';
+import {createContentInteractionRecorder} from '../content-telemetry/interaction.mjs';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
@@ -59,8 +60,9 @@ export function createExecutor(base,settings,key){
   });
 }
 
-export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(),observability=createObservability({enabled:false}),emit=emitOperational}){
+export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(),observability=createObservability({enabled:false}),emit=emitOperational,contentTelemetry=null}){
   const sessions=new Map();let active=0;
+  const content=createContentInteractionRecorder({spool:contentTelemetry,settings,now});
   const excluded=s=>new Set([...s.excluded,'PRIVATE_80B']);
   const help=()=>HELP;
   const spec=settings.settingsFileHash??hash(JSON.stringify(settings));
@@ -72,7 +74,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
       nonce:randomBytes(32).toString('hex'),expires:now()/1000+settings.approval_expiry_seconds,spec_sha256:spec};
   }
   async function control(s,op,packet={}){return execute(body(s,op,'CONTROL',packet),new AbortController().signal);}
-  function cancel(s){s.generation++;s.pending=null;s.abort?.abort();s.abort=null;s.busy=false;s.job=null;}
+  function cancel(s){if(s.interaction){content.abandon(s.interaction);s.interaction=null;}s.generation++;s.pending=null;s.abort?.abort();s.abort=null;s.busy=false;s.job=null;}
   function freshSession(){return {generation:0,pending:null,busy:false,job:null,privateGrant:false,auditGrant:null,excluded:new Set(['PRIVATE_80B']),mode:settings.mode,messages:[],revision:-1,strong:false,media:null,state:{scope:id(),high_stakes:false,privacy_floor:'PERSONAL',revision:-1,request_digest:''}};}
   function auditGrant(s){
     const grant=s.auditGrant;
@@ -138,11 +140,11 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
     return span.run(async()=>{
       try{
         result=await run();if(result?.status!=='OK')outcome='unavailable';
-        const duration=Math.max(0,performance.now()-started),telemetry=result?.telemetry??{};
+        const duration=Math.max(0,performance.now()-started),telemetry=result?.telemetry??{};content.model(s.interaction,{tier,operation,telemetry});
         observability.recordModel({modelRole:role,provider,outcome,durationMs:duration,inputTokens:Number.isSafeInteger(telemetry.prompt_tokens)?telemetry.prompt_tokens:null,outputTokens:Number.isSafeInteger(telemetry.completion_tokens)?telemetry.completion_tokens:null});
         emit({eventType:outcome==='success'?'model_request_completed':'model_request_failed',component:'reasoner',outcome:outcome==='success'?'completed':'unavailable',taskId:s.state.scope,modelRole:role,provider,durationMs:Math.round(duration),inputTokens:Number.isSafeInteger(telemetry.prompt_tokens)?telemetry.prompt_tokens:null,outputTokens:Number.isSafeInteger(telemetry.completion_tokens)?telemetry.completion_tokens:null,payload:{operation,reason_code:outcome==='success'?'NONE':'BACKEND_UNAVAILABLE'}});
         return result;
-      }catch(error){outcome='failure';observability.recordModel({modelRole:role,provider,outcome,durationMs:Math.max(0,performance.now()-started)});throw error;}
+      }catch(error){const duration=Math.max(0,performance.now()-started);outcome='failure';content.model(s.interaction,{tier,operation});observability.recordModel({modelRole:role,provider,outcome,durationMs:duration});throw error;}
       finally{span.end(outcome,outcome==='success'?null:'MODEL_UNAVAILABLE');}
     });
   }
@@ -150,6 +152,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
     if(operation==='infer'&&tier==='PRIVATE_80B')return {text:'Private 80B is permanently retired and unavailable.'};
     if(active>=4)return {text:'The gate is busy. Nothing new was sent. Please try again shortly.'};
     const generation=s.generation,controller=new AbortController(),job={id:id(),result:null};
+    content.trace(s.interaction,requestSpan?.ids?.().traceId);
     s.busy=true;s.abort=controller;s.job=job;active++;let assessed=false;
     const valid=()=>generation===s.generation&&!controller.signal.aborted;
     const requestStarted=performance.now();let requestOutcome='success',requestError=null;
@@ -161,13 +164,13 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
         if(result?.status!=='OK'){
           requestOutcome='unavailable';requestError='MODEL_UNAVAILABLE';
           if(operation==='classify')s.state.high_stakes=true;
-          job.result={text:operation==='classify'?FAIL:`${tier} was unavailable (${/^[a-z_]+$/.test(result?.reason??'')?result.reason:'backend_unavailable'}). No fallback or additional disclosure was made.`};return;
+          job.result={text:operation==='classify'?FAIL:`${tier} was unavailable (${/^[a-z_]+$/.test(result?.reason??'')?result.reason:'backend_unavailable'}). No fallback or additional disclosure was made.`};content.complete(s.interaction,{outcome:'failure',failure:{stage:'MODEL_PROVIDER',category:'UPSTREAM',code:'MODEL_UNAVAILABLE'}});return;
         }
         if(operation==='classify'){
           if(!result.state||result.state.scope!==s.state.scope||result.state.privacy_floor!=='PERSONAL'||typeof result.state.high_stakes!=='boolean'||result.state.revision!==s.revision||!['NORMAL','HIGH_STAKES','URGENT_SAFETY'].includes(result.handling)||!['ABSENT','PRESENT','UNKNOWN'].includes(result.urgency)||!['CONTEXT_REQUIRED','UNAVAILABLE','URGENT_SAFETY',...TIERS].includes(result.route))throw Error(FAIL);
           if(s.state.high_stakes&&!result.state.high_stakes)throw Error(FAIL);
           s.state=result.state;s.audit=result.audit;assessed=true;
-          if(result.urgency==='PRESENT'){job.result={text:URGENT};return;}
+          if(result.urgency==='PRESENT'){job.result={text:URGENT};content.complete(s.interaction,{outcome:'blocked',failure:{stage:'AUTHORITY_APPROVAL',category:'SAFETY',code:'URGENT_SAFETY'}});return;}
           if(result.route==='CONTEXT_REQUIRED'){
             if(after.contextRound)throw Error('The audit still lacks enough context. No more data was sent. Clarify the request.');
             const disclosed=selected(s,result.audit.context_need.classification);
@@ -180,11 +183,11 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
           if(source?.need&&source.need!=='NONE'){
             if(source.schema!=='sanctum-source/v1'||source.authority!=='MAC_POLICY'||source.scope!==s.state.scope||source.revision!==s.revision||!/^[a-f0-9]{64}$/.test(source.request_digest??''))throw Error(FAIL);
             if(typeof retrieve!=='function'){
-              if(source.need==='WEB_REQUIRED'){job.result={text:'Source retrieval is unavailable. No external query or answer disclosure was made.'};return;}
-            }else evidencePack=await observability.withSpan('source_first.research',{'sanctum.component':'source-first','sanctum.source_need':source.need},()=>retrieve({requestDigest:source.request_digest,scope:source.scope,revision:source.revision,sourceNeed:source.need,reasonCodes:source.reason_codes,queryMode:source.query_mode,query:source.query?.query}));
+              if(source.need==='WEB_REQUIRED'){job.result={text:'Source retrieval is unavailable. No external query or answer disclosure was made.'};content.complete(s.interaction,{outcome:'failure',failure:{stage:'ROUTING_SOURCE',category:'RETRIEVAL',code:'SOURCE_RETRIEVAL_UNAVAILABLE'}});return;}
+            }else try{evidencePack=await observability.withSpan('source_first.research',{'sanctum.component':'source-first','sanctum.source_need':source.need},()=>retrieve({requestDigest:source.request_digest,scope:source.scope,revision:source.revision,sourceNeed:source.need,reasonCodes:source.reason_codes,queryMode:source.query_mode,query:source.query?.query}));}catch{job.result={text:'Source retrieval failed. No unqualified answer was generated.'};content.complete(s.interaction,{outcome:'failure',failure:{stage:'ROUTING_SOURCE',category:'RETRIEVAL',code:'SOURCE_RETRIEVAL_FAILED'}});return;}
             if(!valid())return;
             if(evidencePack&&(evidencePack.requestDigest!==source.request_digest||evidencePack.scope!==source.scope||evidencePack.revision!==source.revision||evidencePack.sourceNeed!==source.need))throw Error(FAIL);
-            if(source.need==='WEB_REQUIRED'&&evidencePack?.adequacy!=='ADEQUATE'){const approval=evidencePack?.failureCodes?.includes('QUERY_APPROVAL_REQUIRED')?' An exact query approval is required; no query was sent.':'';job.result={text:'Current externally verifiable evidence was required but adequate fetched evidence was unavailable.'+approval+' No unqualified answer was generated.'};return;}
+            if(source.need==='WEB_REQUIRED'&&evidencePack?.adequacy!=='ADEQUATE'){const approval=evidencePack?.failureCodes?.includes('QUERY_APPROVAL_REQUIRED')?' An exact query approval is required; no query was sent.':'';job.result={text:'Current externally verifiable evidence was required but adequate fetched evidence was unavailable.'+approval+' No unqualified answer was generated.'};content.complete(s.interaction,{outcome:approval?'blocked':'failure',failure:{stage:approval?'AUTHORITY_APPROVAL':'ROUTING_SOURCE',category:approval?'POLICY':'RETRIEVAL',code:approval?'QUERY_APPROVAL_REQUIRED':'EVIDENCE_INADEQUATE'}});return;}
           }
           let route=s.state.high_stakes||s.strong?'OPENAI_FRONTIER':result.route;
           if(s.requested==='HOSTED_235B'&&route!=='OPENAI_FRONTIER')route='HOSTED_235B';
@@ -214,15 +217,15 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
           job.result=ticket(s,'infer',route,answerPacket,{evidencePack,evidenceView});return;
         }
         job.result=finishAnswer(s,result,tier,packet,after.evidencePack,after.evidenceView);
-      }catch(e){requestOutcome='failure';requestError='REQUEST_FAILED';if(valid()){if(operation==='classify'&&!assessed)s.state.high_stakes=true;job.result={text:e.message&&e.message.length<600?inertAnswer(e.message):FAIL};}}
-      finally{active--;if(valid()){s.busy=false;s.abort=null;if(!job.result)job.result={text:FAIL};}if(requestSpan){requestSpan.end(requestOutcome,requestError);observability.recordRequest({outcome:requestOutcome,requestClass:operation==='classify'?'classification':'inference',durationMs:Math.max(0,performance.now()-requestStarted)});}}
+      }catch(e){requestOutcome='failure';requestError='REQUEST_FAILED';if(valid()){if(operation==='classify'&&!assessed)s.state.high_stakes=true;job.result={text:e.message&&e.message.length<600?inertAnswer(e.message):FAIL};content.complete(s.interaction,{outcome:'unknown',failure:{stage:'UNKNOWN',category:'UNKNOWN',code:'UNCLASSIFIED_ERROR'}});}}
+      finally{active--;if(valid()){s.busy=false;s.abort=null;if(!job.result){job.result={text:FAIL};content.complete(s.interaction,{outcome:'unknown',failure:{stage:'UNKNOWN',category:'UNKNOWN',code:'NO_TERMINAL_RESULT'}});}}if(requestSpan){requestSpan.end(requestOutcome,requestError);observability.recordRequest({outcome:requestOutcome,requestClass:operation==='classify'?'classification':'inference',durationMs:Math.max(0,performance.now()-requestStarted)});}}
     })());
     return jobText(job);
   }
   function finishAnswer(s,result,tier,packet={prompt:s.prompt},evidencePack=null,evidenceView=null){
-    if(result?.status!=='OK'||typeof result.text!=='string'||!result.text.trim()||Buffer.byteLength(result.text)>32768)return {text:`${tier} answering was unavailable. No automatic fallback was used.`};
+    if(result?.status!=='OK'||typeof result.text!=='string'||!result.text.trim()||Buffer.byteLength(result.text)>32768){content.complete(s.interaction,{outcome:'failure',failure:{stage:'MODEL_PROVIDER',category:'UPSTREAM',code:'ANSWER_UNAVAILABLE'}});return {text:`${tier} answering was unavailable. No automatic fallback was used.`};}
     let answer=result.text, escalation=result.escalation;
-    if(evidencePack){let grounded=result.grounded;try{if(!grounded)grounded=JSON.parse(result.text);}catch{return {text:`${tier} grounding validation failed. No ungrounded answer was delivered.`};}const checked=validateGroundedAnswer(grounded,evidencePack,evidenceView);if(!checked.ok)return {text:`${tier} grounding validation failed (${checked.code}). No ungrounded answer was delivered.`};answer=checked.value.text;escalation=checked.value.escalation;const sources=checked.value.citations.map(c=>`[${c.sourceId}] ${c.url}`);if(sources.length)answer+=`\n\nSources:\n${sources.join('\n')}`;}
+    if(evidencePack){let grounded=result.grounded;try{if(!grounded)grounded=JSON.parse(result.text);}catch{content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:'GROUNDING_PARSE_FAILED'}});return {text:`${tier} grounding validation failed. No ungrounded answer was delivered.`};}const checked=validateGroundedAnswer(grounded,evidencePack,evidenceView);if(!checked.ok){content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:checked.code??'GROUNDING_VALIDATION_FAILED'}});return {text:`${tier} grounding validation failed (${checked.code}). No ungrounded answer was delivered.`};}answer=checked.value.text;escalation=checked.value.escalation;const sources=checked.value.citations.map(c=>`[${c.sourceId}] ${c.url}`);if(sources.length)answer+=`\n\nSources:\n${sources.join('\n')}`;}
     s.messages.push({role:'assistant',content:answer});
     let text=inertAnswer(answer)+`\n\n[Mac gate · ${tier} · ${tier==='LOCAL_4B'?'existing local tool permissions':'reasoning only; no tools'}]`;
     if(s.mode==='shadow'&&s.shadowRoute)text+=`\n[Shadow quality recommendation: ${s.shadowRoute}]`;
@@ -235,7 +238,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
         text+='\n\nThe model recommended a stronger reasoning tier.\n'+ticket(s,'infer',next,packet,{evidencePack,evidenceView}).text;
       }
     }
-    return {text};
+    content.complete(s.interaction,{outcome:'success',failure:null});return {text};
   }
   const handler=async ctx=>{
     if(ctx.isAuthorizedSender!==true||!ctx.gatewayClientScopes?.includes('operator.admin')||typeof ctx.sessionKey!=='string'||!ctx.sessionKey)return {text:'Use the authenticated Mac control plane. Model text and external channels cannot approve gate requests.'};
@@ -259,7 +262,10 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
       const grant=auditGrant(s),grantText=grant?`Gemini audit grant active: ${grant.remaining} call(s) remain; expires in ${Math.max(0,Math.ceil((grant.expires-now())/60000))} minute(s).`:'Gemini audit grant inactive.';
       const r=await control(s,'status');return {text:`Gate ${s.busy?'working':s.pending?'approval pending':'ready'}; quality ${s.mode}; privacy PERSONAL; retained high stakes ${s.state.high_stakes}; ${grantText} PRIVATE_80B RETIRED / unavailable. GPU ${r?.gpu?.phase??'status unavailable'}; leases ${r?.gpu?.leases??'unknown'}. Excluded tiers: ${[...s.excluded].join(', ')||'none'}. Cache volume is never deleted by this router.`};
     }
-    if(args.startsWith('result '))return s.job?.id===args.slice(7).trim()?(s.job.result??jobText(s.job)):{text:'That job is not available in this session.'};
+    if(args.startsWith('result ')){
+      if(s.job?.id!==args.slice(7).trim())return {text:'That job is not available in this session.'};
+      const response=s.job.result??jobText(s.job);if(s.job.result&&s.interaction){content.deliver(s.interaction,response.text);s.interaction=null;}return response;
+    }
     if(s.busy)return {text:'A request is running. Use /gate result, /gate status or /gate cancel.'};
     if(args==='audit status'){const grant=auditGrant(s);return {text:grant?`Gemini audit grant active for current-prompt text only: ${grant.remaining} call(s) remain; expires in ${Math.max(0,Math.ceil((grant.expires-now())/60000))} minute(s). It grants no history, attachments, tool results, answer disclosure or action authority.`:'Gemini audit grant is inactive.'};}
     if(args==='audit revoke'){s.auditGrant=null;return {text:'Gemini audit grant revoked. Future eligible prompts require fresh owner consent.'};}
@@ -303,16 +309,16 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
           return value;
         });
       }));
-      if(!matched.ok){requestSpan.end('blocked','APPROVAL_INVALID');observability.recordRequest({outcome:'blocked',requestClass:p.operation==='classify'?'classification':'inference',durationMs:0});return {text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};}
+      if(!matched.ok){requestSpan.end('blocked','APPROVAL_INVALID');observability.recordRequest({outcome:'blocked',requestClass:p.operation==='classify'?'classification':'inference',durationMs:0});const response={text:'Approval invalid, expired, changed, already used or from another session. Nothing was sent.'};content.complete(s.interaction,{outcome:'denied',failure:{stage:'AUTHORITY_APPROVAL',category:'POLICY',code:'APPROVAL_INVALID'}});content.deliver(s.interaction,response.text);s.interaction=null;return response;}
       s.pending=null;return requestSpan.run(()=>launch(s,p.operation,p.tier,p.packet,p.after,requestSpan));
     }
     const match=conversational;
     if(!match)return {text:help()};
     const prompt=match[2].trim();
-    if(!prompt||SECRET.test(prompt)||Buffer.byteLength(prompt)>settings.max_context_bytes)return {text:'Empty, oversize or recognized credential text was refused. Nothing was sent.'};
+    if(!prompt||SECRET.test(prompt)||Buffer.byteLength(prompt)>settings.max_context_bytes){const response={text:'Empty, oversize or recognized credential text was refused. Nothing was sent.'};const rejected=content.start({query:prompt||'[EMPTY]',runId:s.state.scope,sessionId:identity});content.complete(rejected,{outcome:'denied',failure:{stage:'AUTHORITY_APPROVAL',category:'INPUT_POLICY',code:'INPUT_REJECTED'}});content.deliver(rejected,response.text);return response;}
     const messages=[...s.messages,{role:'user',content:prompt}];
-    if(messages.length>settings.max_messages||Buffer.byteLength(JSON.stringify(messages))>settings.max_context_bytes)return {text:'Local gate context limit reached. It was not truncated. Start a genuinely new conversation with /gate new.'};
-    cancel(s);s.prompt=prompt;s.messages=messages;s.revision++;s.strong=match[1]==='ask-strong';s.requested=match[1]==='ask-235'?'HOSTED_235B':null;
+    if(messages.length>settings.max_messages||Buffer.byteLength(JSON.stringify(messages))>settings.max_context_bytes){const response={text:'Local gate context limit reached. It was not truncated. Start a genuinely new conversation with /gate new.'};const rejected=content.start({query:prompt,runId:s.state.scope,sessionId:identity});content.complete(rejected,{outcome:'blocked',failure:{stage:'AUTHORITY_APPROVAL',category:'CONTEXT_POLICY',code:'CONTEXT_LIMIT'}});content.deliver(rejected,response.text);return response;}
+    cancel(s);s.prompt=prompt;s.messages=messages;s.revision++;s.strong=match[1]==='ask-strong';s.requested=match[1]==='ask-235'?'HOSTED_235B':null;s.interaction=content.start({query:prompt,runId:s.state.scope,sessionId:identity});
     return ticket(s,'classify','GEMINI_AUDIT',packetFor(s));
   };
   handler.sweep=async()=>control({state:{scope:'0'.repeat(32)},strong:false},'sweep');

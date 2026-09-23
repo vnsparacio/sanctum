@@ -130,5 +130,10 @@
     "ledger_root": "@STATE@/gate/private-lead/work-mode/tasks",
     "max_concurrent_tasks": 1
   },
+  "content_telemetry": {
+    "enabled": false,
+    "retention_days": null,
+    "access_policy": "owner_only"
+  },
   "direct_openai_retention_authorized": false
 }

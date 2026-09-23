@@ -8,6 +8,16 @@ The generated environment defines OpenClaw state/config, socket cache, contact m
 
 The first candidate configuration is intentionally minimal: exact utilities are available, optional tool integrations need reviewed setup, GPU autostart is false, and contact aliases are empty. File root configuration accepts only the established scope names and absolute paths; model arguments cannot change those roots.
 
+Restricted interaction content telemetry remains disabled by default. The
+reviewed `content_telemetry` settings contain only `enabled`,
+`retention_days`, and `access_policy`; the local spool root is derived beneath
+the external private state directory at `telemetry/content`. It is separate
+from the metadata-only operational `ops/` spool and cannot be selected by a
+request, model response, or environment-provided destination. Enabling or
+changing this policy requires an owner-reviewed stopped-gateway settings
+amendment and a new private source freeze; there is no content export in this
+slice.
+
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 
 Project 3G installs Work Mode only through the stopped-gateway, reversible `scripts/upgrade_work_mode.py` amendment. The amendment verifies source and installed receipts, confirms both managed GPU releases are offline with no leases, confirms the independent janitor is loaded, builds and records the exact local runner image, and writes private work profiles outside Git. It enables PRIVATE_LEAD for explicit signed Work Mode proposals while leaving background GPU autostart disabled. The ordinary `/gate` Assistant path and its tool policy remain unchanged; a separate `workmode-broker` agent receives only the five Work Mode semantic capabilities plus the two internal Source-First adapters.

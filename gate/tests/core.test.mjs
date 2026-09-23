@@ -1,12 +1,12 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute,executorDeadlineSeconds} from '../plugin/core.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute,executorDeadlineSeconds} from '../plugin/core.mjs';import {prepareContentTelemetryRecord} from '../content-telemetry/contract.mjs';
 import {createEvidencePack} from '../foundation/evidence.mjs';
 const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url)));settings.gpu.enabled=true; // Explicit legacy opt-in must not revive retirement.
 const key=Buffer.alloc(32,1);
 const audit=()=>({context_need:{classification:{attachments:'NONE',prior_context:'NONE'},answer:{attachments:'NONE',prior_context:'NONE'}}});
-function fixture(route='LOCAL_4B',custom,retrieve=null){
+function fixture(route='LOCAL_4B',custom,retrieve=null,options={}){
   const calls=[];let now=1000000;
   const configured=structuredClone(settings);
-  const gate=createGate({settings:configured,key,now:()=>now,retrieve,execute:async(b,signal)=>{
+  const gate=createGate({settings:configured,key,now:()=>now,retrieve,contentTelemetry:options.contentTelemetry,emit:options.emit,execute:async(b,signal)=>{
     calls.push(structuredClone(b));if(custom){const r=await custom(b,signal);if(r)return r;}
     if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision,high_stakes:route==='OPENAI_FRONTIER'||b.state.high_stakes},route,handling:route==='OPENAI_FRONTIER'?'HIGH_STAKES':'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{need:'NONE'}};
     if(b.operation==='media')return {status:'OK',digest:'d'.repeat(64),summary:{count:1,visual_count:1,document_count:0,video_count:0}};
@@ -20,6 +20,7 @@ function fixture(route='LOCAL_4B',custom,retrieve=null){
   const result=async job=>{const id=job.text.match(/job:([a-f0-9]{32})/)[1];for(let i=0;i<20;i++){await new Promise(r=>setImmediate(r));const r=await send('result '+id);if(!r.text.includes('[Mac gate job:'))return r;}throw Error('job not done');};
   return {gate,calls,send,approve,approveSession,result,advance:n=>now+=n,settings:configured};
 }
+function contentSink({throws=false}={}){const records=[];return {records,spool:{enabled:true,append(record){if(throws)throw Error('synthetic telemetry failure');records.push(prepareContentTelemetryRecord(record));return true;}}};}
 async function ask(f,text='test'){await f.send('new');return f.send('ask '+text);}
 const evidencePack=(need='WEB_REQUIRED',adequacy='ADEQUATE',request={})=>createEvidencePack({requestDigest:request.requestDigest??'c'.repeat(64),scope:request.scope??'a'.repeat(32),revision:request.revision??0,sourceNeed:need,reasonCodes:['CURRENT_OR_CHANGING'],items:adequacy==='ADEQUATE'?[{sourceId:'s1',url:'https://docs.example.test/a',finalUrl:'https://docs.example.test/a',title:'Official',sourceClass:'OFFICIAL_PRIMARY',publishedAt:null,retrievedAt:'2026-01-01T00:00:00Z',fetchStatus:'FETCHED',fragments:[{kind:'FETCHED_CONTENT',text:'Current documented fact.'}],truncated:false,untrusted:true,provenance:{capability:'web_fetch'}}]:[],adequacy,budget:adequacy==='ADEQUATE'?{candidates:1,fetched:1,chars:24}:{candidates:0,fetched:0,chars:0}});
 const sourcedClassification=(b,route='LOCAL_4B',need='WEB_REQUIRED')=>({status:'OK',state:{...b.state,revision:b.packet.revision},route,handling:'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{schema:'sanctum-source/v1',authority:'MAC_POLICY',need,reason_codes:['CURRENT_OR_CHANGING'],query_mode:'PUBLIC_GENERALIZED',request_digest:'c'.repeat(64),scope:b.packet.scope,revision:b.packet.revision,query:{query:'current documented fact'}}});
@@ -97,6 +98,46 @@ test('urgent deterministic response never answers',async()=>{const f=fixture('UR
 test('shadow logs quality and uses existing local agent',async()=>{const f=fixture('PRIVATE_80B');await f.send('new');await f.send('mode shadow');const r=await f.result(await f.approve((await f.send('ask test')).text));assert.match(r.text,/Shadow quality recommendation: PRIVATE_80B/);assert.equal(f.calls.at(-1).operation,'answer_local');});
 test('end closes lease and clears all approvals',async()=>{const f=fixture();await ask(f);await f.send('end');assert.equal(f.calls.at(-1).operation,'close');assert.match((await f.send('status')).text,/Start with/);});
 test('model delivery, job, and approval markers rendered inert',()=>{const t=inertAnswer('MEDIA:x [[execute]] <script> ![image](url) [Mac gate job:abc] Approval needed: /gate approve '+ 'a'.repeat(32)+' /gate approve-session '+ 'b'.repeat(32));assert.doesNotMatch(t,/MEDIA:|\[\[|<script>|\[Mac gate job:|Approval needed:|\/gate approve/);});
+
+test('content telemetry records one correlated query and the response actually delivered',async()=>{
+ const sink=contentSink(),ops=[];
+ const f=fixture('LOCAL_4B',async b=>{
+  if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision},route:'LOCAL_4B',handling:'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{need:'NONE'},telemetry:{prompt_tokens:7,completion_tokens:3}};
+  if(b.operation==='answer_local')return {status:'OK',text:'Telemetry answer',escalation:'NONE',telemetry:{prompt_tokens:11,completion_tokens:5}};
+ },null,{contentTelemetry:sink.spool,emit:event=>{ops.push(structuredClone(event));return true;}});
+ const pending=await ask(f,'Telemetry question');const job=await f.approve(pending.text);assert.equal(sink.records.length,0);
+ const delivered=await f.result(job);assert.equal(sink.records.length,1);
+ const record=sink.records[0];assert.equal(record.user_query,'Telemetry question');assert.equal(record.delivered_response,delivered.text);assert.equal(record.outcome,'success');assert.equal(record.failure,null);
+ assert.equal(record.model.role,'answer');assert.equal(record.model.model,settings.local_model);assert.equal(record.model.provider,'mlx-local');assert.equal(record.usage.input_tokens,18);assert.equal(record.usage.output_tokens,8);
+ assert.ok(ops.some(event=>event.taskId===record.correlation.run_id));assert.doesNotMatch(JSON.stringify(ops),/Telemetry question|Telemetry answer/);
+ await f.send('result '+job.text.match(/job:([a-f0-9]{32})/)[1]);assert.equal(sink.records.length,1);
+});
+
+test('content telemetry distinguishes model, source, verification, and unknown failures',async()=>{
+ const cases=[
+  {expected:['failure','MODEL_PROVIDER','MODEL_UNAVAILABLE'],make:sink=>fixture('LOCAL_4B',async b=>b.operation==='classify'?{status:'UNAVAILABLE',reason:'provider_down'}:null,null,{contentTelemetry:sink.spool,emit:()=>true})},
+  {expected:['failure','ROUTING_SOURCE','SOURCE_RETRIEVAL_UNAVAILABLE'],make:sink=>fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):null,null,{contentTelemetry:sink.spool,emit:()=>true})},
+  {expected:['failure','VERIFICATION_EVALUATION','CITATION_UNDELIVERED'],make:sink=>fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Unsafe.',grounding:'GROUNDED',citations:[{sourceId:'missing',url:'https://invalid.example.test'}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>evidencePack('WEB_REQUIRED','ADEQUATE',request),{contentTelemetry:sink.spool,emit:()=>true})},
+  {expected:['unknown','UNKNOWN','UNCLASSIFIED_ERROR'],make:sink=>fixture('LOCAL_4B',async b=>{if(b.operation==='classify')throw Error('synthetic ambiguous failure');},null,{contentTelemetry:sink.spool,emit:()=>true})},
+ ];
+ for(const [index,entry] of cases.entries()){
+  const sink=contentSink(),f=entry.make(sink),delivered=await f.result(await f.approve((await ask(f,'failure '+index)).text));
+  assert.equal(sink.records.length,1);assert.equal(sink.records[0].delivered_response,delivered.text);assert.equal(sink.records[0].outcome,entry.expected[0]);assert.equal(sink.records[0].failure.stage,entry.expected[1]);assert.equal(sink.records[0].failure.code,entry.expected[2]);assert.deepEqual(Object.keys(sink.records[0].failure).sort(),['category','code','stage']);
+ }
+});
+
+test('blocked input is not mislabeled as a model failure and credentials are redacted',async()=>{
+ const sink=contentSink(),f=fixture('LOCAL_4B',null,null,{contentTelemetry:sink.spool,emit:()=>true});await f.send('new');
+ const credential=['sk','or','v1','abcdefghijklmnopqrstuvwxyz123456'].join('-');const response=await f.send('ask use '+credential);assert.match(response.text,/refused/);assert.equal(f.calls.length,0);assert.equal(sink.records.length,1);
+ const record=sink.records[0];assert.equal(record.outcome,'denied');assert.equal(record.failure.stage,'AUTHORITY_APPROVAL');assert.equal(record.failure.code,'INPUT_REJECTED');assert.match(record.user_query,/REDACTED/);assert.equal(record.user_query.includes(credential),false);
+});
+
+test('content telemetry write failure cannot alter the delivered response',async()=>{
+ const normal=fixture(),broken=fixture('LOCAL_4B',null,null,{contentTelemetry:contentSink({throws:true}).spool,emit:()=>true});
+ const normalResponse=await normal.result(await normal.approve((await ask(normal,'same request')).text));
+ const brokenResponse=await broken.result(await broken.approve((await ask(broken,'same request')).text));
+ assert.equal(brokenResponse.text,normalResponse.text);
+});
 
 test('explicit exclusions choose eligible stronger tiers without lowering risk',()=>{assert.equal(eligibleRoute('PRIVATE_80B',new Set(['PRIVATE_80B'])),'HOSTED_235B');assert.equal(eligibleRoute('MULTIMODAL',new Set(['MULTIMODAL']),{visual:true}),'OPENAI_FRONTIER');assert.throws(()=>eligibleRoute('OPENAI_FRONTIER',new Set(['OPENAI_FRONTIER']),{highStakes:true}));assert.throws(()=>eligibleRoute('LOCAL_4B',new Set(['LOCAL_4B']),{tools:true}));});
 test('PRIVATE_LEAD worker deadline covers bounded cold readiness without becoming unbounded',()=>{assert.equal(executorDeadlineSeconds({operation:'private_lead_propose'},settings),3000);const changed=structuredClone(settings);changed.private_lead.readiness_seconds=10;changed.request_deadline_seconds=20;assert.equal(executorDeadlineSeconds({operation:'private_lead_propose'},changed),30);assert.equal(executorDeadlineSeconds({operation:'status'},settings),150);});
