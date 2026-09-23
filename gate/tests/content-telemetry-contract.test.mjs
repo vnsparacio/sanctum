@@ -20,7 +20,6 @@ const base=()=>({
  failure:null,
  model:{role:'answer',model:'synthetic-model',revision:'r1',provider:'local'},
  usage:{latency_ms:25,input_tokens:7,output_tokens:9},
- quality:{owner_rating:5,evaluator_id:'quality-check',evaluator_version:'v1',evaluator_score:0.9,evaluator_label:'PASS',benchmark_id:'suite',benchmark_version:'v1',test_case_id:'case-1',test_case_version:'v2'},
 });
 
 test('contract represents success, failure, blocked, denied, and unknown outcomes',()=>{

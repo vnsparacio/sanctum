@@ -73,22 +73,6 @@
         "input_tokens": {"type": "integer", "minimum": 0, "maximum": 10000000},
         "output_tokens": {"type": "integer", "minimum": 0, "maximum": 10000000}
       }
-    },
-    "quality": {
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "owner_rating": {"type": "integer", "minimum": 1, "maximum": 5},
-        "evaluator_id": {"$ref": "#/definitions/id"},
-        "evaluator_version": {"$ref": "#/definitions/id"},
-        "evaluator_score": {"type": "number", "minimum": 0, "maximum": 1},
-        "evaluator_label": {"$ref": "#/definitions/code"},
-        "benchmark_id": {"$ref": "#/definitions/id"},
-        "benchmark_version": {"$ref": "#/definitions/id"},
-        "test_case_id": {"$ref": "#/definitions/id"},
-        "test_case_version": {"$ref": "#/definitions/id"}
-      }
     }
   },
   "allOf": [
