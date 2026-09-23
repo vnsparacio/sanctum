@@ -1,0 +1,44 @@
+<form version="1.1" theme="dark">
+  <label>Sanctum Restricted Content</label>
+  <description>Restricted interaction outcomes and quality signals. Access must remain narrower than sanctum_ops.</description>
+  <fieldset submitButton="false">
+    <input type="time" token="time_range">
+      <label>Time range</label>
+      <default><earliest>-24h@h</earliest><latest>now</latest></default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Success rate</title>
+      <single>
+        <search ref="Sanctum Content - Success Rate" />
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+        <option name="underLabel">percent successful</option>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Failure reasons</title>
+      <table>
+        <search ref="Sanctum Content - Failure Reasons" />
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Recent interaction outcomes</title>
+      <table>
+        <search ref="Sanctum Content - Recent Interaction Outcomes" />
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+        <option name="count">20</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>
+
