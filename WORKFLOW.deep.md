@@ -28,7 +28,7 @@ workspace:
 hooks:
   after_create: |
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.3-dev" https://github.com/vnsparacio/sanctum.git .
-    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
+    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare --fresh-workspace
   before_run: |
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
   timeout_ms: 120000

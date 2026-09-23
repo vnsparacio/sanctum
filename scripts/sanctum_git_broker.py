@@ -224,9 +224,12 @@ def main() -> int:
     if sys.argv[1:] == ["prepare"]:
         print(json.dumps(control_plane().prepare(), sort_keys=True))
         return 0
+    if sys.argv[1:] == ["prepare", "--fresh-workspace"]:
+        print(json.dumps(control_plane().prepare(fresh_workspace=True), sort_keys=True))
+        return 0
     if sys.argv[1:] == ["mcp"]:
         return serve_mcp()
-    raise SystemExit("usage: sanctum_git_broker.py prepare|mcp")
+    raise SystemExit("usage: sanctum_git_broker.py prepare [--fresh-workspace]|mcp")
 
 
 if __name__ == "__main__":
