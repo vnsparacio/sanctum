@@ -95,6 +95,7 @@ from sanctum_agents.symphony_supervisor import (
     classify_termination,
     evaluate_snapshot,
     load_continuations,
+    operator_blocker_violations,
     preflight,
     resume_from_incident,
     supervise,
@@ -340,6 +341,210 @@ class ConfigurationTests(unittest.TestCase):
                 "roles.implementation.wall_clock_seconds must be a positive integer",
             ):
                 load_config(path)
+
+    def test_work_mode_standard_and_deep_preflight_resolve_private_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_config = root / "source/config"
+            source_config.mkdir(parents=True)
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = source_config / "agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "vnsparacio/sanctum-work-mode-qualification",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            github_config = root / "github-config"
+            github_config.mkdir(mode=0o700)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\nexit 0\n")
+            gh.chmod(0o700)
+            environment = {
+                "LINEAR_API_KEY": "synthetic-test-token",
+                "SANCTUM_AGENT_PREFIX": str(prefix),
+                "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            }
+
+            standard = preflight(config, ROOT, environment)
+            deep = preflight(config, ROOT, environment, worker_class="deep")
+
+            self.assertEqual("work-mode", standard["implementation_backend"])
+            self.assertEqual(str(ROOT / "WORKFLOW.work-mode.md"), standard["workflow"])
+            self.assertEqual(str(ROOT / "WORKFLOW.work-mode.deep.md"), deep["workflow"])
+            self.assertEqual(
+                {
+                    "app_server": str(app_server.resolve()),
+                    "profiles_file": str(profile_path.resolve()),
+                    "project_id": "v13-qualification",
+                    "repository": "vnsparacio/sanctum-work-mode-qualification",
+                    "integration_branch": "main",
+                    "validation_operations": ["build", "lint", "test"],
+                },
+                standard["work_mode"],
+            )
+
+    def test_work_mode_preflight_rejects_profile_drift_and_public_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_config = root / "source/config"
+            source_config.mkdir(parents=True)
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = source_config / "agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "attacker/redirected",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            environment = {
+                "LINEAR_API_KEY": "synthetic-test-token",
+                "SANCTUM_AGENT_PREFIX": str(prefix),
+                "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+            }
+            with self.assertRaisesRegex(ConfigError, "does not match reviewed"):
+                preflight(config, ROOT, environment)
+
+            profile = json.loads(profile_path.read_text())
+            profile["profiles"][0][
+                "repository"
+            ] = "vnsparacio/sanctum-work-mode-qualification"
+            profile_path.write_text(json.dumps(profile))
+            profile_path.chmod(0o644)
+            with self.assertRaisesRegex(ConfigError, "owner-private"):
+                preflight(config, ROOT, environment)
+
+    def test_work_mode_configuration_and_workflow_binding_drift_fail_closed(self):
+        raw = json.loads(CONFIG.read_text())
+        raw["symphony"]["work_mode_app_server_env"] = "ATTACKER_SELECTED_SERVER"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agents.json"
+            path.write_text(json.dumps(raw))
+            with self.assertRaisesRegex(ConfigError, "environment binding"):
+                load_config(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "source"
+            (repository / "config").mkdir(parents=True)
+            for name in ("WORKFLOW.work-mode.md", "WORKFLOW.work-mode.deep.md"):
+                (repository / name).write_text((ROOT / name).read_text())
+            raw = json.loads(CONFIG.read_text())
+            raw["symphony"]["implementation_backend"] = "work-mode"
+            binary = root / "symphony"
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o700)
+            raw["symphony"]["default_binary"] = str(binary)
+            config_path = repository / "config/agents.json"
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            workflow = repository / "WORKFLOW.work-mode.md"
+            workflow.write_text(
+                workflow.read_text().replace(
+                    '    "$SANCTUM_WORK_MODE_APP_SERVER"', '    "/tmp/unreviewed"'
+                )
+            )
+
+            prefix = root / "private"
+            profile_path = prefix / "config/work-mode-projects.json"
+            profile_path.parent.mkdir(parents=True, mode=0o700)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-project-profiles/v1",
+                        "profiles": [
+                            {
+                                "project_id": "v13-qualification",
+                                "repository": "vnsparacio/sanctum-work-mode-qualification",
+                                "base_branch": "main",
+                                "validation_operations": ["build", "lint", "test"],
+                                "private_config_refs": {
+                                    "repository": "v13-qualification-repository",
+                                    "validation": "v13-qualification-validation",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+            profile_path.chmod(0o600)
+            app_server = root / "work-mode-app-server"
+            app_server.write_text("#!/bin/sh\n")
+            app_server.chmod(0o700)
+            with self.assertRaisesRegex(
+                ConfigError, "workflow does not match reviewed routing configuration"
+            ):
+                preflight(
+                    config,
+                    repository,
+                    {
+                        "LINEAR_API_KEY": "synthetic-test-token",
+                        "SANCTUM_AGENT_PREFIX": str(prefix),
+                        "SANCTUM_WORK_MODE_APP_SERVER": str(app_server),
+                        "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                    },
+                )
 
 
 class AuthorityTests(unittest.TestCase):
@@ -1092,6 +1297,11 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("stall_timeout_ms: 900000", workflow)
         self.assertIn("dashboard_enabled: false", workflow)
         self.assertIn("run_validation_profile", workflow)
+        self.assertIn("report_operator_blocker", workflow)
+        self.assertIn(
+            'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]',
+            workflow,
+        )
         self.assertIn('model="gpt-6-astra"', deep_workflow)
         self.assertIn("agent-deep", deep_workflow)
         self.assertIn("max_turns: 30", deep_workflow)
@@ -1115,15 +1325,37 @@ class ImplementationLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(standard, normalized)
 
+        work_mode_standard = (ROOT / "WORKFLOW.work-mode.md").read_text()
+        work_mode_deep = (ROOT / "WORKFLOW.work-mode.deep.md").read_text()
+        normalized_work_mode = (
+            work_mode_deep.replace("    - agent-deep\n", "    - agent-standard\n")
+            .replace("max_turns: 30", "max_turns: 20")
+            .replace(
+                "Worker class: deep (`agent-deep`).",
+                "Worker class: standard (`agent-standard`).",
+            )
+        )
+        self.assertEqual(work_mode_standard, normalized_work_mode)
+        self.assertIn('"$SANCTUM_WORK_MODE_APP_SERVER"', work_mode_standard)
+        self.assertIn("`v13-qualification`", work_mode_standard)
+        self.assertNotIn("git pr merge", work_mode_standard)
+
 
 class SymphonySupervisorTests(unittest.TestCase):
-    def running(self, session: str, turns: int, tokens: int) -> dict[str, object]:
+    def running(
+        self,
+        session: str,
+        turns: int,
+        tokens: int,
+        *,
+        started_at: str = "1970-01-01T00:01:40Z",
+    ) -> dict[str, object]:
         return {
             "issue_identifier": "SAN-7",
             "session_id": session,
             "turn_count": turns,
             "tokens": {"total_tokens": tokens},
-            "started_at": "1970-01-01T00:01:40Z",
+            "started_at": started_at,
             "last_event_at": "1970-01-01T00:03:15Z",
         }
 
@@ -1163,7 +1395,7 @@ class SymphonySupervisorTests(unittest.TestCase):
         self.assertEqual(["concurrency_budget"], [item.reason for item in violations])
         self.assertEqual("service", violations[0].issue_identifier)
 
-    def test_cumulative_counters_are_not_summed_across_continuation_sessions(self):
+    def test_cumulative_counters_use_high_water_within_one_attempt(self):
         ledger: dict[str, object] = {"issues": {}}
         first = self.evaluate(
             {"running": [self.running("one", 4, 300)], "retrying": []}, ledger
@@ -1176,6 +1408,44 @@ class SymphonySupervisorTests(unittest.TestCase):
         record = ledger["issues"]["SAN-7"]
         self.assertEqual(5, _ledger_totals(record, 200)["turn_count"])
         self.assertEqual(400, _ledger_totals(record, 200)["tokens"])
+
+    def test_cumulative_counters_sum_continuation_attempts_in_one_runtime(self):
+        ledger: dict[str, object] = {"issues": {}}
+        first = self.evaluate(
+            {
+                "running": [
+                    self.running(
+                        "one",
+                        4,
+                        300,
+                        started_at="1970-01-01T00:01:40Z",
+                    )
+                ],
+                "retrying": [],
+            },
+            ledger,
+        )
+        self.assertEqual([], first)
+        second = self.evaluate(
+            {
+                "running": [
+                    self.running(
+                        "two",
+                        5,
+                        300,
+                        started_at="1970-01-01T00:03:30Z",
+                    )
+                ],
+                "retrying": [],
+            },
+            ledger,
+        )
+        self.assertEqual(
+            {"turns_budget", "tokens_budget"}, {item.reason for item in second}
+        )
+        record = ledger["issues"]["SAN-7"]
+        self.assertEqual(9, _ledger_totals(record, 200)["turn_count"])
+        self.assertEqual(600, _ledger_totals(record, 200)["tokens"])
 
     def test_total_turn_and_token_caps_span_supervisor_runtimes(self):
         ledger: dict[str, object] = {"issues": {}}
@@ -1204,8 +1474,9 @@ class SymphonySupervisorTests(unittest.TestCase):
         }
         self.evaluate({"running": [entry], "retrying": []}, ledger)
         runtime = ledger["issues"]["SAN-7"]["runtimes"]["runtime-one"]
-        self.assertEqual(20, runtime["input_tokens"])
-        self.assertEqual(10, runtime["output_tokens"])
+        attempt = runtime["attempts"]["1970-01-01T00:01:40Z"]
+        self.assertEqual(20, attempt["input_tokens"])
+        self.assertEqual(10, attempt["output_tokens"])
 
     def test_legacy_session_ledger_uses_cumulative_high_water_marks(self):
         record = {
@@ -1336,6 +1607,34 @@ class SymphonySupervisorTests(unittest.TestCase):
             self.assertEqual(
                 [],
                 validation_environment_violations(
+                    Path(root), snapshot, launched_at=2_000_000_000
+                ),
+            )
+
+    def test_fresh_operator_blocker_stops_without_poisoning_later_runs(self):
+        with tempfile.TemporaryDirectory() as root:
+            blockers = Path(root) / "blockers" / "SAN-7"
+            blockers.mkdir(parents=True)
+            (blockers / "owner-prerequisite.json").write_text(
+                json.dumps(
+                    {
+                        "issue_id": "SAN-7",
+                        "event": "operator_action_required",
+                        "state": "reported",
+                        "reported_at": "2026-09-21T00:00:00+00:00",
+                    }
+                )
+            )
+            snapshot = {"running": [self.running("one", 1, 1)], "retrying": []}
+            violations = operator_blocker_violations(
+                Path(root), snapshot, launched_at=0
+            )
+            self.assertEqual(1, len(violations))
+            self.assertEqual("operator_action_required", violations[0].reason)
+            self.assertEqual("OWNER_ACTION_REQUIRED", violations[0].termination_class)
+            self.assertEqual(
+                [],
+                operator_blocker_violations(
                     Path(root), snapshot, launched_at=2_000_000_000
                 ),
             )
@@ -1966,6 +2265,7 @@ class SymphonyRecoveryTests(unittest.TestCase):
                     "issue_identifier": self.issue,
                     "turn_count": 43,
                     "tokens": {"total_tokens": 8100000},
+                    "started_at": "1970-01-01T00:00:01Z",
                 }
             ],
             "retrying": [],

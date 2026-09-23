@@ -16,6 +16,7 @@ GATE_NODE_TESTS = (
     "tests/observability.test.mjs",
     "tests/local-agent.test.mjs",
     "tests/source-retrieval.test.mjs",
+    "tests/work-mode-app-server.test.mjs",
     "tests/work-mode.test.mjs",
     "tests/worktree-edit.test.mjs",
     "tests/task-evidence.test.mjs",

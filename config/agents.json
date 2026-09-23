@@ -113,6 +113,14 @@
     "deep_workflow": "WORKFLOW.deep.md",
     "work_mode_workflow": "WORKFLOW.work-mode.md",
     "work_mode_deep_workflow": "WORKFLOW.work-mode.deep.md",
+    "work_mode_app_server_env": "SANCTUM_WORK_MODE_APP_SERVER",
+    "work_mode_profile": {
+      "relative_path": "config/work-mode-projects.json",
+      "project_id": "v13-qualification",
+      "repository": "vnsparacio/sanctum-work-mode-qualification",
+      "integration_branch": "main",
+      "validation_operations": ["build", "lint", "test"]
+    },
     "max_concurrency": 5,
     "shutdown_grace_seconds": 10,
     "state_port": 7788,
