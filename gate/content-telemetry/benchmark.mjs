@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import Ajv from 'ajv';
+import Ajv from './ajv.mjs';
 import {prepareContentTelemetryRecord,redactContentText} from './contract.mjs';
 
 export const BENCHMARK_DATASET_SCHEMA_VERSION='sanctum.benchmark-dataset/v1';

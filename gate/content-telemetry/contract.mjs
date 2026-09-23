@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import Ajv from 'ajv';
+import Ajv from './ajv.mjs';
 
 export const CONTENT_TELEMETRY_SCHEMA_VERSION='sanctum.ai-interaction/v1';
 export const CONTENT_TELEMETRY_MAX_RECORD_BYTES=65536;

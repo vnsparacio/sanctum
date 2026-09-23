@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import {isAbsolute,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import Ajv from 'ajv';
+import Ajv from './ajv.mjs';
 
 export const QUALITY_ANNOTATION_SCHEMA_VERSION='sanctum.quality-annotation/v1';
 export const QUALITY_ANNOTATION_MAX_BYTES=16384;
