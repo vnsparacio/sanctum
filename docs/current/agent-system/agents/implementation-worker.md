@@ -45,6 +45,19 @@ authority and differ only in routing label and turn budget. Preflight also
 requires each workflow to retain the reviewed adapter command and exact
 qualification profile, repository, branch and validation-operation text.
 
+The source adapter is `scripts/work_mode_app_server.mjs`. Its external launcher
+must bind `SANCTUM_WORK_MODE_RUNTIME_PREFIX` to the separately verified private
+Work Mode runtime; the launcher itself remains owner-private and is the
+executable selected by `SANCTUM_WORK_MODE_APP_SERVER`. Before allocating a
+model, the adapter verifies the exact pinned container image through the
+profile's fixed Docker executable and socket. It publishes the reviewed Work
+Mode capability manifest and serves an authenticated ephemeral loopback
+`/tools/invoke` bridge inside its own process. This same-process bridge is
+required because a Work Mode task binding is process-local; forwarding those
+calls to the general gateway would lose the binding and fail every capability
+as unavailable. The bridge accepts only the six registered Work Mode tools,
+has a 64 KiB request bound, and does not expose its random bearer token.
+
 ## Hard governor
 
 `sanctum_agents.symphony_supervisor` launches the unmodified external Symphony
