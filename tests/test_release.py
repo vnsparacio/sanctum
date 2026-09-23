@@ -106,6 +106,38 @@ class Setup(unittest.TestCase):
             self.assertNotIn("@PYTHON@", text)
             self.assertNotIn("@SANCTUM_PACKAGE@", text)
 
+    def test_rendered_content_telemetry_resolves_pinned_ajv(self):
+        op.setup(self.prefix)
+        script = """import {pathToFileURL} from 'node:url';
+const root=process.argv[1];
+for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
+  await import(pathToFileURL(root+'/gate/content-telemetry/'+name));
+}
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script, str(self.prefix)],
+            cwd=self.prefix.parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_content_telemetry_runtime_amendment_is_reversible(self):
+        op.setup(self.prefix)
+        module_spec = importlib.util.spec_from_file_location(
+            "content_telemetry_upgrade",
+            ROOT / "scripts/upgrade_content_telemetry_runtime.py",
+        )
+        upgrade = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(upgrade)
+        before = (self.prefix / "receipt.json").read_bytes()
+        record = upgrade.apply(self.prefix)
+        self.assertTrue((record / "complete").is_file())
+        op.verify_install(self.prefix)
+        upgrade.rollback(self.prefix, record)
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+        op.verify_install(self.prefix)
+
     def test_gateway_process_identity_is_exact_and_stale_records_fail(self):
         expected = {
             "schema": op.GATEWAY_PROCESS_SCHEMA,

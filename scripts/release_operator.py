@@ -88,6 +88,16 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
         "state/workspace",
     ):
         private(prefix / name)
+    for name in (
+        "benchmark-dataset-v1.schema.json",
+        "benchmark-replay-v1.schema.json",
+        "content-telemetry-v1.schema.json",
+        "quality-annotation-v1.schema.json",
+    ):
+        write(
+            prefix / "config/schemas" / name,
+            (ROOT / "config/schemas" / name).read_text(),
+        )
     python = str(ROOT / ".venv/bin/python")
     node = shutil.which("node")
     if not Path(python).exists() or not node:
