@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sanctum.local/schemas/benchmark-replay-v1.schema.json",
+  "title": "Sanctum offline benchmark replay results v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "replay_id", "run_id", "created_at", "dataset", "authority_effect", "result_sets"],
+  "properties": {
+    "schema_version": {"const": "sanctum.benchmark-replay/v1"},
+    "replay_id": {"type": "string", "pattern": "^br-[a-f0-9]{64}$"},
+    "run_id": {"$ref": "#/definitions/id"},
+    "created_at": {"$ref": "#/definitions/timestamp"},
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "dataset_version"],
+      "properties": {
+        "dataset_id": {"$ref": "#/definitions/id"},
+        "dataset_version": {"$ref": "#/definitions/id"}
+      }
+    },
+    "authority_effect": {"const": "NONE"},
+    "result_sets": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["configuration_id", "model", "revision", "provider", "results"],
+        "properties": {
+          "configuration_id": {"$ref": "#/definitions/id"},
+          "model": {"$ref": "#/definitions/id"},
+          "revision": {"$ref": "#/definitions/idOrNull"},
+          "provider": {"$ref": "#/definitions/id"},
+          "results": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["test_case_id", "response", "failure_category", "latency_ms"],
+              "properties": {
+                "test_case_id": {"$ref": "#/definitions/id"},
+                "response": {"type": ["string", "null"], "maxLength": 32768},
+                "failure_category": {"enum": ["NONE", "PROVIDER_ERROR", "INVALID_RESULT"]},
+                "latency_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 86400000}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@+-]*$"},
+    "idOrNull": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@+-]*$"},
+    "timestamp": {"type": "string", "maxLength": 32, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"}
+  }
+}

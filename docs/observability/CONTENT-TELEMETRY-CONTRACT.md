@@ -3,7 +3,7 @@
 ## Status and boundary
 
 `sanctum.ai-interaction/v1` is the source contract for a restricted,
-content-bearing interaction and evaluation stream. The authenticated gate
+content-bearing interaction stream. The authenticated gate
 records one terminal outcome for each owner-enabled conversational interaction
 and its local persistence adapter stores validated and redacted records in a
 separate private spool. A separately configured delivery process may upload
@@ -20,7 +20,9 @@ settings. When enabled, collection is
 all-or-nothing for every eligible authenticated Sanctum user interaction; no
 per-request or silent sampling/exclusion policy exists in this version.
 
-Telemetry is observational, best-effort, non-fatal, and non-authoritative. A
+Telemetry is observational, best-effort, non-fatal, and non-authoritative.
+Quality annotations, benchmark datasets, and offline replay results are
+likewise evidence only. A
 failure to prepare or eventually deliver a record must not affect authority,
 routing, egress, capability, evaluation, verification, or completion.
 
@@ -32,15 +34,17 @@ The canonical schema is
 - event/interaction identity, UTC timestamp, and run/session/trace correlation;
 - the explicit `user_query` and nullable `delivered_response` content fields;
 - terminal outcome and structured failure stage/category/code;
-- model role, model, revision, and provider;
-- optional latency and token counts; and
-- optional owner rating, evaluator result, benchmark, and test-case identity.
+- model role, model, revision, and provider; and
+- optional latency and token counts.
 
 Success, failure, blocked, denied, and unknown terminal outcomes are distinct.
 Failure diagnostics are bounded codes; raw exception text is not a field.
 Unknown properties are rejected at every object boundary. In particular,
 arbitrary headers, cookies, tool bodies, source bodies, file contents, private
 keys, and hidden chain-of-thought/reasoning are not record fields.
+
+Quality data is deliberately absent from the interaction record. It is never
+added later by rewriting the original query/response event.
 
 Before a valid record can be handed to the local persistence adapter,
 `prepareContentTelemetryRecord` redacts recognized authorization credentials,
@@ -102,6 +106,48 @@ uploaded or silently expired. Spool,
 permission, validation, lock, and I/O failures return a content-free failure
 signal, emit no raw exception/log fallback, and have no authority, routing,
 egress, response-delivery, evaluator, verifier, or completion effect.
+
+## Append-only quality annotations
+
+`sanctum.quality-annotation/v1` records quality evidence separately and refers
+to the immutable source interaction only by `interaction_id`. One interaction
+may have no annotations or any number of private annotation records. Each
+append requires an operator-stable `operation_id`; the annotation identity is
+the SHA-256 digest of that operation and interaction identity. Exact replay
+returns the existing record, while reuse of the identity with changed evidence
+raises an explicit conflict. Files are exclusively created beneath an
+absolute, owner-only `0700` annotation root at mode `0600`.
+
+The schema supports an optional 1–5 owner rating, bounded evaluator/model and
+revision identifiers, benchmark/test-case identity and version, named scores,
+pass/fail, a fixed semantic failure category, and structured grounding and
+citation signals. Semantic failure categories are enums and can be queried
+without interpreting prose. Evaluator prompts, explanations, source or tool
+bodies, arbitrary metadata, hidden reasoning, instructions, and authority
+claims are not fields. `authority_effect` is fixed to `NONE`.
+
+## Curated benchmark export and offline replay
+
+`exportBenchmarkDataset` creates `sanctum.benchmark-dataset/v1` from an exact
+selection of already validated interaction records. Selection is bounded to
+100 cases, must name every interaction and versioned test case explicitly,
+rejects duplicate or missing interaction identities, and reuses the content
+contract's credential redaction. The dataset contains only the selected query,
+nullable delivered reference response, and stable identities; it cannot carry
+tools, sources, private metadata, reasoning, or authority instructions.
+
+`runOfflineReplay` accepts two to eight explicit model/revision configurations
+and matching provider functions supplied by the operator. It does not discover
+providers, credentials, or network destinations and grants no egress. Each
+provider receives only a frozen benchmark case packet. Results use the
+`sanctum.benchmark-replay/v1` format, have a stable replay identity derived from
+the operator run ID, dataset version, and ordered configurations, and retain
+only a redacted response, bounded latency, and structured failure category.
+Provider objects with extra fields are recorded as `INVALID_RESULT`, so a
+provider cannot smuggle source text, tool output, evaluator prompts, or hidden
+reasoning into result metadata. `compareBenchmarkReplay` compares every result
+set with the first configuration using case counts and exact-response matches;
+it makes no completion or quality decision.
 
 ## Immutable S3 delivery
 

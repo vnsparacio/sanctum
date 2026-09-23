@@ -16,6 +16,7 @@ GATE_NODE_TESTS = (
     "tests/content-telemetry-contract.test.mjs",
     "tests/content-telemetry-spool.test.mjs",
     "tests/content-telemetry-delivery.test.mjs",
+    "tests/quality-benchmark.test.mjs",
     "tests/observability.test.mjs",
     "tests/local-agent.test.mjs",
     "tests/source-retrieval.test.mjs",

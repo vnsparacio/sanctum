@@ -1,0 +1,26 @@
+[
+  {
+    "schema_version": "sanctum.ai-interaction/v1",
+    "event_id": "event-quality-1",
+    "interaction_id": "interaction-quality-1",
+    "timestamp": "2026-09-22T17:00:00.000Z",
+    "correlation": {"run_id": "run-quality-1"},
+    "user_query": "Name the synthetic primary color.",
+    "delivered_response": "Blue.",
+    "outcome": "success",
+    "failure": null,
+    "model": {"role": "answer", "model": "synthetic-a", "revision": "r1", "provider": "fixture"}
+  },
+  {
+    "schema_version": "sanctum.ai-interaction/v1",
+    "event_id": "event-quality-2",
+    "interaction_id": "interaction-quality-2",
+    "timestamp": "2026-09-22T17:00:01.000Z",
+    "correlation": {"run_id": "run-quality-2"},
+    "user_query": "Return the synthetic fixture identifier.",
+    "delivered_response": "fixture-2",
+    "outcome": "success",
+    "failure": null,
+    "model": {"role": "answer", "model": "synthetic-a", "revision": "r1", "provider": "fixture"}
+  }
+]
