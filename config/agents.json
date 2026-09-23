@@ -105,16 +105,29 @@
     }
   },
   "symphony": {
+    "implementation_backend": "codex",
     "binary_env": "SANCTUM_SYMPHONY_BIN",
     "default_binary": "symphony",
     "engineering_preview_acknowledged": true,
     "workflow": "WORKFLOW.md",
     "deep_workflow": "WORKFLOW.deep.md",
+    "work_mode_workflow": "WORKFLOW.work-mode.md",
+    "work_mode_deep_workflow": "WORKFLOW.work-mode.deep.md",
+    "work_mode_app_server_env": "SANCTUM_WORK_MODE_APP_SERVER",
+    "work_mode_profile": {
+      "relative_path": "config/work-mode-projects.json",
+      "project_id": "v13-qualification",
+      "repository": "vnsparacio/sanctum-work-mode-qualification",
+      "integration_branch": "main",
+      "validation_operations": ["build", "lint", "test"]
+    },
     "max_concurrency": 5,
     "shutdown_grace_seconds": 10,
     "state_port": 7788,
     "poll_seconds": 2,
     "state_timeout_seconds": 2,
+    "state_startup_grace_seconds": 120,
+    "state_stall_grace_seconds": 30,
     "output_limit_bytes": 67108864,
     "budget_warning_ratio": 0.8
   }

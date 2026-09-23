@@ -19,6 +19,7 @@ from typing import Any
 from urllib import error, request
 
 from .config import AgentConfig, ConfigError
+from .implementation import LifecycleError, implementation_backend_dispatch
 from .runtime import (
     ExclusiveRoleLock,
     JsonlRunLog,
@@ -26,6 +27,7 @@ from .runtime import (
     ensure_private_prefix,
     new_run_id,
 )
+from .work_projects import ProjectProfileError, load_project_profiles
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,46 @@ def validation_environment_violations(
     return violations
 
 
+def operator_blocker_violations(
+    validation_state: Path, snapshot: dict[str, Any], *, launched_at: float
+) -> list[SymphonyViolation]:
+    """Stop only for blocker signals emitted during this supervisor invocation."""
+    violations: list[SymphonyViolation] = []
+    active = snapshot.get("running", []) + snapshot.get("retrying", [])
+    for entry in active:
+        identifier = entry.get("issue_identifier")
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[A-Z][A-Z0-9]*-[1-9][0-9]*", identifier
+        ):
+            continue
+        receipt_dir = validation_state / "blockers" / identifier
+        for path in receipt_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                receipt = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(receipt, dict)
+                and receipt.get("issue_id") == identifier
+                and receipt.get("event") == "operator_action_required"
+                and receipt.get("state") == "reported"
+                and (_parse_time(receipt.get("reported_at")) or 0) >= launched_at
+            ):
+                violations.append(
+                    SymphonyViolation(
+                        identifier,
+                        "operator_action_required",
+                        1.0,
+                        0.0,
+                        TerminationClass.OWNER_ACTION_REQUIRED.value,
+                    )
+                )
+                break
+    return violations
+
+
 def evaluate_snapshot(
     snapshot: dict[str, Any],
     ledger: dict[str, Any],
@@ -195,8 +237,13 @@ def evaluate_snapshot(
         )
         record["last_seen"] = now
         runtimes = _runtime_counters(record)
-        runtime_record = runtimes.setdefault(
-            runtime_id,
+        runtime_record = runtimes.setdefault(runtime_id, {"attempts": {}})
+        attempt_id = entry.get("started_at")
+        if _parse_time(attempt_id) is None:
+            raise ValueError("Symphony running attempt identity is malformed")
+        attempts = _runtime_attempt_counters(runtime_record)
+        attempt_record = attempts.setdefault(
+            attempt_id,
             {"turns": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0},
         )
         elapsed = max(0, now - float(record["first_seen"]))
@@ -220,13 +267,13 @@ def evaluate_snapshot(
         counters = (turns, tokens, input_tokens, output_tokens)
         if any(type(value) is not int or value < 0 for value in counters):
             raise ValueError("Symphony running counters are malformed")
-        runtime_record["turns"] = max(runtime_record.get("turns", 0), turns)
-        runtime_record["tokens"] = max(runtime_record.get("tokens", 0), tokens)
-        runtime_record["input_tokens"] = max(
-            runtime_record.get("input_tokens", 0), input_tokens
+        attempt_record["turns"] = max(attempt_record.get("turns", 0), turns)
+        attempt_record["tokens"] = max(attempt_record.get("tokens", 0), tokens)
+        attempt_record["input_tokens"] = max(
+            attempt_record.get("input_tokens", 0), input_tokens
         )
-        runtime_record["output_tokens"] = max(
-            runtime_record.get("output_tokens", 0), output_tokens
+        attempt_record["output_tokens"] = max(
+            attempt_record.get("output_tokens", 0), output_tokens
         )
         totals = _ledger_totals(record, now)
         total_turns = totals["turn_count"]
@@ -400,6 +447,41 @@ def _runtime_counters(record: dict[str, Any]) -> dict[str, Any]:
     return runtimes
 
 
+_COUNTER_NAMES = ("turns", "tokens", "input_tokens", "output_tokens")
+
+
+def _runtime_attempt_counters(runtime: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(runtime, dict):
+        raise ValueError("Symphony supervisor runtime counters are malformed")
+    attempts = runtime.get("attempts")
+    if attempts is not None:
+        if not isinstance(attempts, dict):
+            raise ValueError("Symphony supervisor attempt ledger is malformed")
+        return attempts
+    legacy = {name: runtime.pop(name, 0) for name in _COUNTER_NAMES}
+    if any(type(value) is not int or value < 0 for value in legacy.values()):
+        raise ValueError("Symphony supervisor runtime counters are malformed")
+    attempts = {"legacy": legacy} if any(legacy.values()) else {}
+    runtime["attempts"] = attempts
+    return attempts
+
+
+def _runtime_totals(runtime: Any) -> dict[str, int]:
+    totals = {name: 0 for name in _COUNTER_NAMES}
+    if not isinstance(runtime, dict):
+        return totals
+    attempts = runtime.get("attempts")
+    values = attempts.values() if isinstance(attempts, dict) else (runtime,)
+    for counters in values:
+        if not isinstance(counters, dict):
+            continue
+        for name in _COUNTER_NAMES:
+            value = counters.get(name, 0)
+            if type(value) is int and value >= 0:
+                totals[name] += value
+    return totals
+
+
 def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
     runtimes = record.get("runtimes")
     if runtimes is None:
@@ -433,16 +515,13 @@ def _ledger_totals(record: dict[str, Any], now: float) -> dict[str, float]:
             "output_tokens": 0.0,
             "retry_count": 0.0,
         }
+    runtime_totals = [_runtime_totals(item) for item in runtimes.values()]
     return {
         "elapsed_ms": max(0.0, now - float(record.get("first_seen", now))) * 1000,
-        "turn_count": float(sum(item.get("turns", 0) for item in runtimes.values())),
-        "tokens": float(sum(item.get("tokens", 0) for item in runtimes.values())),
-        "input_tokens": float(
-            sum(item.get("input_tokens", 0) for item in runtimes.values())
-        ),
-        "output_tokens": float(
-            sum(item.get("output_tokens", 0) for item in runtimes.values())
-        ),
+        "turn_count": float(sum(item["turns"] for item in runtime_totals)),
+        "tokens": float(sum(item["tokens"] for item in runtime_totals)),
+        "input_tokens": float(sum(item["input_tokens"] for item in runtime_totals)),
+        "output_tokens": float(sum(item["output_tokens"] for item in runtime_totals)),
         "retry_count": float(record.get("max_retry", 0)),
     }
 
@@ -543,12 +622,70 @@ def _sanitized_supervisor_environment(
     return {key: value for key, value in values.items() if key in allowed}
 
 
-def _worker_settings(config: AgentConfig, worker_class: str) -> tuple[str, str]:
-    if worker_class == "standard":
-        return "implementation", config.symphony["workflow"]
-    if worker_class == "deep":
-        return "implementation_deep", config.symphony["deep_workflow"]
-    raise ConfigError("worker class must be standard or deep")
+def _work_mode_host_binding(
+    config: AgentConfig,
+    repository: Path,
+    workspace_root: Path,
+    values: dict[str, str],
+) -> dict[str, Any]:
+    """Resolve one reviewed project through owner-private host configuration."""
+
+    expected = config.symphony["work_mode_profile"]
+    profile_path = config.runtime_prefix(values) / expected["relative_path"]
+    if (
+        not profile_path.is_absolute()
+        or profile_path.is_symlink()
+        or not profile_path.is_file()
+        or profile_path.resolve(strict=True) != profile_path
+        or profile_path.stat().st_uid != os.getuid()
+        or profile_path.stat().st_mode & 0o077
+        or profile_path.is_relative_to(repository.resolve())
+        or profile_path.is_relative_to(workspace_root)
+    ):
+        raise ConfigError(
+            "Work Mode project profiles must be owner-private and outside source/workspaces"
+        )
+    try:
+        profile = load_project_profiles(profile_path).select(expected["project_id"])
+    except ProjectProfileError as exc:
+        raise ConfigError(str(exc)) from exc
+    if (
+        profile.repository != expected["repository"]
+        or profile.base_branch != expected["integration_branch"]
+        or list(profile.validation_operations) != expected["validation_operations"]
+    ):
+        raise ConfigError(
+            "Work Mode qualification profile does not match reviewed bindings"
+        )
+
+    app_server_env = config.symphony["work_mode_app_server_env"]
+    raw_app_server = values.get(app_server_env)
+    if not raw_app_server:
+        raise ConfigError(f"{app_server_env} is required for the Work Mode backend")
+    app_server_candidate = Path(raw_app_server).expanduser()
+    app_server = app_server_candidate.resolve(strict=False)
+    safe_path = re.compile(r"^[A-Za-z0-9_./-]+$")
+    if (
+        not app_server_candidate.is_absolute()
+        or app_server_candidate.is_symlink()
+        or not app_server.is_file()
+        or app_server.resolve(strict=True) != app_server
+        or not os.access(app_server, os.X_OK)
+        or not safe_path.fullmatch(str(app_server))
+        or app_server.is_relative_to(repository.resolve())
+        or app_server.is_relative_to(workspace_root)
+        or app_server.stat().st_uid not in {0, os.getuid()}
+        or app_server.stat().st_mode & 0o022
+    ):
+        raise ConfigError("Work Mode app-server is not a reviewed external executable")
+    return {
+        "app_server": str(app_server),
+        "profiles_file": str(profile_path),
+        "project_id": profile.project_id,
+        "repository": profile.repository,
+        "integration_branch": profile.base_branch,
+        "validation_operations": list(profile.validation_operations),
+    }
 
 
 def preflight(
@@ -559,7 +696,11 @@ def preflight(
     worker_class: str = "standard",
 ) -> dict[str, Any]:
     values = os.environ if environ is None else environ
-    role_name, workflow_name = _worker_settings(config, worker_class)
+    try:
+        dispatch = implementation_backend_dispatch(config.symphony, worker_class)
+    except LifecycleError as exc:
+        raise ConfigError(str(exc)) from exc
+    role_name, workflow_name = dispatch.role_name, dispatch.workflow
     binary = _resolve_binary(config, values)
     workflow = repository / workflow_name
     if not workflow.is_file():
@@ -567,12 +708,28 @@ def preflight(
     workflow_text = workflow.read_text()
     route = config.project["worker_routing"][f"{worker_class}_label"]
     model = config.model_for(role_name)
-    required_fragments = (
+    required_fragments = [
         f"    - {route}\n",
-        f'model="{model.model}"',
-        f'model_reasoning_effort="{model.reasoning}"',
         f"max_concurrent_agents: {config.symphony['max_concurrency']}",
-    )
+    ]
+    if dispatch.backend == "codex":
+        required_fragments.extend(
+            (
+                f'model="{model.model}"',
+                f'model_reasoning_effort="{model.reasoning}"',
+            )
+        )
+    else:
+        expected = config.symphony["work_mode_profile"]
+        required_fragments.extend(
+            (
+                '    "$SANCTUM_WORK_MODE_APP_SERVER"',
+                f"The host selected project profile is `{expected['project_id']}`.",
+                f"- repository `{expected['repository']}`;",
+                f"- integration branch `{expected['integration_branch']}`;",
+                "- validation operations `build`, `lint`, and `test`;",
+            )
+        )
     if any(fragment not in workflow_text for fragment in required_fragments):
         raise ConfigError(
             "worker workflow does not match reviewed routing configuration"
@@ -586,6 +743,11 @@ def preflight(
     source = repository.resolve()
     if workspace_root == source or workspace_root.is_relative_to(source):
         raise ConfigError("Symphony workspace root must remain outside source")
+    work_mode_binding = None
+    if dispatch.backend == "work-mode":
+        work_mode_binding = _work_mode_host_binding(
+            config, repository, workspace_root, values
+        )
     broker_python, broker_script, validation_script = _verified_host_assets(repository)
     credential_helper = shutil.which("gh", path=values.get("PATH"))
     if not credential_helper:
@@ -643,10 +805,11 @@ def preflight(
         raise ConfigError("private GitHub CLI authentication check timed out") from exc
     if authenticated.returncode:
         raise ConfigError("private GitHub CLI authentication is unavailable")
-    return {
+    result = {
         "binary": binary,
         "launch_prefix": _launch_prefix(binary),
         "workflow": str(workflow),
+        "implementation_backend": dispatch.backend,
         "workspace_root": str(workspace_root),
         "git_broker_python": broker_python,
         "git_broker_script": broker_script,
@@ -659,6 +822,9 @@ def preflight(
         "reasoning_effort": model.reasoning,
         "wall_clock_timeout_seconds": config.roles[role_name].wall_clock_seconds,
     }
+    if work_mode_binding is not None:
+        result["work_mode"] = work_mode_binding
+    return result
 
 
 def resume_from_incident(
@@ -802,6 +968,15 @@ def _fetch_state(port: int, timeout: float) -> dict[str, Any]:
     return payload
 
 
+def _state_api_grace_seconds(config: AgentConfig, state_api_ready: bool) -> float:
+    key = (
+        "state_stall_grace_seconds"
+        if state_api_ready
+        else "state_startup_grace_seconds"
+    )
+    return float(config.symphony[key])
+
+
 def _ensure_port_available(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
@@ -838,6 +1013,11 @@ def supervise(
     values["SANCTUM_VALIDATION_RUNNER_SCRIPT"] = checked["validation_runner_script"]
     values["SANCTUM_GIT_CREDENTIAL_HELPER"] = checked["git_credential_helper"]
     values["SANCTUM_GIT_GH_CONFIG_DIR"] = checked["git_github_config_dir"]
+    if checked["implementation_backend"] == "work-mode":
+        work_mode = checked["work_mode"]
+        values["SANCTUM_WORK_MODE_APP_SERVER"] = work_mode["app_server"]
+        values["SANCTUM_WORK_MODE_PROJECTS_FILE"] = work_mode["profiles_file"]
+        values["SANCTUM_WORK_MODE_PROJECT_ID"] = work_mode["project_id"]
     role = config.roles[checked["role_name"]]
     workspace_root = Path(checked["workspace_root"])
     workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -914,6 +1094,7 @@ def supervise(
             reasoning_effort=checked["reasoning_effort"],
         )
         unavailable_since: float | None = None
+        state_api_ready = False
         warning_events: set[tuple[str, str]] = set()
         seen_sessions: set[tuple[str, str]] = set()
         turn_high_water: dict[str, int] = {}
@@ -936,16 +1117,20 @@ def supervise(
                             port, config.symphony["state_timeout_seconds"]
                         )
                         unavailable_since = None
+                        state_api_ready = True
                     except RuntimeError:
                         unavailable_since = unavailable_since or time.monotonic()
-                        if time.monotonic() - unavailable_since <= 30:
+                        grace_seconds = _state_api_grace_seconds(
+                            config, state_api_ready
+                        )
+                        if time.monotonic() - unavailable_since <= grace_seconds:
                             continue
                         violations = [
                             SymphonyViolation(
                                 "service",
                                 "state_api_stall",
                                 time.monotonic() - unavailable_since,
-                                30,
+                                grace_seconds,
                                 TerminationClass.ENVIRONMENT.value,
                             )
                         ]
@@ -965,6 +1150,11 @@ def supervise(
                         )
                         violations.extend(
                             validation_environment_violations(
+                                validation_state, snapshot, launched_at=launched_at
+                            )
+                        )
+                        violations.extend(
+                            operator_blocker_violations(
                                 validation_state, snapshot, launched_at=launched_at
                             )
                         )

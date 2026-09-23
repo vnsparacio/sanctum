@@ -57,6 +57,12 @@ VALIDATION_PROFILES: dict[str, tuple[ValidationCommand, ...]] = {
     ),
 }
 
+OPERATOR_BLOCKER_CODES = {
+    "owner_prerequisite_missing",
+    "environment_prerequisite_missing",
+    "control_plane_reconciliation_required",
+}
+
 
 def _atomic_private_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -355,4 +361,62 @@ class HostValidationRunner:
                 }
                 for item in receipt["commands"]
             ],
+        }
+
+    def report_operator_blocker(
+        self,
+        issue_id: Any,
+        workspace_id: Any,
+        blocker_code: Any,
+        operation_id: Any,
+    ) -> dict[str, Any]:
+        """Emit a bounded private signal for a deterministic owner checkpoint."""
+        if blocker_code not in OPERATOR_BLOCKER_CODES:
+            raise ValidationError("blocker_code is not approved")
+        if not isinstance(operation_id, str) or not OPERATION_PATTERN.fullmatch(
+            operation_id
+        ):
+            raise ValidationError("operation_id is invalid")
+        status = self._identity(issue_id, workspace_id)
+        receipt_path = (
+            self.validation_state_root / "blockers" / issue_id / f"{operation_id}.json"
+        )
+        intent = {
+            "issue_id": issue_id,
+            "workspace_id": workspace_id,
+            "blocker_code": blocker_code,
+            "operation_id": operation_id,
+        }
+        receipt_id = hashlib.sha256(
+            f"{issue_id}:{blocker_code}:{operation_id}".encode()
+        ).hexdigest()[:24]
+        if receipt_path.exists():
+            try:
+                receipt = json.loads(receipt_path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationError("operator blocker receipt is unreadable") from exc
+            if any(receipt.get(key) != value for key, value in intent.items()):
+                raise ValidationError(
+                    "operation_id cannot be reused for a different operator blocker"
+                )
+        else:
+            receipt = {
+                "schema_version": 1,
+                "receipt_id": receipt_id,
+                **intent,
+                "event": "operator_action_required",
+                "state": "reported",
+            }
+        receipt.update(
+            {
+                "branch": status["branch"],
+                "head": status["head"],
+                "reported_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        _atomic_private_json(receipt_path, receipt)
+        return {
+            "status": "reported",
+            "receipt_id": receipt_id,
+            "blocker_code": blocker_code,
         }

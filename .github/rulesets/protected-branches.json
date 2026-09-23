@@ -39,6 +39,59 @@
         "required_approving_review_count": 0,
         "required_review_thread_resolution": true
       }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "Python format",
+            "integration_id": 15368
+          },
+          {
+            "context": "Python lint",
+            "integration_id": 15368
+          },
+          {
+            "context": "Plugin build and manifests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Gate JavaScript",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Gate Python",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Reliability",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / MCP containment",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Owned plugins",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Release and portability",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Agent management",
+            "integration_id": 15368
+          },
+          {
+            "context": "Publication, source integrity, and compose",
+            "integration_id": 15368
+          }
+        ],
+        "strict_required_status_checks_policy": false
+      }
     }
   ]
 }

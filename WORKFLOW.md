@@ -64,7 +64,7 @@ codex:
     -c "mcp_servers.sanctum_validation.command=\"$SANCTUM_VALIDATION_RUNNER_PYTHON\""
     -c "mcp_servers.sanctum_validation.args=[\"$SANCTUM_VALIDATION_RUNNER_SCRIPT\",\"mcp\"]"
     -c 'mcp_servers.sanctum_validation.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_VALIDATION_STATE"]'
-    -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile"]'
+    -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]'
     -c 'mcp_servers.sanctum_validation.default_tools_approval_mode="approve"'
     app-server
   approval_policy: never
@@ -534,11 +534,13 @@ If reconciliation remains unknown, record one blocker and stop.
 # Deterministic blockers
 
 An unchanged environment or control-plane blocker is terminal for the current
-supervisor invocation. Record it once in the workpad, then request operator
-input with the exact blocking condition so Symphony enters its blocked state.
-Do not spend continuation turns or retry cycles repeating the same failed Git
-operation. The outer supervisor stops when Symphony reports operator action is
-required; only a later operator-started invocation may resume.
+supervisor invocation. Record the exact blocking condition once in the workpad,
+then call `report_operator_blocker` with a stable operation ID and the narrowest
+approved blocker code. Do not include free-form details in that host signal.
+After the tool reports success, stop. Do not spend continuation turns or retry
+cycles repeating the same prerequisite check or failed Git operation. The outer
+supervisor records `OWNER_ACTION_REQUIRED` and terminates the service; only a
+later operator-started invocation may resume.
 
 # Linear handoff
 
