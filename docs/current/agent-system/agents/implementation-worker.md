@@ -29,6 +29,22 @@ only the worker workflow. Symphony continues to own the execution gate,
 workspace preparation, aggregate budgets, validation and Git control planes,
 and the mandatory Human Review stop.
 
+The reviewed Work Mode workflows resolve an app-server-compatible adapter from
+`SANCTUM_WORK_MODE_APP_SERVER`; the value must be an absolute, non-symlink,
+non-group-writable executable outside both source and the Symphony workspace.
+They also consume the owner-private profile document at
+`$SANCTUM_AGENT_PREFIX/config/work-mode-projects.json`. Preflight selects only
+the centrally pinned `v13-qualification` profile and requires its repository,
+base branch and operations to remain exactly
+`vnsparacio/sanctum-work-mode-qualification`, `main`, and `build`/`lint`/`test`.
+The resolved profile path and project ID are passed to the adapter as
+`SANCTUM_WORK_MODE_PROJECTS_FILE` and `SANCTUM_WORK_MODE_PROJECT_ID`; repository
+paths, credentials, runner images, command argv and GitHub authentication stay
+in owner-private host bindings. Standard and deep workflows have identical
+authority and differ only in routing label and turn budget. Preflight also
+requires each workflow to retain the reviewed adapter command and exact
+qualification profile, repository, branch and validation-operation text.
+
 ## Hard governor
 
 `sanctum_agents.symphony_supervisor` launches the unmodified external Symphony

@@ -24,6 +24,13 @@ _ROLES = {
     "reviewer",
 }
 _REASONING = {"low", "medium", "high", "xhigh", "max", "ultra"}
+_WORK_MODE_PROFILE_FIELDS = {
+    "relative_path",
+    "project_id",
+    "repository",
+    "integration_branch",
+    "validation_operations",
+}
 
 
 @dataclass(frozen=True)
@@ -177,9 +184,31 @@ def load_config(path: str | Path) -> AgentConfig:
         "deep_workflow",
         "work_mode_workflow",
         "work_mode_deep_workflow",
+        "work_mode_app_server_env",
     ):
         if not isinstance(symphony.get(key), str) or not symphony[key]:
             raise ConfigError(f"symphony.{key} must be non-empty")
+    if symphony["work_mode_app_server_env"] != "SANCTUM_WORK_MODE_APP_SERVER":
+        raise ConfigError("Work Mode app-server environment binding is invalid")
+    work_mode_profile = symphony.get("work_mode_profile")
+    if (
+        not isinstance(work_mode_profile, dict)
+        or set(work_mode_profile) != _WORK_MODE_PROFILE_FIELDS
+        or work_mode_profile.get("project_id") != "v13-qualification"
+        or work_mode_profile.get("repository")
+        != "vnsparacio/sanctum-work-mode-qualification"
+        or work_mode_profile.get("integration_branch") != "main"
+        or work_mode_profile.get("validation_operations") != ["build", "lint", "test"]
+    ):
+        raise ConfigError("reviewed Work Mode qualification profile is invalid")
+    relative_profile = Path(str(work_mode_profile.get("relative_path", "")))
+    if (
+        relative_profile.is_absolute()
+        or not relative_profile.parts
+        or ".." in relative_profile.parts
+        or relative_profile.suffix != ".json"
+    ):
+        raise ConfigError("Work Mode profile path must be a safe relative JSON path")
     try:
         implementation_backend_dispatch(symphony, "standard")
         implementation_backend_dispatch(symphony, "deep")

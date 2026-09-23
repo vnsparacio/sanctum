@@ -27,6 +27,7 @@ from .runtime import (
     ensure_private_prefix,
     new_run_id,
 )
+from .work_projects import ProjectProfileError, load_project_profiles
 
 
 @dataclass(frozen=True)
@@ -621,6 +622,72 @@ def _sanitized_supervisor_environment(
     return {key: value for key, value in values.items() if key in allowed}
 
 
+def _work_mode_host_binding(
+    config: AgentConfig,
+    repository: Path,
+    workspace_root: Path,
+    values: dict[str, str],
+) -> dict[str, Any]:
+    """Resolve one reviewed project through owner-private host configuration."""
+
+    expected = config.symphony["work_mode_profile"]
+    profile_path = config.runtime_prefix(values) / expected["relative_path"]
+    if (
+        not profile_path.is_absolute()
+        or profile_path.is_symlink()
+        or not profile_path.is_file()
+        or profile_path.resolve(strict=True) != profile_path
+        or profile_path.stat().st_uid != os.getuid()
+        or profile_path.stat().st_mode & 0o077
+        or profile_path.is_relative_to(repository.resolve())
+        or profile_path.is_relative_to(workspace_root)
+    ):
+        raise ConfigError(
+            "Work Mode project profiles must be owner-private and outside source/workspaces"
+        )
+    try:
+        profile = load_project_profiles(profile_path).select(expected["project_id"])
+    except ProjectProfileError as exc:
+        raise ConfigError(str(exc)) from exc
+    if (
+        profile.repository != expected["repository"]
+        or profile.base_branch != expected["integration_branch"]
+        or list(profile.validation_operations) != expected["validation_operations"]
+    ):
+        raise ConfigError(
+            "Work Mode qualification profile does not match reviewed bindings"
+        )
+
+    app_server_env = config.symphony["work_mode_app_server_env"]
+    raw_app_server = values.get(app_server_env)
+    if not raw_app_server:
+        raise ConfigError(f"{app_server_env} is required for the Work Mode backend")
+    app_server_candidate = Path(raw_app_server).expanduser()
+    app_server = app_server_candidate.resolve(strict=False)
+    safe_path = re.compile(r"^[A-Za-z0-9_./-]+$")
+    if (
+        not app_server_candidate.is_absolute()
+        or app_server_candidate.is_symlink()
+        or not app_server.is_file()
+        or app_server.resolve(strict=True) != app_server
+        or not os.access(app_server, os.X_OK)
+        or not safe_path.fullmatch(str(app_server))
+        or app_server.is_relative_to(repository.resolve())
+        or app_server.is_relative_to(workspace_root)
+        or app_server.stat().st_uid not in {0, os.getuid()}
+        or app_server.stat().st_mode & 0o022
+    ):
+        raise ConfigError("Work Mode app-server is not a reviewed external executable")
+    return {
+        "app_server": str(app_server),
+        "profiles_file": str(profile_path),
+        "project_id": profile.project_id,
+        "repository": profile.repository,
+        "integration_branch": profile.base_branch,
+        "validation_operations": list(profile.validation_operations),
+    }
+
+
 def preflight(
     config: AgentConfig,
     repository: Path,
@@ -652,6 +719,17 @@ def preflight(
                 f'model_reasoning_effort="{model.reasoning}"',
             )
         )
+    else:
+        expected = config.symphony["work_mode_profile"]
+        required_fragments.extend(
+            (
+                '    "$SANCTUM_WORK_MODE_APP_SERVER"',
+                f"The host selected project profile is `{expected['project_id']}`.",
+                f"- repository `{expected['repository']}`;",
+                f"- integration branch `{expected['integration_branch']}`;",
+                "- validation operations `build`, `lint`, and `test`;",
+            )
+        )
     if any(fragment not in workflow_text for fragment in required_fragments):
         raise ConfigError(
             "worker workflow does not match reviewed routing configuration"
@@ -665,6 +743,11 @@ def preflight(
     source = repository.resolve()
     if workspace_root == source or workspace_root.is_relative_to(source):
         raise ConfigError("Symphony workspace root must remain outside source")
+    work_mode_binding = None
+    if dispatch.backend == "work-mode":
+        work_mode_binding = _work_mode_host_binding(
+            config, repository, workspace_root, values
+        )
     broker_python, broker_script, validation_script = _verified_host_assets(repository)
     credential_helper = shutil.which("gh", path=values.get("PATH"))
     if not credential_helper:
@@ -722,7 +805,7 @@ def preflight(
         raise ConfigError("private GitHub CLI authentication check timed out") from exc
     if authenticated.returncode:
         raise ConfigError("private GitHub CLI authentication is unavailable")
-    return {
+    result = {
         "binary": binary,
         "launch_prefix": _launch_prefix(binary),
         "workflow": str(workflow),
@@ -739,6 +822,9 @@ def preflight(
         "reasoning_effort": model.reasoning,
         "wall_clock_timeout_seconds": config.roles[role_name].wall_clock_seconds,
     }
+    if work_mode_binding is not None:
+        result["work_mode"] = work_mode_binding
+    return result
 
 
 def resume_from_incident(
@@ -927,6 +1013,11 @@ def supervise(
     values["SANCTUM_VALIDATION_RUNNER_SCRIPT"] = checked["validation_runner_script"]
     values["SANCTUM_GIT_CREDENTIAL_HELPER"] = checked["git_credential_helper"]
     values["SANCTUM_GIT_GH_CONFIG_DIR"] = checked["git_github_config_dir"]
+    if checked["implementation_backend"] == "work-mode":
+        work_mode = checked["work_mode"]
+        values["SANCTUM_WORK_MODE_APP_SERVER"] = work_mode["app_server"]
+        values["SANCTUM_WORK_MODE_PROJECTS_FILE"] = work_mode["profiles_file"]
+        values["SANCTUM_WORK_MODE_PROJECT_ID"] = work_mode["project_id"]
     role = config.roles[checked["role_name"]]
     workspace_root = Path(checked["workspace_root"])
     workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
