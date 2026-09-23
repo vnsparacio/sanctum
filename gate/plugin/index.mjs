@@ -8,6 +8,8 @@ import { createSourceRetrieval } from './source-retrieval.mjs';
 import { createWorkCommand } from './work-command.mjs';
 import {boundedShutdown,gatewayObservability} from './observability.mjs';
 import { currentCapabilityManifest } from '../foundation/manifest.mjs';
+import {CONTENT_TELEMETRY_DEFAULTS} from '../content-telemetry/contract.mjs';
+import {createContentTelemetrySpool} from '../content-telemetry/spool.mjs';
 export default {
   id:'hybrid-ai-prompt-gate',name:'Mac privacy-first hybrid gate',
   register(api){
@@ -21,6 +23,8 @@ export default {
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});
+    const contentTelemetry=createContentTelemetrySpool({config:settings.content_telemetry??CONTENT_TELEMETRY_DEFAULTS,root:resolve(settings.state_directory,'..','telemetry','content')});
+    contentTelemetry.recover();
     const invokeWeb=async(name,args,proposal)=>{
       const cfg=api.runtime.config.current(), gateway=cfg.gateway;
       if(gateway?.bind!=='loopback'||gateway?.auth?.mode!=='token'||!gateway.auth.token)throw Error('source_runtime_unavailable');
@@ -29,7 +33,7 @@ export default {
       return body.result?.details??body.result;
     };
     let retrieval=null;
-    const gate=createGate({settings,key,observability,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
+    const gate=createGate({settings,key,observability,contentTelemetry,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
     api.registerCommand({name:'gate',description:'Mac-owned hybrid reasoning with exact disclosure approvals',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:gate});
     const work=createWorkCommand({api,base,settings,key,remote});
     api.registerCommand({name:'work',description:'Owner-selected bounded PRIVATE_LEAD Work Mode',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:work});

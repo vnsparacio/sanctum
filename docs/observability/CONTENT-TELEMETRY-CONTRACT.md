@@ -3,17 +3,19 @@
 ## Status and boundary
 
 `sanctum.ai-interaction/v1` is the source contract for a restricted,
-content-bearing interaction and evaluation stream. Its local persistence
-adapter stores validated and redacted records in a separate private spool. It
-does not collect interactions at a call site, upload records, or make an S3 or
+content-bearing interaction and evaluation stream. The authenticated gate
+records one terminal outcome for each owner-enabled conversational interaction
+and its local persistence adapter stores validated and redacted records in a
+separate private spool. This slice does not upload records or make an S3 or
 Splunk change.
 
 This stream is separate from the existing metadata-only operational telemetry
 under `ops/` and from manual Observability Cloud traces and metrics. Content
 records may never be written through either existing path.
 
-Content telemetry is disabled by default. A future integration may enable it
-only through explicit owner configuration. When enabled, collection is
+Content telemetry is disabled by default and may be enabled only through the
+reviewed `content_telemetry` owner configuration in the private rendered gate
+settings. When enabled, collection is
 all-or-nothing for every eligible authenticated Sanctum user interaction; no
 per-request or silent sampling/exclusion policy exists in this version.
 
@@ -39,7 +41,7 @@ Unknown properties are rejected at every object boundary. In particular,
 arbitrary headers, cookies, tool bodies, source bodies, file contents, private
 keys, and hidden chain-of-thought/reasoning are not record fields.
 
-Before a valid record can be handed to any future persistence adapter,
+Before a valid record can be handed to the local persistence adapter,
 `prepareContentTelemetryRecord` redacts recognized authorization credentials,
 provider-style tokens, named secret assignments, JWTs, and PEM private keys
 from the two explicit content fields. The schema bounds query text to 16,384
@@ -48,12 +50,12 @@ numeric metrics individually, and the final UTF-8 JSON record to 65,536 bytes.
 Invalid or oversized records are rejected without returning content values.
 
 Redaction is defense in depth, not permission to add broader input surfaces.
-A future persistence integration must call the preparation function and must
-not accept already-serialized or arbitrary objects as content records.
+The persistence integration calls the preparation function and does not accept
+already-serialized or arbitrary objects as content records.
 
-## Future owner configuration hooks
+## Owner configuration hooks
 
-The contract reserves three validated, non-secret policy hooks:
+The contract exposes three validated, non-secret policy hooks:
 
 - `enabled`: boolean, default `false`;
 - `retention_days`: `null` until the owner chooses a policy, otherwise 1–3650;
@@ -61,9 +63,11 @@ The contract reserves three validated, non-secret policy hooks:
   `owner_authorized_reviewers` after explicit owner configuration.
 
 These hooks define policy intent only. They contain no credentials, endpoints,
-bucket names, indexes, account bindings, or private infrastructure values.
-Adding collection or export requires a separate reviewed change with private
-runtime binding, access enforcement, deletion behavior, and live validation.
+bucket names, indexes, account bindings, or private infrastructure values. The
+local root is derived from the private rendered state directory as
+`telemetry/content`; it is not model- or request-selectable. Adding export
+requires a separate reviewed change with private runtime binding, access
+enforcement, deletion behavior, and live validation.
 
 ## Durable local spool
 
@@ -97,3 +101,20 @@ uploaded or silently expired. Spool,
 permission, validation, lock, and I/O failures return a content-free failure
 signal, emit no raw exception/log fallback, and have no authority, routing,
 egress, response-delivery, evaluator, verifier, or completion effect.
+
+## Authenticated interaction lifecycle
+
+The gate starts an interaction only for an authenticated conversational
+request. It retains the user query across disclosure approvals and background
+work, accumulates naturally available model latency/token metadata, and writes
+the terminal record only when the final gate response is actually returned to
+the owner. Repeated result reads do not duplicate the record. Replacement,
+cancellation, or shutdown before delivery records a cancellation with no
+delivered response.
+
+Host-observed failure mapping uses bounded stage/category/code values for
+model/provider failure, routing or source retrieval, authority or input-policy
+blocking, verification/evaluation rejection, cancellation, and unknown or
+ambiguous failure. Raw exception objects and messages are never copied into
+the structured failure object. The existing metadata-only operational emitter
+continues to receive no query or response fields.
