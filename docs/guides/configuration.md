@@ -17,6 +17,28 @@ request, model response, or environment-provided destination. Enabling or
 changing collection policy requires an owner-reviewed stopped-gateway settings
 amendment and a new private source freeze.
 
+Create an owner-only proposal file outside source containing all three policy
+fields, then apply it with the ordinary validated amendment command. Enabling
+requires a concrete retention period; destination names and credentials do not
+belong in this proposal:
+
+```json
+{
+  "content_telemetry": {
+    "enabled": true,
+    "retention_days": 30,
+    "access_policy": "owner_only"
+  }
+}
+```
+
+```sh
+.venv/bin/python scripts/configure.py \
+  --prefix /absolute/private/prefix \
+  --proposal /absolute/private/content-telemetry-policy.json
+make doctor PREFIX=/absolute/private/prefix
+```
+
 Content delivery has a second, private configuration file based on
 `config/examples/content-telemetry-delivery.json`. Copy it beneath the external
 private prefix, keep it owner-owned mode `0600`, replace the bucket, region,

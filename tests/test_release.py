@@ -303,6 +303,75 @@ class Amendments(unittest.TestCase):
                 mod.configure(self.prefix, {"observability": value})
         self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
 
+    def test_content_telemetry_policy_is_validated_reversible_and_frozen(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_content_telemetry", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        before = settings_path.read_bytes()
+        mod.configure(
+            self.prefix,
+            {
+                "content_telemetry": {
+                    "enabled": True,
+                    "retention_days": 30,
+                    "access_policy": "owner_only",
+                }
+            },
+        )
+        op.verify_install(self.prefix)
+        settings = json.loads(settings_path.read_text())
+        self.assertEqual(
+            settings["content_telemetry"],
+            {
+                "enabled": True,
+                "retention_days": 30,
+                "access_policy": "owner_only",
+            },
+        )
+        freeze = json.loads(freeze_path.read_text())
+        self.assertEqual(op.sha(settings_path), freeze["SETTINGS.json"])
+        log = next((self.prefix / "state/amendments").iterdir())
+        mod.rollback(self.prefix, log)
+        op.verify_install(self.prefix)
+        self.assertEqual(before, settings_path.read_bytes())
+
+    def test_content_telemetry_rejects_unsafe_or_incomplete_policy(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_content_telemetry_invalid", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "receipt.json").read_bytes()
+        for value in (
+            {"enabled": True, "retention_days": None, "access_policy": "owner_only"},
+            {"enabled": True, "retention_days": 0, "access_policy": "owner_only"},
+            {
+                "enabled": True,
+                "retention_days": 30,
+                "access_policy": "everyone",
+            },
+            {
+                "enabled": "yes",
+                "retention_days": 30,
+                "access_policy": "owner_only",
+            },
+            {
+                "enabled": False,
+                "retention_days": None,
+                "access_policy": "owner_only",
+                "bucket": "not-allowed",
+            },
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                mod.configure(self.prefix, {"content_telemetry": value})
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+
 
 class WorkProfileAmendments(unittest.TestCase):
     setUp = Setup.setUp
