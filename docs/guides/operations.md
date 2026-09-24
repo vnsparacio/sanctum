@@ -4,11 +4,40 @@
 
 Foreground components use `scripts/component.py`. Start only one owner for each socket/port. An occupied gateway port fails rather than adopting or killing an unknown process. A startup timeout is not permission to start a duplicate. Inspect the private log and process state.
 
+## Routine startup and shutdown
+
+Start the foreground components in dependency order: MLX, gateway, then WebUI.
+Always pass the same private prefix:
+
+```sh
+# Terminal 1
+.venv/bin/python scripts/component.py mlx \
+  --prefix /absolute/private/prefix \
+  --cache-only
+
+# Terminal 2
+.venv/bin/python scripts/component.py mlx \
+  --prefix /absolute/private/prefix \
+  --health
+make up PREFIX=/absolute/private/prefix
+make doctor PREFIX=/absolute/private/prefix
+
+# Terminal 3
+.venv/bin/python scripts/component.py webui \
+  --prefix /absolute/private/prefix
+```
+
+For shutdown, end or cancel active Gate and Work Mode sessions first, then run
+`make down PREFIX=/absolute/private/prefix`. Stop WebUI and MLX with Ctrl-C in
+their own terminals. Stop MLX last so an in-flight local request is not cut off.
+The complete first-install and WebUI enrollment path is in the
+[end-to-end quickstart](quickstart.md).
+
 The GPU controller's rendered `manage.py status|stop|resume|sweep` remains an explicit owner interface. Stop can delete owned compute; do not invoke it against an unrelated production deployment. If deletion is uncertain, keep cleanup supervision intact. Never clear allocation intent just because one provider query found no Pod.
 
 `manage.py status|stop|resume --release PRIVATE_LEAD` addresses the staged lead release explicitly. The no-argument janitor form `manage.py sweep` reconciles both `PRIVATE_80B` and `PRIVATE_LEAD`; it attempts both even when the inactive lifecycle reports the other managed Pod. It fails only when neither release can be reconciled. The two releases remain mutually exclusive and use separate state and lease stores.
 
-Work Mode is invoked only from an authenticated owner session with `/work start PROFILE -- GOAL`. `/work status` and `/work result TASK_ID` expose bounded task state; `/work cancel` requests a deterministic stop; `/work end` removes the isolated worktree, closes the private lease and retains the minimized private receipt. A terminal result deliberately keeps the workspace and lease available for owner inspection until `/work end`; the independent GPU janitor still enforces lease expiry, idle grace and maximum runtime after gateway loss.
+Work Mode is invoked only from an authenticated owner session with `/work start PROFILE -- GOAL`. `/work status` and `/work result TASK_ID` expose bounded task state; `/work cancel` requests a deterministic stop; `/work end` removes the isolated worktree, closes the private lease and retains the minimized private receipt. A terminal result deliberately keeps the workspace and lease available for owner inspection until `/work end`; the independent GPU janitor still enforces lease expiry, idle grace and maximum runtime after gateway loss. Mutation is limited to exact observed replacements, bounded text-file create/delete/move operations, and one exact preflighted multi-file text patch. It does not expose arbitrary host paths, a generic shell, fuzzy patches, binary/vendor/generated edits or partial patch commits.
 
 Doctor refuses config/source drift. Preserve the receipt and investigate the exact change. Setup refuses a partial/nonempty prefix rather than erasing it. Keep the old deployment until new acceptance closes. No uninstall removes credentials, databases, snapshots, model caches or provider volumes.
 
