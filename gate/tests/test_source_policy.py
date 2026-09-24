@@ -64,6 +64,19 @@ class SourcePolicyTests(unittest.TestCase):
         d = minimize_query("My wife said secret 123456789 is broken")
         self.assertEqual(d.mode, "EXACT_APPROVAL_REQUIRED")
 
+    def test_public_weather_query_keeps_today_without_disclosing_zip(self):
+        d = minimize_query(
+            "What is the weather forecast for ZIP 94114 in San Francisco today, "
+            "September 24, 2026? Use current public evidence, preferably "
+            "weather.gov, and report conditions, temperature, precipitation "
+            "chance, and wind."
+        )
+        self.assertEqual(d.mode, "PUBLIC_GENERALIZED")
+        self.assertIn("today", d.query)
+        self.assertIn("san francisco", d.query)
+        self.assertIn("weather.gov", d.query)
+        self.assertNotIn("94114", d.query)
+
     def test_personal_source_terms_and_codenames_never_enter_public_query(self):
         for prompt in [
             "My Gmail says Project Kestrel closes Friday; what is the latest law?",

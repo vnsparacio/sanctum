@@ -6,7 +6,15 @@ const MAX_CANDIDATES=6, MAX_FETCHES=3, MAX_CHARS=12000, PER_SOURCE=4000;
 const blocked=/(?:^(?:localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|198\.1[89]\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|f[cd][0-9a-f:]*$|fe[89ab][0-9a-f:]*$)|\.(?:local|internal)$)/i;
 const safeUrl=value=>{try{const u=new URL(value);u.hash='';const host=u.hostname.replace(/^\[|\]$/g,'');return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!blocked.test(host)&&u.href.length<=2048?u:null;}catch{return null;}};
 const sourceClass=url=>/\b(?:gov|edu)\b/i.test(url.hostname)?'AUTHORITATIVE_INSTITUTION':/(?:docs|developer|support|official)/i.test(url.hostname)?'OFFICIAL_PRIMARY':/(?:reddit|forum|community|stack)/i.test(url.hostname)?'COMMUNITY':'REPUTABLE_SECONDARY';
-const score=(row,query)=>{const text=`${row.title??''} ${row.description??''}`.toLowerCase(), terms=query.toLowerCase().split(/\s+/).filter(Boolean),weight={AUTHORITATIVE_INSTITUTION:12,OFFICIAL_PRIMARY:10,REPUTABLE_SECONDARY:4,COMMUNITY:0}[sourceClass(new URL(row.url))];return terms.reduce((n,t)=>n+(text.includes(t)?4:0),0)+weight+(row.url.startsWith('https://')?1:0);};
+const common=new Set(['about','and','are','for','from','has','how','the','this','use','what','when','where','with','zip']);
+const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}/g)??[]).filter(x=>!common.has(x));
+const score=(row,query)=>{
+ const terms=tokens(query), page=tokens(`${row.title??''} ${row.description??''}`), present=new Set(page), pairs=new Set(page.slice(1).map((x,i)=>`${page[i]} ${x}`));
+ const matches=terms.reduce((n,t)=>n+(present.has(t)?4:0),0);
+ const phrases=terms.slice(1).reduce((n,t,i)=>n+(pairs.has(`${terms[i]} ${t}`)?8:0),0);
+ const weight={AUTHORITATIVE_INSTITUTION:12,OFFICIAL_PRIMARY:10,REPUTABLE_SECONDARY:4,COMMUNITY:0}[sourceClass(new URL(row.url))];
+ return matches+phrases+weight+(row.url.startsWith('https://')?1:0);
+};
 const nowIso=()=>new Date().toISOString();
 
 export function rankCandidates(results,query){
