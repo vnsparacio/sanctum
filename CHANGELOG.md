@@ -3,6 +3,17 @@
 - Correct Source-First web retrieval to use the accepted OpenClaw core fetch path instead of an invalid Firecrawl provider pin, while retaining bounded Parallel discovery and per-candidate fetch failure handling.
 - Give slow local evidence-grounded answers a four-minute model deadline within ordered 270/300/310-second worker, bridge and WebUI ceilings; no retry or model fallback is added.
 - Report active Open WebUI function drift in doctor so a stale imported pipe cannot silently retain obsolete approval and timeout behavior after an on-disk upgrade.
+- Add a resumable `./sanctum setup` runner for the isolated prefix, pinned MLX
+  and Open WebUI runtimes, local model cache, optional reviewed configuration
+  proposal, hidden-input web credential enrollment and read-only Google OAuth.
+- Add one-command `start`, `status`, `logs` and `stop` lifecycle operations.
+  The private supervisor starts components in dependency order, verifies model,
+  broker and WebUI readiness, retains per-component logs, records exact process
+  identities and refuses to adopt unknown listeners or a separately managed
+  gateway.
+- Keep macOS privacy grants, WebUI owner/function enrollment and optional hosted
+  model authentication as explicit owner checkpoints; no secret is accepted on
+  the command line or written to source.
 
 # Sanctum v1.2.0
 

@@ -12,19 +12,16 @@ verification can run without an Apple GPU, personal accounts or paid-provider
 credentials.
 
 ```sh
-make deps
-make build
-make test
-make audit
-make setup PREFIX=/absolute/private/prefix
-make doctor PREFIX=/absolute/private/prefix
+./sanctum setup --prefix /absolute/private/prefix
 ```
 
-`make deps` installs the root npm lock and pinned Python dependencies into the
-existing repository `.venv`; inspect that environment before recreating it.
-`make build` compiles six plugins and validates reviewed OpenClaw artifacts.
-Setup renders a new private installation and refuses a partial or changed
-prefix. It never adopts another OpenClaw home or WebUI database.
+The setup runner installs missing root dependencies, verifies reviewed source,
+renders a new private installation, installs the prefix-owned MLX and Open
+WebUI runtimes and prepares the pinned local model cache. It is resumable for a
+complete unchanged installation and refuses a partial runtime, changed receipt,
+another OpenClaw home or another WebUI database. Maintainers still run `make
+build`, `make test` and `make audit` as release checks; they are not repeated on
+every owner startup.
 
 ## Local Qwen through MLX
 
@@ -87,37 +84,21 @@ testing. The current conversational pipe is version `2.1.0`.
 
 ## Start the complete local path
 
-Start MLX first, verify it, start the gateway, start the broker group, and then
-start WebUI:
+The supported routine path starts MLX, verifies its model identity, starts the
+gateway, waits for every configured broker socket, starts WebUI and waits for
+its health endpoint behind one owner-scoped supervisor:
 
 ```sh
-# Terminal 1
-.venv/bin/python scripts/component.py mlx \
-  --prefix /absolute/private/prefix \
-  --cache-only
-
-# Terminal 2
-.venv/bin/python scripts/component.py mlx \
-  --prefix /absolute/private/prefix \
-  --health
-make up PREFIX=/absolute/private/prefix
-make doctor PREFIX=/absolute/private/prefix
-
-# Terminal 3
-.venv/bin/python scripts/component.py brokers \
-  --prefix /absolute/private/prefix
-
-# Terminal 4
-.venv/bin/python scripts/component.py webui \
-  --prefix /absolute/private/prefix
+./sanctum start --prefix /absolute/private/prefix
+./sanctum status --prefix /absolute/private/prefix
 ```
 
-The gateway uses the recorded prefix and port; omitting `PREFIX` starts or
-inspects the repository `.local` candidate instead. Component health checks
-establish only that component's loopback identity, not an end-to-end answer.
-The `brokers` component starts enabled Messages, Gmail and Calendar integrations
-plus the local Markdown and file brokers. It stops the whole group if one exits;
-individual broker component names remain available for focused diagnosis.
+The runner refuses to adopt an occupied port, a separately managed gateway or
+a stale supervisor identity. Logs are split into `logs/stack.log`, `mlx.log`,
+`gateway.log`, `brokers.log` and `webui.log` beneath the private prefix. The old
+`scripts/component.py` commands remain supported for focused diagnosis, but do
+not mix them with a managed stack. Component health establishes loopback
+identity and readiness, not a successful end-to-end answer.
 
 ## Install or upgrade Work Mode
 

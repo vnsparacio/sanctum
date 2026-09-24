@@ -1,6 +1,11 @@
 # Owner migration and rollback
 
-**Requires a separately approved migration window. None of these cutover commands has been run.** There is no validated unattended migration yet: isolated janitor restart now passes, while model/WebUI/gateway startup still uses foreground/manual operation and owner-specific enrollment must be repeated for the deployment. Do not replace production services with an unverified supervisor.
+**Requires a separately approved migration window. None of these cutover
+commands has been run.** The repository now provides an owner-scoped stack
+supervisor, but a source-level lifecycle test is not a production cutover
+qualification. Owner-specific OAuth, macOS privacy and WebUI enrollment still
+must be completed for the deployment. Do not replace production services
+without the checks below and an approved rollback window.
 
 This procedure deliberately creates new conversations/approvals and retains the old deployment for rollback. It does not import historical chats, outstanding gate approvals, nonces or File Steward undo records. Finish/undo old file transactions and close old sessions before cutover. If history-preserving migration is required, stop: no supported importer exists.
 
@@ -18,9 +23,7 @@ make deps
 make build
 make test
 make audit
-make setup PREFIX="$SANCTUM_PREFIX"
-.venv/bin/python scripts/bootstrap.py mlx --prefix "$SANCTUM_PREFIX"
-.venv/bin/python scripts/bootstrap.py webui --prefix "$SANCTUM_PREFIX"
+./sanctum setup --prefix "$SANCTUM_PREFIX" --cache-only
 make doctor PREFIX="$SANCTUM_PREFIX"
 ```
 
@@ -58,18 +61,12 @@ launchctl bootout "gui/$(id -u)/com.vinceai.openwebui"
 
 The original MLX server has no discovered LaunchAgent. Its measured command is reproduced under rollback below. Before stopping it, inspect the current process and confirm that exact executable/model/port identity; signal only that verified PID. Never use a broad process-name kill. Do not run two loaded models on a memory-constrained Mac merely to avoid a maintenance window.
 
-4. Start the candidate model, gateway and WebUI. Keep model/UI terminals open until validated persistent supervision exists:
+4. Start the candidate model, gateway, configured brokers and WebUI through the
+   owner-scoped supervisor:
 
 ```sh
-# Terminal 1, from SANCTUM_REPO:
-.venv/bin/python scripts/component.py mlx --prefix "$SANCTUM_PREFIX" --cache-only
-# Terminal 2:
-.venv/bin/python scripts/component.py mlx --prefix "$SANCTUM_PREFIX" --health
-make up PREFIX="$SANCTUM_PREFIX"
-# Terminal 3:
-.venv/bin/python scripts/component.py brokers --prefix "$SANCTUM_PREFIX"
-# Terminal 4:
-.venv/bin/python scripts/component.py webui --prefix "$SANCTUM_PREFIX"
+./sanctum start --prefix "$SANCTUM_PREFIX"
+./sanctum status --prefix "$SANCTUM_PREFIX"
 ```
 
 5. Open loopback port 28000. Enroll the owner administrator; import `$SANCTUM_PREFIX/gate/webui/pipe.py` and `guard.py` in Functions, enable the filter on the gate model, and use a saved chat. Confirm disabled external connections/arena/automation/memory/search. Test `/gate new`, `/gate help`, `/gate status`, a normal local request and the exact disclosure prompt. Re-run approved personal/file/browser checks and a bounded GPU cleanup test. Do not copy the qualification account/database into production.
@@ -78,7 +75,10 @@ make up PREFIX="$SANCTUM_PREFIX"
 ## Rollback
 
 1. End candidate sessions and perform the candidate’s managed GPU stop. Confirm provider-side deletion/no ownership before stopping cleanup. If deletion is uncertain, preserve both cleanup supervision and ownership records; do not roll back by killing processes or deleting state.
-2. Stop the candidate gateway with `make down PREFIX="$SANCTUM_PREFIX"`. Stop only the candidate foreground model and WebUI with Ctrl-C in their own terminals. Keep all candidate state/receipts for diagnosis; uninstall does not delete it.
+2. Stop the candidate with `./sanctum stop --prefix "$SANCTUM_PREFIX"`. It
+   runs the existing GPU/lease guard before signaling only its recorded
+   processes. Keep all candidate state, logs and receipts for diagnosis;
+   shutdown does not delete them.
 3. If original MLX was stopped, restore its measured command in a dedicated terminal:
 
 ```sh
