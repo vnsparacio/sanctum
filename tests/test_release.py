@@ -20,6 +20,11 @@ component_spec = importlib.util.spec_from_file_location(
 )
 component = importlib.util.module_from_spec(component_spec)
 component_spec.loader.exec_module(component)
+work_mode_spec = importlib.util.spec_from_file_location(
+    "work_mode_tools", ROOT / "scripts/upgrade_work_mode.py"
+)
+work_mode = importlib.util.module_from_spec(work_mode_spec)
+work_mode_spec.loader.exec_module(work_mode)
 
 
 class Setup(unittest.TestCase):
@@ -41,6 +46,10 @@ class Setup(unittest.TestCase):
         main = cfg["agents"]["entries"]["main"]
         self.assertEqual(main["thinkingDefault"], "off")
         self.assertFalse(main["params"]["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(
+            cfg["models"]["providers"]["mlx-local"]["models"][0]["contextWindow"],
+            24576,
+        )
         self.assertFalse(
             json.loads((self.prefix / "gate/SETTINGS.json").read_text())["gpu"][
                 "auto_start"
@@ -70,6 +79,23 @@ class Setup(unittest.TestCase):
         with self.assertRaises(ValueError):
             op.setup(self.prefix)
         self.assertEqual(p.read_text(), "{}")
+
+    def test_work_mode_amendment_updates_only_reviewed_local_model_context(self):
+        op.setup(self.prefix)
+        config_path = self.prefix / "config/openclaw.json"
+        config = json.loads(config_path.read_text())
+        local = config["models"]["providers"]["mlx-local"]["models"][0]
+        local["contextWindow"] = 16384
+        config_path.write_text(json.dumps(config))
+        updated = json.loads(work_mode.openclaw_config(self.prefix))
+        self.assertEqual(
+            updated["models"]["providers"]["mlx-local"]["models"][0]["contextWindow"],
+            24576,
+        )
+        self.assertEqual(
+            updated["agents"]["defaults"]["model"],
+            config["agents"]["defaults"]["model"],
+        )
 
     def test_nonempty_prefix_is_preserved(self):
         self.prefix.mkdir(mode=0o700)
