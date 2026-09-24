@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter } from '../plugin/local-agent.mjs';
 const model='local4b';
-const config={agents:{defaults:{model:{primary:'mlx-local/'+model}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
+const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
 const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Search Gmail for a synthetic query.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
 const response=text=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}]}));
 test('handoff pins local model and supplies no new tools or system permissions',()=>{
  const r=buildLocalRequest(body,config,model);
  assert.equal(r.url,'http://127.0.0.1:18789/v1/chat/completions');assert.equal(r.headers['x-openclaw-model'],'mlx-local/'+model);
+ assert.equal(r.headers['x-openclaw-agent-id'],'main');assert.equal(r.payload.model,'openclaw/main');
  assert.deepEqual(r.payload.messages,[body.request.messages.at(-1)]);assert.equal(r.payload.tools,undefined);assert.equal(r.payload.messages.some(x=>x.role==='system'),false);
 });
 test('scope isolates local sessions and revisions retain task context',()=>{

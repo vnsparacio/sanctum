@@ -27,8 +27,9 @@ export function buildLocalRequest(body, config, localModel) {
   const sessionKey='agent:main:mac-gate-local-'+createHash('sha256').update(req.scope).digest('hex');
   return {url:`http://127.0.0.1:${port}/v1/chat/completions`,
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+gateway.auth.token,
-      'x-openclaw-model':expected,'x-openclaw-session-key':sessionKey},
-    payload:{model:'openclaw/default',messages:[{role:'user',content:latest.content}],
+      'x-openclaw-agent-id':'main','x-openclaw-model':expected,
+      'x-openclaw-session-key':sessionKey},
+    payload:{model:'openclaw/main',messages:[{role:'user',content:latest.content}],
       stream:false,max_completion_tokens:1024}};
 }
 
