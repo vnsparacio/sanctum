@@ -85,6 +85,23 @@ test('search fetch creates bounded fetched evidence, never trusts snippets',asyn
  assert.deepEqual(compact.items[0].fragments.map(x=>x.kind),['FETCHED_CONTENT']);assert.equal(Object.hasOwn(compact.items[0],'title'),false);
  assert.equal(validateGroundedAnswer({kind:'GROUNDED_FINAL',text:'Enabled.',grounding:'GROUNDED',citations:[{sourceId:'s1',url:'https://docs.example.test/a'}],inferences:[],missingReasons:[],escalation:'NONE'},pack).ok,true);
 });
+test('six rich search results cannot overflow the bounded evidence pack',async()=>{
+ const results=Array.from({length:6},(_,n)=>({url:`https://news.example.test/openai/${n}`,title:`OpenAI headline ${n}`,snippet:'Search metadata only. '.repeat(180)}));
+ const invoke=async(name,args)=>name==='web_search'?{results}:{url:args.url,text:'Fetched source fact. '.repeat(250)};
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'latest OpenAI headline'});
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.equal(pack.budget.candidates,6);
+ assert.ok(pack.items.some(item=>['FETCHED','TRUNCATED'].includes(item.fetchStatus)));
+ assert.ok(pack.items.some(item=>item.fragments.some(fragment=>fragment.kind==='FETCHED_CONTENT'&&fragment.text.length>0)));
+});
+test('long source URLs force honest content truncation, not retrieval failure',async()=>{
+ const results=Array.from({length:3},(_,n)=>({url:`https://example.test/${n}/${'a'.repeat(1850)}`,title:`OpenAI headline ${n}`}));
+ const invoke=async(name,args)=>name==='web_search'?{results}:{url:args.url,text:'Fetched fact. '.repeat(350)};
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'latest OpenAI headline'});
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.ok(pack.items.some(item=>item.fetchStatus==='TRUNCATED'));
+ assert.ok(pack.items.every(item=>item.fragments.some(fragment=>fragment.kind==='FETCHED_CONTENT'&&fragment.text.length>0)));
+});
 test('private query decisions are exact ASK or DENY and cannot execute',async()=>{
  const ask=queryEgressDecision({...req,queryMode:'EXACT_APPROVAL_REQUIRED',query:''},'web_search',manifest.byName.web_search.digest,1000);
  assert.equal(ask.outcome,'ASK');assert.equal(ask.purpose,'PUBLIC_SEARCH');assert.equal(ask.destination.service,'parallel');
