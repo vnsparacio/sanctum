@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import {createReasonerAdapter} from '../foundation/contracts.mjs';
+import {beginLocalToolRun,endLocalToolRun,localSessionKey,localToolFamily} from './local-tool-boundary.mjs';
 
 export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
   if(body.operation!=='answer_local' || body.approval!=='local_only')throw Error('wrong_operation');
@@ -31,7 +31,7 @@ export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
       || gateway.http?.endpoints?.chatCompletions?.enabled!==true)throw Error('gateway_contract_changed');
   // A gate scope gets its own ordinary-agent session. Tool history stays here on
   // the Mac. Send only the new user message; OpenClaw supplies its agent context.
-  const sessionKey='agent:main:mac-gate-local-'+createHash('sha256').update(req.scope).digest('hex');
+  const sessionKey=localSessionKey(req.scope,localToolFamily(latest.content));
   return {url:`http://127.0.0.1:${port}/v1/chat/completions`,
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+gateway.auth.token,
       'x-openclaw-agent-id':'main','x-openclaw-model':expected,
@@ -46,11 +46,13 @@ export const LOCAL_AGENT_TIMEOUT_MS=240000;
 
 export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=LOCAL_AGENT_TIMEOUT_MS}) {
   return async(body,signal)=>{
-    let abort, timer;
+    let abort, timer, sessionKey=null;
     const controller=new AbortController();
     try {
       if(signal.aborted)return {status:'UNAVAILABLE'};
       const request=buildLocalRequest(body,getConfig(),localModel,maxAnswerTokens);
+      sessionKey=request.headers['x-openclaw-session-key'];
+      beginLocalToolRun(sessionKey);
       abort=()=>controller.abort();signal.addEventListener('abort',abort,{once:true});
       timer=setTimeout(abort,timeoutMs);
       const response=await fetchImpl(request.url,{method:'POST',headers:request.headers,
@@ -63,9 +65,11 @@ export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl
         || choices[0].finish_reason!=='stop' || choices[0].message?.tool_calls)throw Error('unfinished_agent_turn');
       const text=choices[0].message?.content;
       if(typeof text!=='string' || !text.trim() || Buffer.byteLength(text)>32768 || controller.signal.aborted)throw Error('invalid_answer');
+      if(!endLocalToolRun(sessionKey)){sessionKey=null;return {status:'UNAVAILABLE',reason:'local_source_unavailable'};}
+      sessionKey=null;
       return {status:'OK',text};
     }catch{return {status:'UNAVAILABLE'};}
-    finally{clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
+    finally{if(sessionKey)endLocalToolRun(sessionKey);clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
   };
 }
 

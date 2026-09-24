@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createGate,createExecutor } from './core.mjs';
 import { createLocalAgent } from './local-agent.mjs';
+import {localToolSurface,localToolGuard,observeLocalTool} from './local-tool-boundary.mjs';
 import { createSourceRetrieval } from './source-retrieval.mjs';
 import { createWorkCommand } from './work-command.mjs';
 import {boundedShutdown,gatewayObservability} from './observability.mjs';
@@ -13,6 +14,9 @@ import {createContentTelemetrySpool} from '../content-telemetry/spool.mjs';
 export default {
   id:'hybrid-ai-prompt-gate',name:'Mac privacy-first hybrid gate',
   register(api){
+    api.on('before_prompt_build',localToolSurface);
+    api.on('before_tool_call',localToolGuard);
+    api.on('after_tool_call',observeLocalTool);
     const base=resolve(fileURLToPath(new URL('.',import.meta.url)),'..');
     for(const [name,expected] of Object.entries(JSON.parse(readFileSync(resolve(base,'FREEZE.json'),'utf8')))){
       const path=resolve(base,name);if(!path.startsWith(base+'/')||lstatSync(path).isSymbolicLink()||createHash('sha256').update(readFileSync(path)).digest('hex')!==expected)throw Error('Mac gate integrity check failed');

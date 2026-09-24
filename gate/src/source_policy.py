@@ -29,13 +29,19 @@ WEB_REASONS = SOURCE_REASONS - {
     "DETERMINISTIC_OR_SELF_CONTAINED",
 }
 PRIVATE_MARKERS = re.compile(
-    r"(?:\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d[\d .()\-]{7,}\d\b|/Users/|/private/|\b(?:token|secret|password|api[_ -]?key)\b|-----BEGIN|\b(?:he|she|they) said\b|\b[A-Z][a-z]{1,30} said\b|\bmy (?:doctor|wife|husband|friend|boss|child|email|gmail|message|calendar|appointment|file|document|attachment)\b|\b(?:gmail|email|message|calendar|attachment|tool output|private context|local file)\s+(?:says?|shows?|contains?|from)\b)",
+    r"(?:\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d[\d .()\-]{7,}\d\b|/Users/|/private/|\b(?:token|secret|password|api[_ -]?key)\b|-----BEGIN|\b(?:he|she|they) said\b|\b[A-Z][a-z]{1,30} said\b|\bmy (?:doctor|wife|husband|friend|boss|child|home|house|address|location|email|gmail|message|calendar|appointment|file|document|attachment)\b|\b(?:gmail|email|message|calendar|attachment|tool output|private context|local file)\s+(?:says?|shows?|contains?|from)\b)",
     re.I,
 )
 CONTROL = re.compile(r"/(?:gate|approve|attach|detach|result|cancel)\b", re.I)
-WORDS = re.compile(r"[A-Za-z][A-Za-z0-9_.+/#:-]{1,79}")
+WORDS = re.compile(r"[A-Za-z][A-Za-z0-9_.+/#:-]{1,79}|\b\d{5}\b")
+WEATHER = re.compile(r"\b(?:weather|forecast|temperature|rain|conditions)\b", re.I)
+WEATHER_ZIP = re.compile(r"\b(?:zip(?:\s*code)?|in|for)\s+(\d{5})\b", re.I)
 UPGRADE = re.compile(
     r"\b(?:current|currently|latest|today|now|price|pricing|availability|available|regulation|law|schedule|documentation|docs|release notes|model capability|product behavior|recommend)\b",
+    re.I,
+)
+LOCAL_SOURCE = re.compile(
+    r"\bmy\s+(?:latest|recent|last|newest|unread|next|upcoming)?\s*(?:e-?mails?|gmail|inbox|texts?|iMessages?|sms|calendar|appointments?|meetings?)\b",
     re.I,
 )
 SAFE_PRIVATE_TERMS = frozenset(
@@ -79,6 +85,16 @@ def minimize_query(prompt):
         return QueryDraft("", "RESTRICTED", "DENY", ("INVALID_QUERY",), "")
     raw = CONTROL.sub(" ", prompt)
     private = bool(PRIVATE_MARKERS.search(raw))
+    # A ZIP explicitly supplied for a public weather request is the requested
+    # location, not a generic numeric identifier. Keep exactly one such ZIP;
+    # never lift a ZIP from private context into an automatic public query.
+    weather_zips = (
+        set(WEATHER_ZIP.findall(raw)) if not private and WEATHER.search(raw) else set()
+    )
+    all_zips = set(re.findall(r"\b\d{5}\b", raw))
+    public_weather_zip = (
+        next(iter(weather_zips)) if len(weather_zips) == len(all_zips) == 1 else None
+    )
     raw = PRIVATE_MARKERS.sub(" ", raw)
     if private:
         raw = re.sub(r"\b[A-Z][a-z]{1,30}\b", " ", raw)
@@ -87,6 +103,8 @@ def minimize_query(prompt):
     words = []
     for word in WORDS.findall(raw):
         lower = word.lower().strip(".:/#-")
+        if lower.isdigit() and lower != public_weather_zip:
+            continue
         if lower in {
             "please",
             "could",
@@ -152,7 +170,11 @@ def decide(packet, audit):
     need = advised
     # A stable local lower bound protects current/external requests if advisory
     # classification is too weak. It never lowers WEB_REQUIRED.
-    if advised != "WEB_REQUIRED" and UPGRADE.search(prompt):
+    if (
+        advised != "WEB_REQUIRED"
+        and UPGRADE.search(prompt)
+        and not LOCAL_SOURCE.search(prompt)
+    ):
         need = "WEB_REQUIRED"
         codes = tuple(sorted(set(codes) | {"CURRENT_OR_CHANGING"}))
     if need == "NONE":
