@@ -58,6 +58,14 @@ test('ZIP weather prefers a concrete NWS forecast over forecast marketing copy',
  assert.equal(bad.adequacy,'INADEQUATE');
  assert.equal(bad.items[0].fetchStatus,'REJECTED_IRRELEVANT');
 });
+test('missing requested forecast field remains explicit without weakening citation rules',async()=>{
+ const weather={...req,query:'94114 weather forecast today'};
+ const url='https://www.weather.gov/94114';
+ const pack=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[{url,title:'94114 forecast'}]}:{url:args.url,text:'This Afternoon Mostly sunny, with a temperature around 69. West wind 9 to 14 mph.'}}).retrieve(weather);
+ const answer={kind:'GROUNDED_FINAL',text:'Mostly sunny, around 69 F, with west wind 9 to 14 mph. The source does not state a precipitation probability.',grounding:'GROUNDED',citations:[{sourceId:'s1',url}],inferences:[],missingReasons:['EVIDENCE_GAP'],escalation:'NONE'};
+ assert.equal(validateGroundedAnswer(answer,pack,presentEvidence(pack,'OPENAI_FRONTIER')).ok,true);
+ assert.equal(validateGroundedAnswer({...answer,grounding:'PARTIAL'},pack,presentEvidence(pack,'OPENAI_FRONTIER')).code,'GROUNDING_REQUIRED');
+});
 test('irrelevant weather fetches do not displace later grounded evidence',async()=>{
  const weather={...req,query:'weather 94114 today'};
  const invoke=async(name,args)=>name==='web_search'?{results:['a','b','c'].map(x=>({url:`https://weather.example.test/94114/${x}`,title:`94114 weather ${x}`}))}:{url:args.url,text:args.url.endsWith('/c')?'Forecast for 94114: Sunny, high 67 F.':'Welcome to our site.'};

@@ -17,6 +17,7 @@ import install
 import manage
 from authority import authorize
 from backends import (
+    ANSWER_SYSTEM,
     Private80BBackend,
     PrivateLeadBackend,
     Remote,
@@ -533,6 +534,12 @@ class Transport(Temp):
     def test_answer_schema_no_authority_fields(self):
         with self.assertRaises(Refused):
             answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
+
+    def test_answer_prompt_distinguishes_missing_fields_from_unsupported_claims(self):
+        self.assertIn(
+            "Grounding describes support for claims actually made", ANSWER_SYSTEM
+        )
+        self.assertIn("Never guess an omitted value", ANSWER_SYSTEM)
 
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
         sent = []
