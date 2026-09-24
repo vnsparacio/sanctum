@@ -415,6 +415,15 @@ class PackagingClosure(unittest.TestCase):
             )
             self.assertIn("main", rendered["agents"]["entries"])
             self.assertIn("workmode-broker", rendered["agents"]["entries"])
+            self.assertEqual(
+                rendered["agents"]["entries"]["main"]["thinkingDefault"],
+                "off",
+            )
+            self.assertFalse(
+                rendered["agents"]["entries"]["main"]["params"]["chat_template_kwargs"][
+                    "enable_thinking"
+                ]
+            )
 
             rendered["agents"]["defaults"]["systemAgent"]["agentId"] = "other"
             config.write_text(json.dumps(rendered))

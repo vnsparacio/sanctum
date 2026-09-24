@@ -17,6 +17,9 @@ export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
   const model=config.agents?.defaults?.model;
   const primary=typeof model==='string'?model:model?.primary;
   if(primary!==expected || (model?.fallbacks?.length??0)!==0 || (config.agents?.list?.length??0)!==0)throw Error('unreviewed_agent_model');
+  const main=config.agents?.entries?.main;
+  if(main?.thinkingDefault!=='off'
+      || main?.params?.chat_template_kwargs?.enable_thinking!==false)throw Error('unreviewed_local_answer_budget');
   const provider=config.models?.providers?.['mlx-local'];
   if(provider?.baseUrl!==`http://127.0.0.1:${mlxPort}/v1`)throw Error('local_provider_changed');
   const gateway=config.gateway;

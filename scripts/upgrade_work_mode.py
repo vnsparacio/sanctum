@@ -295,6 +295,10 @@ def openclaw_config(prefix):
     system_agent["agentId"] = "main"
     entries = agents.setdefault("entries", {})
     main = entries.setdefault("main", {})
+    main["thinkingDefault"] = "off"
+    params = main.setdefault("params", {})
+    chat_template_kwargs = params.setdefault("chat_template_kwargs", {})
+    chat_template_kwargs["enable_thinking"] = False
     tools = main.setdefault("tools", {})
     tools["deny"] = sorted(set(tools.get("deny", []) + WORK_TOOLS))
     entries["workmode-broker"] = {
