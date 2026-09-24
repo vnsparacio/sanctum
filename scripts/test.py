@@ -19,6 +19,7 @@ GATE_NODE_TESTS = (
     "tests/quality-benchmark.test.mjs",
     "tests/observability.test.mjs",
     "tests/local-agent.test.mjs",
+    "tests/local-synthesis.test.mjs",
     "tests/local-context-budget.test.mjs",
     "tests/source-retrieval.test.mjs",
     "tests/work-mode-app-server.test.mjs",

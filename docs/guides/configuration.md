@@ -103,6 +103,15 @@ For a fetched source that supports only part of a request, the answer prompts re
 
 The gate's local-agent handoff narrows the per-turn OpenClaw tool surface for explicit Gmail, Messages, and Calendar requests to the requested source family. A second pre-tool guard blocks a wrong-family call, and no personal-source answer is delivered without a successful requested-family tool call. The Source-First evidence answer has no optional local tools. These restrictions do not grant new capabilities or replace owner permissions.
 
+Tool-free local answers now use a fresh request to the same pinned, already
+running MLX model. They carry no OpenClaw session history or tool schemas.
+Explicit personal-source, local-tool and retained-context requests still use
+the OpenClaw agent. The direct local route does not start another model server
+or authorize a provider fallback. It does not make the model's factual claims
+independently verified; see the
+[local answer reliability plan](../current/gate/local-answer-reliability-plan.md)
+for live probe limits and post-merge acceptance.
+
 Messages search accepts `from:+E164` (or a bare exact `+E164` number) for a bounded, read-only history of inbound messages from that sender across chats. It does not treat a participant in a group chat as the sender, infer a contact identity, scan message bodies for a phone number, or broaden a failed lookup. The default is ten messages and the maximum is twelve. Text is capped per message; missing or truncated text is identified rather than inferred. This path reads the local Messages database through the existing user-only broker and still requires the Mac's Messages permission. A reviewed source update to this broker and plugin requires a stopped-stack restart; it is not a private contact-mapping amendment.
 
 MCP amendments generate a unique profile identity per prefix and an exact three-tool transport. Run `.venv/bin/python scripts/mcp_gateway.py install --prefix /absolute/private/prefix` with Docker available. It imports only a missing candidate profile and refuses a changed existing profile. The transport verifies the profile before every start, uses the pinned container images, restricts mounts to the prefix input directory, disables container networking and call logging, and retains the Hugging Face per-call disclosure guard. It never reuses the legacy profile identity. No profile or container is started by configuration alone.

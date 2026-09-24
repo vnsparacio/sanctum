@@ -68,13 +68,31 @@ test('audit grant is owner-session bound and invalidated by destination drift',a
 test('NONE does not invoke Source-First retrieval',async()=>{let retrievals=0;const f=fixture('LOCAL_4B',null,async()=>{retrievals++;});await f.result(await f.approve((await ask(f,'rewrite this')).text));assert.equal(retrievals,0);});
 test('WEB_REQUIRED uses profiled fetched evidence and host-validates citations',async()=>{
  let retrievals=0;const f=fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Documented.',grounding:'GROUNDED',citations:[{sourceId:'s1',url:'https://docs.example.test/a'}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>{retrievals++;return evidencePack('WEB_REQUIRED','ADEQUATE',request);});
- const r=await f.result(await f.approve((await ask(f,'current fact')).text));assert.equal(retrievals,1);assert.match(r.text,/Sources:\n\[s1\]/);const request=f.calls.find(x=>x.operation==='answer_local').request.messages[0].content;assert.match(request,/LOCAL_COMPACT/);assert.match(request,/Grounding measures support for claims actually made/);assert.match(request,/Never infer precipitation probability/);assert.doesNotMatch(request,/evidence_pack/);
+ const r=await f.result(await f.approve((await ask(f,'current fact')).text));assert.equal(retrievals,1);assert.match(r.text,/Sources:\n\[s1\]/);const request=f.calls.find(x=>x.operation==='answer_local').request;assert.equal(request.mode,'synthesis');assert.equal(request.messages[0].content,'current fact');assert.equal(request.evidence.profile,'LOCAL_COMPACT');assert.equal(request.evidence.items[0].fragments[0].kind,'FETCHED_CONTENT');
+});
+test('ordinary local questions use fresh synthesis; personal-source questions retain the tool agent',async()=>{
+ const simple=fixture();await simple.result(await simple.approve((await ask(simple,'Explain a synthetic concept')).text));
+ const local=simple.calls.find(x=>x.operation==='answer_local').request;assert.equal(local.mode,'synthesis');assert.equal(local.evidence,undefined);
+ const personal=fixture();await personal.result(await personal.approve((await ask(personal,'What is my latest email?')).text));
+ assert.equal(personal.calls.find(x=>x.operation==='answer_local').request.mode,'agent');
+});
+test('audit-required local tools and prior conversation retain the agent path',async()=>{
+ for(const field of ['tools','history']){
+  const f=fixture('LOCAL_4B',async b=>{
+   if(b.operation!=='classify')return null;
+   const observed=audit();if(field==='tools')observed.needs_local_tools=true;
+   if(field==='history')observed.context_need.answer.prior_context='HELPFUL';
+   return {status:'OK',state:{...b.state,revision:b.packet.revision},route:'LOCAL_4B',handling:'NORMAL',urgency:'ABSENT',audit:observed,source_decision:{need:'NONE'}};
+  });
+  await f.result(await f.approve((await ask(f,'Synthetic request')).text));
+  assert.equal(f.calls.find(x=>x.operation==='answer_local').request.mode,'agent');
+ }
 });
 test('WEB_REQUIRED blocks inadequate evidence and fabricated citations',async()=>{
  let answers=0;const inadequate=fixture('LOCAL_4B',async b=>{if(b.operation==='classify')return sourcedClassification(b);if(b.operation==='answer_local')answers++;},async request=>evidencePack('WEB_REQUIRED','INADEQUATE',request));
  let r=await inadequate.result(await inadequate.approve((await ask(inadequate,'current fact')).text));assert.match(r.text,/adequate fetched evidence was unavailable/);assert.equal(answers,0);
  const fabricated=fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Made up.',grounding:'GROUNDED',citations:[{sourceId:'s9',url:'https://fake.example.test'}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>evidencePack('WEB_REQUIRED','ADEQUATE',request));
- r=await fabricated.result(await fabricated.approve((await ask(fabricated,'current fact')).text));assert.match(r.text,/grounding validation failed/);assert.doesNotMatch(r.text,/Made up/);
+ r=await fabricated.result(await fabricated.approve((await ask(fabricated,'current fact')).text));assert.match(r.text,/grounding validation failed/);assert.doesNotMatch(r.text,/Made up/);assert.match(r.text,/Fetched source excerpts \(uninterpreted/);assert.match(r.text,/Current documented fact/);
 });
 test('WEB_HELPFUL denied private query continues with explicit partial grounding',async()=>{
  const f=fixture('LOCAL_4B',async b=>{if(b.operation==='classify'){const r=sourcedClassification(b,'LOCAL_4B','WEB_HELPFUL');r.source_decision.query_mode='EXACT_APPROVAL_REQUIRED';r.source_decision.query={query:''};return r;}if(b.operation==='answer_local')return {status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'A general answer with no web claim.',grounding:'PARTIAL',citations:[],inferences:[],missingReasons:['QUERY_APPROVAL_REQUIRED'],escalation:'NONE'})};},async request=>evidencePack('WEB_HELPFUL','PARTIAL',request));

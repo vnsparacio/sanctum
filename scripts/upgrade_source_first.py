@@ -26,6 +26,7 @@ FILES = (
     "plugin/core.mjs",
     "plugin/index.mjs",
     "plugin/local-agent.mjs",
+    "plugin/local-synthesis.mjs",
     "plugin/local-tool-boundary.mjs",
     "plugin/source-retrieval.mjs",
     "src/schema.py",

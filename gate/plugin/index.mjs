@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createGate,createExecutor } from './core.mjs';
 import { createLocalAgent } from './local-agent.mjs';
+import { createLocalSynthesis } from './local-synthesis.mjs';
 import {localToolSurface,localToolGuard,observeLocalTool} from './local-tool-boundary.mjs';
 import { createSourceRetrieval } from './source-retrieval.mjs';
 import { createWorkCommand } from './work-command.mjs';
@@ -27,6 +28,7 @@ export default {
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
     const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model,maxAnswerTokens:settings.max_answer_tokens});
+    const synthesis=createLocalSynthesis({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model,maxAnswerTokens:settings.max_answer_tokens});
     const contentTelemetry=createContentTelemetrySpool({config:settings.content_telemetry??CONTENT_TELEMETRY_DEFAULTS,root:resolve(settings.state_directory,'..','telemetry','content')});
     contentTelemetry.recover();
     const invokeWeb=async(name,args,proposal)=>{
@@ -37,7 +39,7 @@ export default {
       return body.result?.details??body.result;
     };
     let retrieval=null;
-    const gate=createGate({settings,key,observability,contentTelemetry,execute:(body,signal)=>body.operation==='answer_local'?local(body,signal):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
+    const gate=createGate({settings,key,observability,contentTelemetry,execute:(body,signal)=>body.operation==='answer_local'?(body.request?.mode==='synthesis'?synthesis(body,signal):body.request?.mode==='agent'?local(body,signal):{status:'UNAVAILABLE'}):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
     api.registerCommand({name:'gate',description:'Mac-owned hybrid reasoning with exact disclosure approvals',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:gate});
     const work=createWorkCommand({api,base,settings,key,remote});
     api.registerCommand({name:'work',description:'Owner-selected bounded PRIVATE_LEAD Work Mode',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:work});

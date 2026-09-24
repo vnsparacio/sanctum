@@ -66,6 +66,7 @@ FILES = (
     "plugin/index.mjs",
     "plugin/core.mjs",
     "plugin/local-agent.mjs",
+    "plugin/local-synthesis.mjs",
     "plugin/local-tool-boundary.mjs",
     "plugin/observability.mjs",
     "plugin/observability-bootstrap.mjs",
