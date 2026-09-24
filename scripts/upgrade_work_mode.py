@@ -56,8 +56,11 @@ FILES = (
     "foundation/evidence.mjs",
     "foundation/work-intent.mjs",
     "foundation/vllm-structured-output.mjs",
+    "content-telemetry/ajv.mjs",
+    "content-telemetry/benchmark.mjs",
     "content-telemetry/contract.mjs",
     "content-telemetry/interaction.mjs",
+    "content-telemetry/quality.mjs",
     "content-telemetry/spool.mjs",
     "content-telemetry/delivery.mjs",
     "plugin/index.mjs",
@@ -82,6 +85,12 @@ FILES = (
     "runtime/work-runner.Dockerfile",
     "webui/bridge.mjs",
     "webui/pipe.py",
+)
+CONTENT_TELEMETRY_SCHEMA_FILES = (
+    "benchmark-dataset-v1.schema.json",
+    "benchmark-replay-v1.schema.json",
+    "content-telemetry-v1.schema.json",
+    "quality-annotation-v1.schema.json",
 )
 WORK_TOOLS = [
     "worktree_list",
@@ -394,6 +403,10 @@ def apply(prefix):
     record = prefix / "state/amendments" / ("work-mode-" + str(time.time_ns()))
     op.private(record)
     targets = [("gate/" + name, prefix / "gate" / name) for name in FILES] + [
+        *(
+            ("config/schemas/" + name, prefix / "config/schemas" / name)
+            for name in CONTENT_TELEMETRY_SCHEMA_FILES
+        ),
         ("config/openclaw.json", prefix / "config/openclaw.json"),
         ("config/work-mode.json", prefix / "config/work-mode.json"),
     ]
@@ -412,6 +425,10 @@ def apply(prefix):
         target = prefix / "gate" / name
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic(target, rendered_file(prefix, name))
+    for name in CONTENT_TELEMETRY_SCHEMA_FILES:
+        target = prefix / "config/schemas" / name
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic(target, (ROOT / "config/schemas" / name).read_text())
     atomic(prefix / "config/openclaw.json", openclaw_config(prefix))
     atomic(
         prefix / "config/work-mode.json", work_profile(prefix, docker, host, tag, image)

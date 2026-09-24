@@ -7,6 +7,7 @@
 | Source/runtime drift | Compare reviewed hashes and changes. Do not auto-refresh pins. |
 | Setup refuses nonempty prefix | Preserve the contents and inspect partial installation; choose an empty private directory. |
 | Gateway exits | Inspect private gateway log; validate configuration using isolated OpenClaw state. |
+| Gate plugin reports `Cannot find module './ajv.mjs'` | An existing prefix has an incomplete content-telemetry runtime closure. Stop the candidate gateway, run `.venv/bin/python scripts/upgrade_content_telemetry_runtime.py --prefix /absolute/private/prefix`, run `make doctor PREFIX=/absolute/private/prefix`, then restart it. Current Work Mode amendments include this closure. |
 | Local answer unavailable | Check MLX model identity, selected loopback port, gateway authentication and agent model. Bare-model health does not establish the agent path. |
 | Personal tool unavailable | Configure the read-only account/permission, marker, socket and explicitly allowed tool; do not broaden API/shell access. |
 | Unknown contact | Add an explicit local mapping after review; do not broaden the search automatically. |
