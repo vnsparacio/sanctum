@@ -9,13 +9,16 @@ const sourceClass=url=>/\b(?:gov|edu)\b/i.test(url.hostname)?'AUTHORITATIVE_INST
 const common=new Set(['about','and','are','for','from','has','how','the','this','use','what','when','where','with','zip']);
 const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}|\b\d{5}\b/g)??[]).filter(x=>!common.has(x));
 const weatherZip=query=>/\b(?:weather|forecast|temperature|rain|conditions)\b/i.test(query)?query.match(/\b\d{5}\b/)?.[0]??null:null;
-const weatherFact=/\b(?:forecast|temperature|high|low|sunny|cloudy|rain|wind|degrees)\b|\b\d{2,3}\s?°?\s?F\b/i;
+// Generic uses of "forecast" (including a forecaster's marketing copy) do
+// not establish a usable forecast. Require an observed numeric condition.
+const weatherFact=/\b(?:high|low|temperature)\s+(?:near|around|of|:)?\s*\d{1,3}(?:\s?°?\s?[FC])?\b|\bwind\b[^\n.]{0,40}\b\d{1,3}\s?(?:mph|kph|km\/h)\b|\b\d{1,3}\s?%\s+(?:chance\s+of\s+)?(?:rain|precipitation|showers)\b|\b\d{1,3}\s?°\s?[FC]?\b/i;
 const score=(row,query)=>{
  const terms=tokens(query), page=tokens(`${row.title??''} ${row.description??''} ${row.url??''}`), present=new Set(page), pairs=new Set(page.slice(1).map((x,i)=>`${page[i]} ${x}`));
  const matches=terms.reduce((n,t)=>n+(present.has(t)?(t===weatherZip(query)?40:4):0),0);
  const phrases=terms.slice(1).reduce((n,t,i)=>n+(pairs.has(`${terms[i]} ${t}`)?8:0),0);
  const weight={AUTHORITATIVE_INSTITUTION:12,OFFICIAL_PRIMARY:10,REPUTABLE_SECONDARY:4,COMMUNITY:0}[sourceClass(new URL(row.url))];
- return matches+phrases+weight+(row.url.startsWith('https://')?1:0);
+ const weatherPrimary=weatherZip(query)&&sourceClass(new URL(row.url))==='AUTHORITATIVE_INSTITUTION'?100:0;
+ return matches+phrases+weight+weatherPrimary+(row.url.startsWith('https://')?1:0);
 };
 const nowIso=()=>new Date().toISOString();
 
