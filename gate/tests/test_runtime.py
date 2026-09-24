@@ -562,6 +562,27 @@ class Transport(Temp):
             ],
             ["GROUNDED_FINAL"],
         )
+        reason_items = sent[0]["response_format"]["json_schema"]["schema"][
+            "properties"
+        ]["missingReasons"]["items"]
+        self.assertIn("EVIDENCE_GAP", reason_items["enum"])
+
+    def test_grounded_answer_rejects_fields_that_the_gate_would_reject(self):
+        grounded = {
+            "kind": "GROUNDED_FINAL",
+            "text": "documented",
+            "grounding": "GROUNDED",
+            "citations": [{"sourceId": "s1", "url": "https://example.test"}],
+            "inferences": [],
+            "missingReasons": [],
+            "escalation": "NONE",
+        }
+        for field, value in (
+            ("missingReasons", ["The source did not mention wind."]),
+            ("inferences", ["x" * 513]),
+        ):
+            with self.subTest(field=field), self.assertRaises(Refused):
+                answer_result(json.dumps({**grounded, field: value}), grounded=True)
 
 
 class FakeProvider:
