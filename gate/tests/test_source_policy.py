@@ -80,10 +80,7 @@ class SourcePolicyTests(unittest.TestCase):
             "chance, and wind."
         )
         self.assertEqual(d.mode, "PUBLIC_GENERALIZED")
-        self.assertIn("today", d.query)
-        self.assertIn("san francisco", d.query)
-        self.assertIn("weather.gov", d.query)
-        self.assertIn("94114", d.query)
+        self.assertEqual(d.query, "94114 weather forecast today")
 
     def test_zip_is_not_sent_for_private_or_non_weather_context(self):
         for prompt in [

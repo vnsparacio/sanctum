@@ -144,7 +144,14 @@ def minimize_query(prompt):
             continue
         if lower not in words:
             words.append(lower)
-    query = " ".join(words[:16]).strip()
+    # Verbose weather instructions dilute the ZIP search and can yield only
+    # promotional or blocked pages. The explicit public ZIP already supplies
+    # the requested location; keep the current-day cue without the prose.
+    query = (
+        f"{public_weather_zip} weather forecast today"
+        if public_weather_zip and re.search(r"\btoday\b", raw, re.I)
+        else " ".join(words[:16]).strip()
+    )
     if len(query) < 4 or (private and len(words) < 3):
         return QueryDraft(
             "",

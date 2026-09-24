@@ -43,6 +43,21 @@ test('ZIP weather search rejects unrelated government pages and requires fetched
  assert.equal(noLocation.adequacy,'INADEQUATE');
  assert.deepEqual(noLocation.failureCodes,['WEATHER_LOCATION_UNVERIFIED']);
 });
+test('ZIP weather prefers a concrete NWS forecast over forecast marketing copy',async()=>{
+ const weather={...req,query:'94114 weather forecast today'};
+ const marketing='The Weather Channel was found to be the world’s most accurate forecaster in ForecastWatch’s Global and Regional Weather Forecast Accuracy Overview, 2021-2024.';
+ const results=[
+  {url:'https://weather.com/us/california/san-francisco/postcode/94114/today',title:'Weather Forecast and Conditions for San Francisco, 94114, California'},
+  {url:'https://www.weather.gov/94114',title:'7-Day Forecast 37.77N 122.44W - National Weather Service'},
+ ];
+ assert.match(rankCandidates(results,weather.query)[0].url,/weather\.gov/);
+ const pack=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results}:{url:args.url,text:args.url.includes('weather.gov')?'This Afternoon Mostly sunny, with a steady temperature around 69. West wind 9 to 14 mph.':marketing},now:()=> '2026-09-24T20:00:00Z'}).retrieve(weather);
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.match(presentEvidence(pack,'LOCAL_4B').items[0].url,/weather\.gov/);
+ const bad=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[results[0]]}:{url:args.url,text:marketing},now:()=> '2026-09-24T20:00:00Z'}).retrieve(weather);
+ assert.equal(bad.adequacy,'INADEQUATE');
+ assert.equal(bad.items[0].fetchStatus,'REJECTED_IRRELEVANT');
+});
 test('irrelevant weather fetches do not displace later grounded evidence',async()=>{
  const weather={...req,query:'weather 94114 today'};
  const invoke=async(name,args)=>name==='web_search'?{results:['a','b','c'].map(x=>({url:`https://weather.example.test/94114/${x}`,title:`94114 weather ${x}`}))}:{url:args.url,text:args.url.endsWith('/c')?'Forecast for 94114: Sunny, high 67 F.':'Welcome to our site.'};
