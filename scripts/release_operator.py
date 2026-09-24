@@ -210,7 +210,7 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
                         {
                             "id": model,
                             "name": "Local Qwen 4B",
-                            "contextWindow": 16384,
+                            "contextWindow": 24576,
                             "maxTokens": 4096,
                         }
                     ],

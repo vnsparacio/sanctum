@@ -299,6 +299,14 @@ def openclaw_config(prefix):
     params = main.setdefault("params", {})
     chat_template_kwargs = params.setdefault("chat_template_kwargs", {})
     chat_template_kwargs["enable_thinking"] = False
+    local_model = json.loads((ROOT / "gate/SETTINGS.json").read_text())["local_model"]
+    provider_models = value["models"]["providers"]["mlx-local"]["models"]
+    matching_models = [
+        model for model in provider_models if model.get("id") == local_model
+    ]
+    if len(matching_models) != 1:
+        raise ValueError("Expected exactly one reviewed local model")
+    matching_models[0]["contextWindow"] = 24576
     tools = main.setdefault("tools", {})
     tools["deny"] = sorted(set(tools.get("deny", []) + WORK_TOOLS))
     entries["workmode-broker"] = {

@@ -402,9 +402,27 @@ class PackagingClosure(unittest.TestCase):
             prefix = Path(directory)
             config = prefix / "config/openclaw.json"
             config.parent.mkdir(parents=True)
+            local_model = json.loads((root / "gate/SETTINGS.json").read_text())[
+                "local_model"
+            ]
             config.write_text(
                 json.dumps(
-                    {"agents": {"defaults": {"model": {"primary": "mlx-local/model"}}}}
+                    {
+                        "agents": {
+                            "defaults": {
+                                "model": {"primary": "mlx-local/" + local_model}
+                            }
+                        },
+                        "models": {
+                            "providers": {
+                                "mlx-local": {
+                                    "models": [
+                                        {"id": local_model, "contextWindow": 16384}
+                                    ]
+                                }
+                            }
+                        },
+                    }
                 )
             )
             rendered = json.loads(amendment.openclaw_config(prefix))
@@ -423,6 +441,12 @@ class PackagingClosure(unittest.TestCase):
                 rendered["agents"]["entries"]["main"]["params"]["chat_template_kwargs"][
                     "enable_thinking"
                 ]
+            )
+            self.assertEqual(
+                rendered["models"]["providers"]["mlx-local"]["models"][0][
+                    "contextWindow"
+                ],
+                24576,
             )
 
             rendered["agents"]["defaults"]["systemAgent"]["agentId"] = "other"

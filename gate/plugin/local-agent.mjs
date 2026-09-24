@@ -23,6 +23,7 @@ export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
   const provider=config.models?.providers?.['mlx-local'];
   const providerModel=provider?.models?.find(item=>item?.id===localModel);
   if(provider?.baseUrl!==`http://127.0.0.1:${mlxPort}/v1`
+      || providerModel?.contextWindow!==24576
       || providerModel?.maxTokens!==maxAnswerTokens)throw Error('local_provider_changed');
   const gateway=config.gateway;
   if(gateway?.bind!=='loopback' || gateway.port!==port || gateway.auth?.mode!=='token'
