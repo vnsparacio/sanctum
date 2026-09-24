@@ -5,8 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { t as GatewayClient } from '@OPENCLAW@/dist/client-BBWFfmhX.js';
 import { n as loadDeviceIdentityIfPresent } from '@OPENCLAW@/dist/device-identity-BP5V9Wxb.js';
 
+// Ordinary local execution is bounded at 150 seconds. Keep this transport alive
+// beyond that deadline so it never becomes the component that cancels MLX.
+const RESPONSE_TIMEOUT_MS=180000;
 let client, done=false;
-const timer=setTimeout(()=>finish({ok:false}),30000);
+const timer=setTimeout(()=>finish({ok:false,reason:'deadline'}),RESPONSE_TIMEOUT_MS);
 function finish(result) {
   if(done)return;done=true;clearTimeout(timer);
   client?.stop();process.stdout.write(JSON.stringify(result)+'\n');

@@ -66,6 +66,9 @@ The original MLX server has no discovered LaunchAgent. Its measured command is r
 # Terminal 2:
 .venv/bin/python scripts/component.py mlx --prefix "$SANCTUM_PREFIX" --health
 make up PREFIX="$SANCTUM_PREFIX"
+# Terminal 3:
+.venv/bin/python scripts/component.py brokers --prefix "$SANCTUM_PREFIX"
+# Terminal 4:
 .venv/bin/python scripts/component.py webui --prefix "$SANCTUM_PREFIX"
 ```
 

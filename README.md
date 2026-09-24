@@ -52,7 +52,7 @@ make doctor PREFIX=/absolute/private/prefix
 Setup creates new authentication material, loopback ports and an integrity
 receipt in an isolated owner-private prefix. It does not import credentials or
 start compute. Bootstrap the prefix-owned MLX and Open WebUI environments, then
-start MLX, the gateway and WebUI in that order. The
+start MLX, the gateway, the supervised broker group and WebUI in that order. The
 [end-to-end quickstart](docs/guides/quickstart.md) includes every command, the
 Open WebUI function-import checkpoint, model selection, first chat, restart and
 shutdown. [Installation](docs/guides/installation.md) covers upgrades, Work Mode

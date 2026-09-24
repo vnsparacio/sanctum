@@ -225,6 +225,11 @@ class WebUI(unittest.TestCase):
         self.assertIn("/gate result " + "b" * 32, result)
         self.assertNotIn("secret", result)
 
+    def test_webui_transport_outlives_bounded_local_execution(self):
+        bridge = (BASE / "webui/bridge.mjs").read_text()
+        self.assertIn("const RESPONSE_TIMEOUT_MS=180000;", bridge)
+        self.assertGreater(self.pipe.BRIDGE_TIMEOUT_SECONDS, 180)
+
 
 class WorkerSubprocess(unittest.TestCase):
     def test_actual_node_signer_python_worker_and_durable_replay(self):

@@ -87,7 +87,8 @@ testing. The current conversational pipe is version `2.1.0`.
 
 ## Start the complete local path
 
-Start MLX first, verify it, start the gateway, and then start WebUI:
+Start MLX first, verify it, start the gateway, start the broker group, and then
+start WebUI:
 
 ```sh
 # Terminal 1
@@ -103,6 +104,10 @@ make up PREFIX=/absolute/private/prefix
 make doctor PREFIX=/absolute/private/prefix
 
 # Terminal 3
+.venv/bin/python scripts/component.py brokers \
+  --prefix /absolute/private/prefix
+
+# Terminal 4
 .venv/bin/python scripts/component.py webui \
   --prefix /absolute/private/prefix
 ```
@@ -110,6 +115,9 @@ make doctor PREFIX=/absolute/private/prefix
 The gateway uses the recorded prefix and port; omitting `PREFIX` starts or
 inspects the repository `.local` candidate instead. Component health checks
 establish only that component's loopback identity, not an end-to-end answer.
+The `brokers` component starts enabled Messages, Gmail and Calendar integrations
+plus the local Markdown and file brokers. It stops the whole group if one exits;
+individual broker component names remain available for focused diagnosis.
 
 ## Install or upgrade Work Mode
 
@@ -212,6 +220,8 @@ make doctor PREFIX=/absolute/private/prefix
 
 The amendment changes only reviewed fields and records private rollback state.
 It cannot enable generic shell, broaden provider policy or remove approvals.
+Restart the `brokers` component after an integration amendment so it selects the
+new enabled set.
 
 ## Hosted and private reasoning
 
