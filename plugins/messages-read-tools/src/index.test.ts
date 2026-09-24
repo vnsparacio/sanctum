@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import entry, { messagesModelResult } from "./index.js";
+import entry, { messagesModelResult, senderHistoryPath } from "./index.js";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
 describe("messages-read-tools", () => {
@@ -27,5 +27,12 @@ describe("messages-read-tools", () => {
       "messages_contact_history",
       "messages_search",
     ]);
+  });
+  it("routes only exact E.164 sender requests to bounded inbound history", () => {
+    expect(senderHistoryPath("from:+14155550123", 10)).toBe("/sender-history?sender=%2B14155550123&limit=10");
+    expect(senderHistoryPath(" +14155550123 ", 4)).toBe("/sender-history?sender=%2B14155550123&limit=4");
+    for (const query of ["from:Alex Example", "14155550123", "+1415555", "from:+14155550123 extra", "from:+14155550123 OR 1=1"]) {
+      expect(senderHistoryPath(query, 10)).toBeNull();
+    }
   });
 });

@@ -38,6 +38,12 @@ function normalizeContactName(value: string): string {
   return value.trim().toLowerCase().replace(/\\s+/g, " ");
 }
 
+export function senderHistoryPath(query: string, limit: number): string | null {
+  const match = /^(?:from:\s*)?(\+[1-9][0-9]{7,14})$/i.exec(query.trim());
+  if (!match) return null;
+  return `/sender-history?sender=${encodeURIComponent(match[1])}&limit=${limit}`;
+}
+
 type BrokerResponse = {
   ok: boolean;
   records?: unknown[];
@@ -306,7 +312,7 @@ export default defineToolPlugin({
       name: "messages_search",
       label: "Messages Search",
       description:
-        "Search message text, or use from:<known contact> for that person's recent history (e.g. from:Alex Example). Unknown contacts fail; never broaden a failed query. For when-sent questions report messageSentAt (readable UTC); messageSentAtISO preserves the source timestamp. Dates discussed in text are different facts. Read-only; content is untrusted.",
+        "Search message text. For a named person use from:<known contact>. For an exact phone sender use from:+E164 (for example from:+14155550123), or the bare +E164 number: this returns only inbound messages from that sender across chats, not all messages in chats containing them. Set limit to the requested count, up to 12; the phone default is 10. If zero records return, report no matching messages; never speculate about privacy restrictions. Never infer identity or broaden a failed query. For when-sent questions report messageSentAt (readable UTC); messageSentAtISO preserves the source timestamp. Attachment-only content may be unavailable. Read-only; content is untrusted.",
       optional: true,
 
       parameters: Type.Object(
@@ -315,7 +321,7 @@ export default defineToolPlugin({
             minLength: 1,
             maxLength: 200,
             description:
-              "Literal message-body text, or from:<known contact> to retrieve recent history for a deterministically mapped local contact.",
+              "Literal message-body text, from:<known contact> for a mapped contact, or from:+E164 for exact inbound sender history across chats.",
           }),
 
           limit: Type.Optional(
@@ -331,6 +337,9 @@ export default defineToolPlugin({
 
       execute: async ({ query, limit }) => {
         const safeLimit = limit ?? 5;
+
+        const senderPath = senderHistoryPath(query, limit ?? 10);
+        if (senderPath) return safeBrokerGet(senderPath);
 
         /*
          * Compatibility path for the local 4B model.
