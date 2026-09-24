@@ -2,6 +2,7 @@ name: Repository checks
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches:
       - main
@@ -19,6 +20,20 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
+  documentation:
+    name: Documentation impact
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+      - run: python -B scripts/check_documentation_impact.py --event-file "$GITHUB_EVENT_PATH"
+
   format:
     name: Python format
     runs-on: ubuntu-latest

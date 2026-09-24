@@ -23,6 +23,7 @@ that path.
 The required contexts are the GitHub Actions job names emitted by
 `.github/workflows/ci.yml`:
 
+- `Documentation impact`
 - `Python format`
 - `Python lint`
 - `Plugin build and manifests`
@@ -85,7 +86,7 @@ After installation, verify through GitHub's repository rules API that:
 1. the ruleset is active and its include list is exactly `main` and
    `v1.3-dev`;
 2. deletion, non-fast-forward updates, and pull-request rules are present;
-3. all eleven required status-check contexts match the list above, are sourced
+3. all twelve required status-check contexts match the list above, are sourced
    from GitHub Actions integration `15368`, and strict/up-to-date mode is off;
 4. the only bypass actor is repository role `Admin`; and
 5. a normal feature branch can be pushed and opened as a PR to `v1.3-dev`,

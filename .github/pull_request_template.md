@@ -8,6 +8,14 @@
 - Tests added or changed:
 - Commands run and results:
 
+## Documentation impact
+
+<!--
+Required. Keep exactly one declaration and replace this comment with either:
+Updated: <what README.md or docs/ changed and why>
+None: <specific reason behavior, configuration, and user workflows are unchanged>
+-->
+
 ## Safety review
 
 - **Authority boundary:** Does this change who can authorize actions, grant capabilities, or make completion/routing decisions? If not, say `None`.
