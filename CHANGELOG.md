@@ -1,3 +1,8 @@
+# Sanctum v1.3.0 (in development)
+
+- Correct Source-First web retrieval to use the accepted OpenClaw core fetch path instead of an invalid Firecrawl provider pin, while retaining bounded Parallel discovery and per-candidate fetch failure handling.
+- Give slow local evidence-grounded answers a four-minute model deadline within ordered 270/300/310-second worker, bridge and WebUI ceilings; no retry or model fallback is added.
+
 # Sanctum v1.2.0
 
 **COMPLETE WITH DOCUMENTED LIMITATIONS.** This backward-compatible release preserves the Mac-owned authority model while adding bounded agent management, stronger repository controls and an observational Splunk integration. It does not migrate or redeploy the private owner runtime.

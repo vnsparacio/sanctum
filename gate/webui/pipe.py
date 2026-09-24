@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 BASE = Path("@GATE@")
-BRIDGE_TIMEOUT_SECONDS = 190
+BRIDGE_TIMEOUT_SECONDS = 310
 UNAVAILABLE = "The Mac gate connection was unavailable. No automatic retry or model fallback was made. An already approved request may have completed; check /gate status before continuing."
 
 

@@ -323,6 +323,21 @@ def openclaw_config(prefix):
     }
     top = value.setdefault("tools", {})
     top["alsoAllow"] = list(dict.fromkeys(top.get("alsoAllow", []) + WORK_TOOLS))
+    web = top.get("web")
+    if (
+        isinstance(web, dict)
+        and web.get("search", {}).get("provider") == "parallel"
+        and web.get("fetch", {}).get("provider") == "firecrawl"
+    ):
+        web["fetch"].pop("provider")
+        plugins = value.setdefault("plugins", {})
+        firecrawl = str(prefix / "runtime/web/node_modules/@openclaw/firecrawl-plugin")
+        load = plugins.setdefault("load", {})
+        load["paths"] = [path for path in load.get("paths", []) if path != firecrawl]
+        plugins["allow"] = [
+            name for name in plugins.get("allow", []) if name != "firecrawl"
+        ]
+        plugins.setdefault("entries", {}).pop("firecrawl", None)
     return json.dumps(value, indent=2) + "\n"
 
 

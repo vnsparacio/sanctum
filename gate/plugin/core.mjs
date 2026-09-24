@@ -9,6 +9,7 @@ import {createContentInteractionRecorder} from '../content-telemetry/interaction
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
+export const ORDINARY_EXECUTOR_DEADLINE_SECONDS=270;
 const TIERS=['LOCAL_4B','PRIVATE_80B','HOSTED_235B','MULTIMODAL','OPENAI_FRONTIER'];
 const ALIASES={local:'LOCAL_4B','4b':'LOCAL_4B','80b':'PRIVATE_80B','235b':'HOSTED_235B',vision:'MULTIMODAL',multimodal:'MULTIMODAL',frontier:'OPENAI_FRONTIER',openai:'OPENAI_FRONTIER'};
 const destinationFor=(settings,tier)=>({GEMINI_AUDIT:{kind:'REASONER',service:'google-vertex',model:'GEMINI_AUDIT'},HOSTED_235B:{kind:'REASONER',service:'google-vertex',model:'HOSTED_235B'},MULTIMODAL:{kind:'REASONER',service:settings.multimodal.transport==='local'?'loopback':'deepinfra',model:'MULTIMODAL'},OPENAI_FRONTIER:{kind:'REASONER',service:settings.frontier_transport==='openai'?'openai':'azure',model:'OPENAI_FRONTIER'}}[tier]);
@@ -31,7 +32,7 @@ export const executorDeadlineSeconds=(body,settings)=>body.packet?.experiment
   ?Math.max(0,body.packet.experiment.deadline-Date.now()/1000-120)
   :body.operation==='private_lead_propose'
     ?Math.min((settings.private_lead?.readiness_seconds??2700)+(settings.request_deadline_seconds??120),3000)
-    :body.operation==='infer'&&body.tier==='PRIVATE_80B'?settings.request_deadline_seconds:150;
+    :body.operation==='infer'&&body.tier==='PRIVATE_80B'?settings.request_deadline_seconds:ORDINARY_EXECUTOR_DEADLINE_SECONDS;
 
 export function createExecutor(base,settings,key){
   return (body,signal)=>new Promise(resolveResult=>{

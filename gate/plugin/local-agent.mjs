@@ -40,7 +40,11 @@ export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
       stream:false}};
 }
 
-export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=120000}) {
+// Leave the worker and WebUI transports enough time to report this bounded
+// deadline instead of racing the native request during a long local prefill.
+export const LOCAL_AGENT_TIMEOUT_MS=240000;
+
+export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=LOCAL_AGENT_TIMEOUT_MS}) {
   return async(body,signal)=>{
     let abort, timer;
     const controller=new AbortController();

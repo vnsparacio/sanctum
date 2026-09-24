@@ -227,8 +227,8 @@ class WebUI(unittest.TestCase):
 
     def test_webui_transport_outlives_bounded_local_execution(self):
         bridge = (BASE / "webui/bridge.mjs").read_text()
-        self.assertIn("const RESPONSE_TIMEOUT_MS=180000;", bridge)
-        self.assertGreater(self.pipe.BRIDGE_TIMEOUT_SECONDS, 180)
+        self.assertIn("const RESPONSE_TIMEOUT_MS=300000;", bridge)
+        self.assertGreater(self.pipe.BRIDGE_TIMEOUT_SECONDS, 300)
 
 
 class WorkerSubprocess(unittest.TestCase):

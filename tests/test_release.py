@@ -86,6 +86,16 @@ class Setup(unittest.TestCase):
         config = json.loads(config_path.read_text())
         local = config["models"]["providers"]["mlx-local"]["models"][0]
         local["contextWindow"] = 16384
+        firecrawl = str(
+            self.prefix / "runtime/web/node_modules/@openclaw/firecrawl-plugin"
+        )
+        config["tools"]["web"] = {
+            "search": {"enabled": True, "provider": "parallel"},
+            "fetch": {"enabled": True, "provider": "firecrawl"},
+        }
+        config["plugins"]["load"]["paths"].append(firecrawl)
+        config["plugins"]["allow"].append("firecrawl")
+        config["plugins"]["entries"]["firecrawl"] = {"enabled": True}
         config_path.write_text(json.dumps(config))
         updated = json.loads(work_mode.openclaw_config(self.prefix))
         self.assertEqual(
@@ -96,6 +106,10 @@ class Setup(unittest.TestCase):
             updated["agents"]["defaults"]["model"],
             config["agents"]["defaults"]["model"],
         )
+        self.assertNotIn("provider", updated["tools"]["web"]["fetch"])
+        self.assertNotIn(firecrawl, updated["plugins"]["load"]["paths"])
+        self.assertNotIn("firecrawl", updated["plugins"]["allow"])
+        self.assertNotIn("firecrawl", updated["plugins"]["entries"])
 
     def test_nonempty_prefix_is_preserved(self):
         self.prefix.mkdir(mode=0o700)
@@ -1144,6 +1158,21 @@ class IntegrationAmendments(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
+
+    def test_web_uses_parallel_search_and_core_fetch(self):
+        op.setup(self.prefix)
+        plugin = self.prefix / "runtime/web/node_modules/@openclaw/parallel-plugin"
+        plugin.mkdir(parents=True)
+        (plugin / "package.json").write_text(
+            json.dumps({"name": "@openclaw/parallel-plugin", "version": "2026.8.1"})
+        )
+        self.module().configure(self.prefix, {"integrations": ["web"]})
+        cfg = json.loads((self.prefix / "config/openclaw.json").read_text())
+        self.assertEqual(cfg["tools"]["web"]["search"]["provider"], "parallel")
+        self.assertNotIn("provider", cfg["tools"]["web"]["fetch"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["entries"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["allow"])
+        op.verify_install(self.prefix)
 
     def test_isolated_mcp_notes_and_tunnel_rollback(self):
         op.setup(self.prefix)
