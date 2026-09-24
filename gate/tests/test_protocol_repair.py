@@ -421,6 +421,28 @@ class PackagingClosure(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "system agent"):
                 amendment.openclaw_config(prefix)
 
+    def test_work_mode_amendment_contains_content_telemetry_runtime_closure(self):
+        root = BASE.parent
+
+        def load(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        work_mode = load(
+            "work_mode_content_runtime", root / "scripts/upgrade_work_mode.py"
+        )
+        content_runtime = load(
+            "content_runtime_closure",
+            root / "scripts/upgrade_content_telemetry_runtime.py",
+        )
+        self.assertFalse(set(content_runtime.GATE_FILES) - set(work_mode.FILES))
+        self.assertEqual(
+            set(content_runtime.SCHEMA_FILES),
+            set(work_mode.CONTENT_TELEMETRY_SCHEMA_FILES),
+        )
+
     def test_amendment_contains_changed_runtime_files_and_local_import_dependencies(
         self,
     ):
