@@ -234,7 +234,7 @@
   "gate/src/risk_policy.py": "c79b8042a976d18e842d046e09447fb3224cc00c9cde70b96c466762b7587f9d",
   "gate/src/runpod.py": "0011c9c8c87306c75de4061d177f745d001e8cae28962b0f17a17a80a5597531",
   "gate/src/schema.py": "20a940da09c445839529b231bf271b0e7295d1200b1a83d6095a1a8e90d4a7a9",
-  "gate/src/source_policy.py": "6dc42f263fa166070d2cb1dd3d09ceb571133215872fd6cd52e4a58eed78e5c5",
+  "gate/src/source_policy.py": "d07b54fbd2d4e3694bddc485b8a54bc9b1e89863d077c5531cb77c14a11abfcb",
   "gate/src/task_evidence.py": "f8560a4f97cfec06254e71522d4ced328286a100438c39f17bf6f3ab837c7477",
   "gate/src/workspace.py": "de121d7b696ca6635e3ea763865ee29d8436e18e44c1ea1a473d6b47c144e260",
   "gate/src/worktree_edit.py": "5ae74a4a9487fbe15284bf1ee6fa4e5bbdae6156a4b4adcfad82c312401bd156",

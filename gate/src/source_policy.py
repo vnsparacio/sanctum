@@ -40,7 +40,10 @@ UPGRADE = re.compile(
     r"\b(?:current|currently|latest|today|now|price|pricing|availability|available|regulation|law|schedule|documentation|docs|release notes|model capability|product behavior|recommend)\b",
     re.I,
 )
-LOCAL_SOURCE = re.compile(r"\bmy\s+(?:latest|recent|last|newest|unread|next|upcoming)?\s*(?:e-?mails?|gmail|inbox|texts?|iMessages?|sms|calendar|appointments?|meetings?)\b", re.I)
+LOCAL_SOURCE = re.compile(
+    r"\bmy\s+(?:latest|recent|last|newest|unread|next|upcoming)?\s*(?:e-?mails?|gmail|inbox|texts?|iMessages?|sms|calendar|appointments?|meetings?)\b",
+    re.I,
+)
 SAFE_PRIVATE_TERMS = frozenset(
     "current latest price pricing availability regulation law schedule documentation docs release notes model capability product behavior recommend cause causes symptom symptoms treatment persistent unilateral calf swelling medical legal technical public general guidance".split()
 )
@@ -85,9 +88,13 @@ def minimize_query(prompt):
     # A ZIP explicitly supplied for a public weather request is the requested
     # location, not a generic numeric identifier. Keep exactly one such ZIP;
     # never lift a ZIP from private context into an automatic public query.
-    weather_zips = set(WEATHER_ZIP.findall(raw)) if not private and WEATHER.search(raw) else set()
+    weather_zips = (
+        set(WEATHER_ZIP.findall(raw)) if not private and WEATHER.search(raw) else set()
+    )
     all_zips = set(re.findall(r"\b\d{5}\b", raw))
-    public_weather_zip = next(iter(weather_zips)) if len(weather_zips) == len(all_zips) == 1 else None
+    public_weather_zip = (
+        next(iter(weather_zips)) if len(weather_zips) == len(all_zips) == 1 else None
+    )
     raw = PRIVATE_MARKERS.sub(" ", raw)
     if private:
         raw = re.sub(r"\b[A-Z][a-z]{1,30}\b", " ", raw)
@@ -163,7 +170,11 @@ def decide(packet, audit):
     need = advised
     # A stable local lower bound protects current/external requests if advisory
     # classification is too weak. It never lowers WEB_REQUIRED.
-    if advised != "WEB_REQUIRED" and UPGRADE.search(prompt) and not LOCAL_SOURCE.search(prompt):
+    if (
+        advised != "WEB_REQUIRED"
+        and UPGRADE.search(prompt)
+        and not LOCAL_SOURCE.search(prompt)
+    ):
         need = "WEB_REQUIRED"
         codes = tuple(sorted(set(codes) | {"CURRENT_OR_CHANGING"}))
     if need == "NONE":
