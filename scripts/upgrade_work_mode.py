@@ -62,6 +62,7 @@ FILES = (
     "content-telemetry/delivery.mjs",
     "plugin/index.mjs",
     "plugin/core.mjs",
+    "plugin/local-agent.mjs",
     "plugin/observability.mjs",
     "plugin/observability-bootstrap.mjs",
     "plugin/telemetry-client.mjs",
@@ -278,6 +279,11 @@ def openclaw_config(prefix):
     value = json.loads(path.read_text())
     agents = value.setdefault("agents", {})
     agents["ownership"] = "explicit"
+    defaults = agents.setdefault("defaults", {})
+    system_agent = defaults.setdefault("systemAgent", {})
+    if system_agent.get("agentId") not in (None, "main"):
+        raise ValueError("Refusing to replace the existing OpenClaw system agent")
+    system_agent["agentId"] = "main"
     entries = agents.setdefault("entries", {})
     main = entries.setdefault("main", {})
     tools = main.setdefault("tools", {})

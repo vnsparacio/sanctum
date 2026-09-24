@@ -2,11 +2,13 @@
 
 import ast
 import hashlib
+import importlib.util
 import io
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -388,6 +390,37 @@ class StreamingContracts(unittest.TestCase):
 
 
 class PackagingClosure(unittest.TestCase):
+    def test_work_mode_amendment_installs_explicit_local_agent_owner(self):
+        root = BASE.parent
+        spec = importlib.util.spec_from_file_location(
+            "work_mode_owner_amendment", root / "scripts/upgrade_work_mode.py"
+        )
+        amendment = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(amendment)
+        self.assertIn("plugin/local-agent.mjs", amendment.FILES)
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            config = prefix / "config/openclaw.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                json.dumps(
+                    {"agents": {"defaults": {"model": {"primary": "mlx-local/model"}}}}
+                )
+            )
+            rendered = json.loads(amendment.openclaw_config(prefix))
+            self.assertEqual(rendered["agents"]["ownership"], "explicit")
+            self.assertEqual(
+                rendered["agents"]["defaults"]["systemAgent"],
+                {"agentId": "main"},
+            )
+            self.assertIn("main", rendered["agents"]["entries"])
+            self.assertIn("workmode-broker", rendered["agents"]["entries"])
+
+            rendered["agents"]["defaults"]["systemAgent"]["agentId"] = "other"
+            config.write_text(json.dumps(rendered))
+            with self.assertRaisesRegex(ValueError, "system agent"):
+                amendment.openclaw_config(prefix)
+
     def test_amendment_contains_changed_runtime_files_and_local_import_dependencies(
         self,
     ):
