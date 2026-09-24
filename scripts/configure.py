@@ -544,7 +544,7 @@ def configure(prefix, proposal):
         ] + [tool for n in sorted(set(items)) for tool in TOOLS[n]]
         if "web" in items:
             base = prefix / "runtime/web/node_modules/@openclaw"
-            for name in ("parallel", "firecrawl"):
+            for name in ("parallel",):
                 plugin = base / (name + "-plugin")
                 package = json.loads((plugin / "package.json").read_text())
                 if (
@@ -559,6 +559,14 @@ def configure(prefix, proposal):
                 if name not in cfg["plugins"]["allow"]:
                     cfg["plugins"]["allow"].append(name)
                 cfg["plugins"]["entries"][name] = {"enabled": True}
+            firecrawl = str(base / "firecrawl-plugin")
+            cfg["plugins"]["load"]["paths"] = [
+                path for path in cfg["plugins"]["load"]["paths"] if path != firecrawl
+            ]
+            cfg["plugins"]["allow"] = [
+                name for name in cfg["plugins"]["allow"] if name != "firecrawl"
+            ]
+            cfg["plugins"]["entries"].pop("firecrawl", None)
             cfg["plugins"]["entries"]["parallel"]["config"] = {
                 "webSearch": {
                     "apiKey": {
@@ -572,7 +580,6 @@ def configure(prefix, proposal):
                 "search": {"enabled": True, "provider": "parallel", "maxResults": 6},
                 "fetch": {
                     "enabled": True,
-                    "provider": "firecrawl",
                     "maxChars": 6000,
                     "maxCharsCap": 6000,
                 },
@@ -630,7 +637,7 @@ def configure(prefix, proposal):
                 "Enable the reviewed web integration before changing its retrieval bound"
             )
         base = prefix / "runtime/web/node_modules/@openclaw"
-        for name in ("parallel", "firecrawl"):
+        for name in ("parallel",):
             plugin = base / (name + "-plugin")
             if plugin.is_symlink() or not plugin.exists():
                 raise ValueError("Bootstrap the pinned optional web runtime first")

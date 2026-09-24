@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter } from '../plugin/local-agent.mjs';
+import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter,LOCAL_AGENT_TIMEOUT_MS } from '../plugin/local-agent.mjs';
 const model='local4b';
 const answerTokens=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url),'utf8')).max_answer_tokens;
 const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1',models:[{id:model,contextWindow:24576,maxTokens:4096}]}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
@@ -69,6 +69,9 @@ test('aborted request does not start agent',async()=>{
 test('deadline cancels native request without retry',async()=>{
  let aborted=false;const run=createLocalAgent({getConfig:()=>config,localModel:model,maxAnswerTokens:answerTokens,timeoutMs:10,fetchImpl:(_url,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>{aborted=true;reject(Error());}))});
  assert.equal((await run(body,new AbortController().signal)).status,'UNAVAILABLE');assert.equal(aborted,true);
+});
+test('default local deadline leaves bounded headroom for slow Mac prefill',()=>{
+ assert.equal(LOCAL_AGENT_TIMEOUT_MS,240000);
 });
 test('UTF-8 split across chunks survives intact',async()=>{
  const data=Buffer.from(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'Grüße'}}]}));const i=data.indexOf(Buffer.from('ü'))+1;

@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -86,6 +87,16 @@ class Setup(unittest.TestCase):
         config = json.loads(config_path.read_text())
         local = config["models"]["providers"]["mlx-local"]["models"][0]
         local["contextWindow"] = 16384
+        firecrawl = str(
+            self.prefix / "runtime/web/node_modules/@openclaw/firecrawl-plugin"
+        )
+        config["tools"]["web"] = {
+            "search": {"enabled": True, "provider": "parallel"},
+            "fetch": {"enabled": True, "provider": "firecrawl"},
+        }
+        config["plugins"]["load"]["paths"].append(firecrawl)
+        config["plugins"]["allow"].append("firecrawl")
+        config["plugins"]["entries"]["firecrawl"] = {"enabled": True}
         config_path.write_text(json.dumps(config))
         updated = json.loads(work_mode.openclaw_config(self.prefix))
         self.assertEqual(
@@ -96,6 +107,41 @@ class Setup(unittest.TestCase):
             updated["agents"]["defaults"]["model"],
             config["agents"]["defaults"]["model"],
         )
+        self.assertNotIn("provider", updated["tools"]["web"]["fetch"])
+        self.assertNotIn(firecrawl, updated["plugins"]["load"]["paths"])
+        self.assertNotIn("firecrawl", updated["plugins"]["allow"])
+        self.assertNotIn("firecrawl", updated["plugins"]["entries"])
+
+    def test_doctor_detects_stale_imported_webui_functions(self):
+        op.setup(self.prefix)
+        self.assertEqual(op.webui_function_sync(self.prefix), "not-enrolled")
+        database = self.prefix / "state/webui/webui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "create table function (id text primary key, content text, is_active boolean)"
+            )
+            connection.executemany(
+                "insert into function values (?, ?, ?)",
+                [
+                    (
+                        "sanctum_gate_guard",
+                        (self.prefix / "gate/webui/guard.py").read_text(),
+                        True,
+                    ),
+                    ("sanctum_gate_pipe", "stale pipe", True),
+                ],
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "stale:sanctum_gate_pipe")
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "update function set content = ? where id = ?",
+                (
+                    (self.prefix / "gate/webui/pipe.py").read_text(),
+                    "sanctum_gate_pipe",
+                ),
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "pass")
 
     def test_nonempty_prefix_is_preserved(self):
         self.prefix.mkdir(mode=0o700)
@@ -1144,6 +1190,21 @@ class IntegrationAmendments(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
+
+    def test_web_uses_parallel_search_and_core_fetch(self):
+        op.setup(self.prefix)
+        plugin = self.prefix / "runtime/web/node_modules/@openclaw/parallel-plugin"
+        plugin.mkdir(parents=True)
+        (plugin / "package.json").write_text(
+            json.dumps({"name": "@openclaw/parallel-plugin", "version": "2026.8.1"})
+        )
+        self.module().configure(self.prefix, {"integrations": ["web"]})
+        cfg = json.loads((self.prefix / "config/openclaw.json").read_text())
+        self.assertEqual(cfg["tools"]["web"]["search"]["provider"], "parallel")
+        self.assertNotIn("provider", cfg["tools"]["web"]["fetch"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["entries"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["allow"])
+        op.verify_install(self.prefix)
 
     def test_isolated_mcp_notes_and_tunnel_rollback(self):
         op.setup(self.prefix)

@@ -378,6 +378,42 @@ def gateway_socket_ready(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def webui_function_sync(prefix):
+    """Compare active imported WebUI functions with reviewed rendered files."""
+    database = prefix / "state/webui/webui.db"
+    if not database.exists():
+        return "not-enrolled"
+    if database.is_symlink() or not database.is_file():
+        return "unsafe"
+    expected = {
+        "sanctum_gate_guard": prefix / "gate/webui/guard.py",
+        "sanctum_gate_pipe": prefix / "gate/webui/pipe.py",
+    }
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+            rows = {
+                row[0]: (row[1], row[2])
+                for row in connection.execute(
+                    "select id, content, is_active from function " "where id in (?, ?)",
+                    tuple(expected),
+                )
+            }
+    except sqlite3.Error:
+        return "unavailable"
+    missing = [name for name in expected if name not in rows]
+    if missing:
+        return "missing:" + ",".join(sorted(missing))
+    inactive = [name for name, (_, active) in rows.items() if active != 1]
+    if inactive:
+        return "inactive:" + ",".join(sorted(inactive))
+    stale = [
+        name
+        for name, path in expected.items()
+        if not path.is_file() or path.is_symlink() or rows[name][0] != path.read_text()
+    ]
+    return "pass" if not stale else "stale:" + ",".join(sorted(stale))
+
+
 def gateway_command(prefix, receipt_value, expected, env):
     args = [expected["node_path"]]
     bootstrap = prefix / "gate/plugin/observability-bootstrap.mjs"
@@ -548,6 +584,7 @@ def doctor(prefix):
         "gateway_running": running,
         "gateway_identity": identity,
         "gateway_health": health,
+        "webui_function_sync": webui_function_sync(prefix),
         "optional_integrations": "unconfigured; no credential or provider probe performed",
         "ports": {"gateway": r["gateway_port"], "mlx": r["mlx_port"]},
     }

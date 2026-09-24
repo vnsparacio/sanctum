@@ -55,7 +55,7 @@ Use the validated configuration amendment command with the gateway stopped; it r
 
 ## Measured lifecycle behavior
 
-Cold gateway startup now waits up to 60 seconds. Shutdown verifies the candidate process has exited within 15 seconds; a timeout remains an explicit pending/error state. MLX and WebUI remain foreground components. `component.py mlx|webui --health --prefix ...` checks only that component’s loopback health/identity, not end-to-end inference.
+Cold gateway startup now waits up to 60 seconds. Shutdown verifies the candidate process has exited within 15 seconds; a timeout remains an explicit pending/error state. MLX and WebUI remain foreground components. `component.py mlx|webui --health --prefix ...` checks only that component’s loopback health/identity, not end-to-end inference. `make doctor PREFIX=/absolute/private/prefix` also reports `webui_function_sync`; `pass` means the active imported guard and pipe exactly match the reviewed rendered files, while `stale`, `missing`, `inactive`, `unsafe`, or `unavailable` requires owner inspection and re-import rather than silent database replacement.
 
 The WebUI bridge waits beyond the gate's bounded local execution deadline before it closes its authenticated loopback connection. This prevents the UI transport from cancelling a still-valid MLX request; the gate and model deadlines remain bounded and no request is automatically replayed.
 
