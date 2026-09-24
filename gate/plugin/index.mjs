@@ -22,7 +22,7 @@ export default {
     const observability=gatewayObservability({gitCommit:process.env.SANCTUM_GIT_COMMIT});
     const path=resolve(settings.state_directory,'authority.key');if(lstatSync(path).isSymbolicLink()||(lstatSync(path).mode&0o077))throw Error('Invalid authority key');
     const key=readFileSync(path),remote=createExecutor(base,settings,key);
-    const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model});
+    const local=createLocalAgent({getConfig:()=>api.runtime.config.current(),localModel:settings.local_model,maxAnswerTokens:settings.max_answer_tokens});
     const contentTelemetry=createContentTelemetrySpool({config:settings.content_telemetry??CONTENT_TELEMETRY_DEFAULTS,root:resolve(settings.state_directory,'..','telemetry','content')});
     contentTelemetry.recover();
     const invokeWeb=async(name,args,proposal)=>{

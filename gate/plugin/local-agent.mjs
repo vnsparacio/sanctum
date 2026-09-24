@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import {createReasonerAdapter} from '../foundation/contracts.mjs';
 
-export function buildLocalRequest(body, config, localModel) {
+export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
   if(body.operation!=='answer_local' || body.approval!=='local_only')throw Error('wrong_operation');
+  if(!Number.isInteger(maxAnswerTokens) || maxAnswerTokens<1 || maxAnswerTokens>4096)throw Error('invalid_answer_token_limit');
   const req=body.request, state=body.state;
   const port=Number(process.env.VINCEAI_GATEWAY_PORT ?? 18789);
   const mlxPort=Number(process.env.VINCEAI_MLX_PORT ?? 8080);
@@ -30,16 +31,16 @@ export function buildLocalRequest(body, config, localModel) {
       'x-openclaw-agent-id':'main','x-openclaw-model':expected,
       'x-openclaw-session-key':sessionKey},
     payload:{model:'openclaw/main',messages:[{role:'user',content:latest.content}],
-      stream:false,max_completion_tokens:1024}};
+      stream:false,max_completion_tokens:maxAnswerTokens}};
 }
 
-export function createLocalAgent({getConfig,localModel,fetchImpl=fetch,timeoutMs=120000}) {
+export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=120000}) {
   return async(body,signal)=>{
     let abort, timer;
     const controller=new AbortController();
     try {
       if(signal.aborted)return {status:'UNAVAILABLE'};
-      const request=buildLocalRequest(body,getConfig(),localModel);
+      const request=buildLocalRequest(body,getConfig(),localModel,maxAnswerTokens);
       abort=()=>controller.abort();signal.addEventListener('abort',abort,{once:true});
       timer=setTimeout(abort,timeoutMs);
       const response=await fetchImpl(request.url,{method:'POST',headers:request.headers,
