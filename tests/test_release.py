@@ -1,11 +1,13 @@
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -13,6 +15,11 @@ spec = importlib.util.spec_from_file_location(
 )
 op = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(op)
+component_spec = importlib.util.spec_from_file_location(
+    "component_tools", ROOT / "scripts/component.py"
+)
+component = importlib.util.module_from_spec(component_spec)
+component_spec.loader.exec_module(component)
 
 
 class Setup(unittest.TestCase):
@@ -212,6 +219,62 @@ for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bootstrap.py mlx", result.stderr)
         self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+    def test_broker_group_selects_enabled_integrations_and_local_brokers(self):
+        config = self.prefix / "config"
+        config.mkdir(parents=True)
+        (config / "messages.enabled").write_text("enabled\n")
+        (config / "gmail.enabled").write_text("disabled\n")
+        (config / "calendar.enabled").write_text("enabled\n")
+        self.assertEqual(
+            component.selected_brokers(self.prefix),
+            ["messages", "calendar", "markdown", "files"],
+        )
+
+    def test_broker_group_stops_peers_when_one_exits(self):
+        config = self.prefix / "config"
+        config.mkdir(parents=True)
+        children = []
+
+        class Child:
+            def __init__(self):
+                self.pid = 1000 + len(children)
+                self.code = None
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return self.code
+
+            def terminate(self):
+                self.terminated = True
+                self.code = -15
+
+            def wait(self, timeout=None):
+                return self.code
+
+            def kill(self):
+                self.killed = True
+                self.code = -9
+
+        def spawn(*_args, **_kwargs):
+            child = Child()
+            children.append(child)
+            return child
+
+        def advance(_seconds):
+            children[0].code = 7
+
+        with (
+            patch.object(component.subprocess, "Popen", side_effect=spawn) as popen,
+            patch.object(component.time, "sleep", side_effect=advance),
+            patch.object(component.signal, "signal", return_value=signal.SIG_DFL),
+        ):
+            result = component.run_brokers(self.prefix, "/reviewed/python", {})
+        self.assertEqual(result, 7)
+        self.assertEqual(popen.call_count, 2)
+        self.assertFalse(children[0].terminated)
+        self.assertTrue(children[1].terminated)
 
     def test_bootstrap_preserves_existing_runtime(self):
         op.setup(self.prefix)

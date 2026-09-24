@@ -6,8 +6,8 @@ Foreground components use `scripts/component.py`. Start only one owner for each 
 
 ## Routine startup and shutdown
 
-Start the foreground components in dependency order: MLX, gateway, then WebUI.
-Always pass the same private prefix:
+Start the foreground components in dependency order: MLX, gateway, broker
+group, then WebUI. Always pass the same private prefix:
 
 ```sh
 # Terminal 1
@@ -23,14 +23,24 @@ make up PREFIX=/absolute/private/prefix
 make doctor PREFIX=/absolute/private/prefix
 
 # Terminal 3
+.venv/bin/python scripts/component.py brokers \
+  --prefix /absolute/private/prefix
+
+# Terminal 4
 .venv/bin/python scripts/component.py webui \
   --prefix /absolute/private/prefix
 ```
 
+The broker group starts all enabled personal-source brokers together with the
+Markdown and file brokers. Ctrl-C or SIGTERM stops only the exact children it
+started. An unexpected broker exit stops its peers and returns a nonzero status
+so a partial tool set is visible. Use an individual broker component only for
+focused diagnosis.
+
 For shutdown, end or cancel active Gate and Work Mode sessions first, then run
-`make down PREFIX=/absolute/private/prefix`. Stop WebUI and MLX with Ctrl-C in
-their own terminals. Stop MLX last so an in-flight local request is not cut off.
-The complete first-install and WebUI enrollment path is in the
+`make down PREFIX=/absolute/private/prefix`. Stop WebUI, the broker group and MLX
+with Ctrl-C in their own terminals. Stop MLX last so an in-flight local request
+is not cut off. The complete first-install and WebUI enrollment path is in the
 [end-to-end quickstart](quickstart.md).
 
 The GPU controller's rendered `manage.py status|stop|resume|sweep` remains an explicit owner interface. Stop can delete owned compute; do not invoke it against an unrelated production deployment. If deletion is uncertain, keep cleanup supervision intact. Never clear allocation intent just because one provider query found no Pod.
@@ -46,6 +56,8 @@ Use the validated configuration amendment command with the gateway stopped; it r
 ## Measured lifecycle behavior
 
 Cold gateway startup now waits up to 60 seconds. Shutdown verifies the candidate process has exited within 15 seconds; a timeout remains an explicit pending/error state. MLX and WebUI remain foreground components. `component.py mlx|webui --health --prefix ...` checks only that component’s loopback health/identity, not end-to-end inference.
+
+The WebUI bridge waits beyond the gate's bounded local execution deadline before it closes its authenticated loopback connection. This prevents the UI transport from cancelling a still-valid MLX request; the gate and model deadlines remain bounded and no request is automatically replayed.
 
 After disk recovery, the uniquely named test janitor executed an offline sweep and another after restart. It was loaded and confirmed active before the approved GPU test, and remained available until provider-side deletion and zero leases were confirmed. Only then was it unloaded and its exact test plist removed. The earlier xpcproxy failure is retained as historical evidence. Repeat this validation for a new deployment; no production service was replaced.
 

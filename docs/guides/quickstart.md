@@ -81,7 +81,19 @@ make up PREFIX="$SANCTUM_PREFIX"
 make doctor PREFIX="$SANCTUM_PREFIX"
 ```
 
-Terminal 3 — Open WebUI:
+Terminal 3 — all configured brokers:
+
+```sh
+cd /absolute/path/to/sanctum
+.venv/bin/python scripts/component.py brokers \
+  --prefix "$SANCTUM_PREFIX"
+```
+
+This starts enabled Messages, Gmail and Calendar integrations together with the
+local Markdown and file brokers. If one broker exits, the command stops its
+peers and returns a failure instead of silently leaving a partial tool set.
+
+Terminal 4 — Open WebUI:
 
 ```sh
 cd /absolute/path/to/sanctum
@@ -195,9 +207,10 @@ its worktree and lease until `/work end` so it can be inspected.
 make down PREFIX="$SANCTUM_PREFIX"
 ```
 
-Then stop WebUI with Ctrl-C in its terminal and stop MLX with Ctrl-C in its
-terminal. Keep the independent GPU janitor loaded whenever ownership could be
-uncertain. Do not delete the prefix to stop the application.
+Then stop WebUI and the broker group with Ctrl-C in their terminals, and stop
+MLX last with Ctrl-C in its terminal. Keep the independent GPU janitor loaded
+whenever ownership could be uncertain. Do not delete the prefix to stop the
+application.
 
 For the next session, repeat section 4. Open WebUI state persists, so account
 creation and function import are not repeated unless an upgrade changed the
