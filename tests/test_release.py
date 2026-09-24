@@ -38,6 +38,9 @@ class Setup(unittest.TestCase):
         self.assertEqual(cfg["tools"]["profile"], "minimal")
         self.assertIn("exec", cfg["tools"]["deny"])
         self.assertEqual(cfg["gateway"]["bind"], "loopback")
+        main = cfg["agents"]["entries"]["main"]
+        self.assertEqual(main["thinkingDefault"], "off")
+        self.assertFalse(main["params"]["chat_template_kwargs"]["enable_thinking"])
         self.assertFalse(
             json.loads((self.prefix / "gate/SETTINGS.json").read_text())["gpu"][
                 "auto_start"

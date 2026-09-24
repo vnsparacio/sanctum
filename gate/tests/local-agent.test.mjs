@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter } from '../plugin/local-agent.mjs';
 const model='local4b';
 const answerTokens=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url),'utf8')).max_answer_tokens;
-const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
+const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
 const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Search Gmail for a synthetic query.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
 const response=text=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}]}));
 test('handoff pins local model and supplies no new tools or system permissions',()=>{
@@ -29,6 +29,11 @@ test('non-normal or stale state cannot dispatch',()=>{
 test('remote default or fallback or provider drift refuses handoff',()=>{
  for(const change of [c=>{c.agents.defaults.model.primary='openrouter/remote';},c=>{c.agents.defaults.model.fallbacks=['openrouter/remote'];},c=>{c.models.providers['mlx-local'].baseUrl='https://example.invalid/v1';},c=>{c.agents.list=[{id:'main',model:'remote'}];}]){
   const c=structuredClone(config);change(c);assert.throws(()=>buildLocalRequest(body,c,model,answerTokens));
+ }
+});
+test('local answer requires the reviewed non-thinking MLX budget',()=>{
+ for(const change of [c=>{c.agents.entries.main.thinkingDefault='medium';},c=>{c.agents.entries.main.params.chat_template_kwargs.enable_thinking=true;},c=>{delete c.agents.entries.main.params.chat_template_kwargs;}]){
+  const c=structuredClone(config);change(c);assert.throws(()=>buildLocalRequest(body,c,model,answerTokens),/unreviewed_local_answer_budget/);
  }
 });
 test('changed gateway authentication or public listener refuses handoff',()=>{

@@ -192,7 +192,13 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
                 "skills": [],
                 "heartbeat": {"every": "0m"},
                 "compaction": {"keepRecentTokens": 2048},
-            }
+            },
+            "entries": {
+                "main": {
+                    "thinkingDefault": "off",
+                    "params": {"chat_template_kwargs": {"enable_thinking": False}},
+                }
+            },
         },
         "models": {
             "providers": {
