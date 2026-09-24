@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter } from '../plugin/local-agent.mjs';
 const model='local4b';
 const answerTokens=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url),'utf8')).max_answer_tokens;
-const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1'}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
+const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1',models:[{id:model,maxTokens:4096}]}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
 const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Search Gmail for a synthetic query.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
 const response=text=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}]}));
 test('handoff pins local model and supplies no new tools or system permissions',()=>{
@@ -12,7 +12,7 @@ test('handoff pins local model and supplies no new tools or system permissions',
  assert.equal(r.url,'http://127.0.0.1:18789/v1/chat/completions');assert.equal(r.headers['x-openclaw-model'],'mlx-local/'+model);
  assert.equal(r.headers['x-openclaw-agent-id'],'main');assert.equal(r.payload.model,'openclaw/main');
  assert.deepEqual(r.payload.messages,[body.request.messages.at(-1)]);assert.equal(r.payload.tools,undefined);assert.equal(r.payload.messages.some(x=>x.role==='system'),false);
- assert.equal(r.payload.max_completion_tokens,4096);
+ assert.equal(r.payload.max_completion_tokens,undefined);
 });
 test('scope isolates local sessions and revisions retain task context',()=>{
  const a=buildLocalRequest(body,config,model,answerTokens).headers['x-openclaw-session-key'];
@@ -27,7 +27,7 @@ test('non-normal or stale state cannot dispatch',()=>{
  for(const operation of ['classify','answer_frontier'])assert.throws(()=>buildLocalRequest({...body,operation},config,model,answerTokens));
 });
 test('remote default or fallback or provider drift refuses handoff',()=>{
- for(const change of [c=>{c.agents.defaults.model.primary='openrouter/remote';},c=>{c.agents.defaults.model.fallbacks=['openrouter/remote'];},c=>{c.models.providers['mlx-local'].baseUrl='https://example.invalid/v1';},c=>{c.agents.list=[{id:'main',model:'remote'}];}]){
+ for(const change of [c=>{c.agents.defaults.model.primary='openrouter/remote';},c=>{c.agents.defaults.model.fallbacks=['openrouter/remote'];},c=>{c.models.providers['mlx-local'].baseUrl='https://example.invalid/v1';},c=>{c.models.providers['mlx-local'].models[0].maxTokens=1;},c=>{c.models.providers['mlx-local'].models=[];},c=>{c.agents.list=[{id:'main',model:'remote'}];}]){
   const c=structuredClone(config);change(c);assert.throws(()=>buildLocalRequest(body,c,model,answerTokens));
  }
 });
@@ -41,14 +41,15 @@ test('changed gateway authentication or public listener refuses handoff',()=>{
   const c=structuredClone(config);change(c);assert.throws(()=>buildLocalRequest(body,c,model,answerTokens));
  }
 });
-test('local answer token limit is explicit and bounded',()=>{
+test('local answer token limit is pinned per provider turn and omitted from the outer agent request',()=>{
  for(const limit of [undefined,0,1.5,4097])assert.throws(()=>buildLocalRequest(body,config,model,limit),/invalid_answer_token_limit/);
- assert.equal(buildLocalRequest(body,config,model,1).payload.max_completion_tokens,1);
+ const changed=structuredClone(config);changed.models.providers['mlx-local'].models[0].maxTokens=1;
+ assert.equal(buildLocalRequest(body,changed,model,1).payload.max_completion_tokens,undefined);
 });
 test('successful local agent answer uses one local request only',async()=>{
  const calls=[];const run=createLocalAgent({getConfig:()=>config,localModel:model,maxAnswerTokens:answerTokens,fetchImpl:async(...args)=>{calls.push(args);return response('Synthetic result');}});
  assert.deepEqual(await run(body,new AbortController().signal),{status:'OK',text:'Synthetic result'});assert.equal(calls.length,1);assert.equal(calls[0][1].redirect,'manual');
- assert.equal(JSON.parse(calls[0][1].body).max_completion_tokens,4096);
+ assert.equal(JSON.parse(calls[0][1].body).max_completion_tokens,undefined);
 });
 test('model-independent adapter preserves the existing local execution boundary',async()=>{
  let calls=0;const adapter=createLocalReasonerAdapter({getConfig:()=>config,localModel:model,maxAnswerTokens:answerTokens,fetchImpl:async()=>{calls++;return response('Adapter result');}});
