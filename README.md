@@ -41,22 +41,23 @@ Requires Node 26.8.1, Python 3.12 and uv. These checks need no personal accounts
 ```sh
 git clone https://github.com/vnsparacio/sanctum.git
 cd sanctum
-make deps
-make build
-make test
-make audit
-make setup PREFIX=/absolute/private/prefix
-make doctor PREFIX=/absolute/private/prefix
+./sanctum setup --prefix /absolute/private/prefix
+./sanctum start --prefix /absolute/private/prefix
 ```
 
-Setup creates new authentication material, loopback ports and an integrity
-receipt in an isolated owner-private prefix. It does not import credentials or
-start compute. Bootstrap the prefix-owned MLX and Open WebUI environments, then
-start MLX, the gateway, the supervised broker group and WebUI in that order. The
-[end-to-end quickstart](docs/guides/quickstart.md) includes every command, the
-Open WebUI function-import checkpoint, model selection, first chat, restart and
-shutdown. [Installation](docs/guides/installation.md) covers upgrades, Work Mode
-and optional integrations.
+The resumable setup runner installs source dependencies when needed, creates
+the isolated private prefix, installs the pinned MLX and Open WebUI runtimes,
+and downloads the pinned local model only when it is absent. `start` supervises
+MLX, the gateway, every configured broker and WebUI behind one command. Use
+`./sanctum status --prefix ...` and `./sanctum stop --prefix ...` for inspection
+and clean shutdown. Credentials, Google OAuth, macOS privacy grants and first
+WebUI enrollment remain explicit owner checkpoints. The [end-to-end
+quickstart](docs/guides/quickstart.md) covers optional integrations, model
+selection and those one-time checkpoints.
+
+`--prefix` defaults to `$SANCTUM_PREFIX` when set, otherwise to
+`$HOME/.local/share/sanctum-v1`. Exporting `SANCTUM_PREFIX` once makes routine
+operation simply `./sanctum start`, `./sanctum status` and `./sanctum stop`.
 
 ## How it works
 

@@ -96,6 +96,84 @@ def run_brokers(prefix, python, env):
             signal.signal(signum, handler)
 
 
+def component_command(prefix, component, cache_only=False):
+    """Return the reviewed direct command and environment for one component."""
+    prefix = prefix.absolute()
+    receipt = op.verify_install(prefix)
+    env = op.environment(prefix)
+    env.setdefault("VINCEAI_NOTES_DIR", str(prefix / "notes"))
+    env["VINCEAI_GOOGLE_HOME"] = str(prefix / "state/google-readonly")
+    python = str(ROOT / ".venv/bin/python")
+    if component in BROKERS:
+        if component in OPTIONAL_BROKERS and not integration_enabled(prefix, component):
+            raise ValueError(
+                "Configure the read-only integration and create config/"
+                + component
+                + ".enabled first; see docs/guides/installation.md"
+            )
+        command = [python, "-B", str(ROOT / "host/macos" / BROKERS[component])]
+    elif component == "brokers":
+        command = [python, "-B", str(ROOT / "scripts/component.py"), "brokers"]
+        command.extend(["--prefix", str(prefix)])
+    elif component == "mlx":
+        exe = str(prefix / "runtime/mlx/bin/mlx_lm.server")
+        if not Path(exe).is_file():
+            raise ValueError(
+                "Run scripts/bootstrap.py mlx with the same --prefix first"
+            )
+        if cache_only:
+            env["HF_HUB_OFFLINE"] = "1"
+        command = [
+            exe,
+            "--model",
+            "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(receipt["mlx_port"]),
+            "--max-tokens",
+            "4096",
+            "--decode-concurrency",
+            "1",
+            "--prompt-concurrency",
+            "1",
+            "--prefill-step-size",
+            "512",
+            "--prompt-cache-size",
+            "2",
+            "--prompt-cache-bytes",
+            "4294967296",
+        ]
+    elif component == "webui":
+        exe = str(prefix / "runtime/webui/bin/open-webui")
+        if not Path(exe).is_file():
+            raise ValueError(
+                "Run scripts/bootstrap.py webui with the same --prefix first"
+            )
+        for name in (
+            "ENABLE_OLLAMA_API",
+            "ENABLE_OPENAI_API",
+            "ENABLE_MEMORIES",
+            "ENABLE_WEB_SEARCH",
+            "ENABLE_VERSION_UPDATE_CHECK",
+            "ENABLE_EVALUATION_ARENA_MODELS",
+            "ENABLE_AUTOMATIONS",
+            "ENABLE_MEMORY_SYSTEM_CONTEXT",
+            "ENABLE_MEMORY_BACKGROUND_REVIEW",
+        ):
+            env[name] = "False"
+        env["OFFLINE_MODE"] = "True"
+        env["CORS_ALLOW_ORIGIN"] = "http://127.0.0.1:28000;http://localhost:28000"
+        env["DO_NOT_TRACK"] = "True"
+        env["ANONYMIZED_TELEMETRY"] = "False"
+        env["SCARF_NO_ANALYTICS"] = "True"
+        env["DATA_DIR"] = str(prefix / "state/webui")
+        command = [exe, "serve", "--host", "127.0.0.1", "--port", "28000"]
+    else:
+        raise ValueError("Unknown component")
+    return command, env
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -109,7 +187,6 @@ def main(argv=None):
     prefix = args.prefix.absolute()
     op.verify()
     receipt = op.verify_install(prefix)
-    env = op.environment(prefix)
     if args.health:
         if args.component not in ("mlx", "webui"):
             raise SystemExit("Health probe is supported for mlx/webui only")
@@ -135,79 +212,16 @@ def main(argv=None):
             )
         print("Healthy:", args.component)
         return 0
-    env.setdefault("VINCEAI_NOTES_DIR", str(prefix / "notes"))
-    env["VINCEAI_GOOGLE_HOME"] = str(prefix / "state/google-readonly")
-    python = str(ROOT / ".venv/bin/python")
     if args.component == "brokers":
+        env = op.environment(prefix)
+        env.setdefault("VINCEAI_NOTES_DIR", str(prefix / "notes"))
+        env["VINCEAI_GOOGLE_HOME"] = str(prefix / "state/google-readonly")
+        python = str(ROOT / ".venv/bin/python")
         return run_brokers(prefix, python, env)
-    if args.component in BROKERS:
-        if args.component in OPTIONAL_BROKERS and not integration_enabled(
-            prefix, args.component
-        ):
-            raise SystemExit(
-                "Configure the read-only integration and create config/"
-                + args.component
-                + ".enabled first; see docs/guides/installation.md"
-            )
-        command = [
-            python,
-            "-B",
-            str(ROOT / "host/macos" / BROKERS[args.component]),
-        ]
-    elif args.component == "mlx":
-        exe = str(prefix / "runtime/mlx/bin/mlx_lm.server")
-        if not Path(exe).is_file():
-            raise SystemExit(
-                "Run scripts/bootstrap.py mlx with the same --prefix first"
-            )
-        if args.cache_only:
-            env["HF_HUB_OFFLINE"] = "1"
-        command = [
-            exe,
-            "--model",
-            "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(receipt["mlx_port"]),
-            "--max-tokens",
-            "4096",
-            "--decode-concurrency",
-            "1",
-            "--prompt-concurrency",
-            "1",
-            "--prefill-step-size",
-            "512",
-            "--prompt-cache-size",
-            "2",
-            "--prompt-cache-bytes",
-            "4294967296",
-        ]
-    else:
-        exe = str(prefix / "runtime/webui/bin/open-webui")
-        if not Path(exe).is_file():
-            raise SystemExit(
-                "Run scripts/bootstrap.py webui with the same --prefix first"
-            )
-        for name in (
-            "ENABLE_OLLAMA_API",
-            "ENABLE_OPENAI_API",
-            "ENABLE_MEMORIES",
-            "ENABLE_WEB_SEARCH",
-            "ENABLE_VERSION_UPDATE_CHECK",
-            "ENABLE_EVALUATION_ARENA_MODELS",
-            "ENABLE_AUTOMATIONS",
-            "ENABLE_MEMORY_SYSTEM_CONTEXT",
-            "ENABLE_MEMORY_BACKGROUND_REVIEW",
-        ):
-            env[name] = "False"
-        env["OFFLINE_MODE"] = "True"
-        env["CORS_ALLOW_ORIGIN"] = "http://127.0.0.1:28000;http://localhost:28000"
-        env["DO_NOT_TRACK"] = "True"
-        env["ANONYMIZED_TELEMETRY"] = "False"
-        env["SCARF_NO_ANALYTICS"] = "True"
-        env["DATA_DIR"] = str(prefix / "state/webui")
-        command = [exe, "serve", "--host", "127.0.0.1", "--port", "28000"]
+    try:
+        command, env = component_command(prefix, args.component, args.cache_only)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     return subprocess.call(command, cwd=prefix, env=env)
 
 

@@ -1,46 +1,42 @@
 # Operations and recovery
 
-`make setup` creates isolated configuration without starting services. `make doctor` verifies source/runtime/config hashes. `make up` starts the candidate gateway; `status` checks its recorded identity; `logs` returns a private log location. `down` signals only a process matching this candidate's recorded executable and port. If GPU autostart is configured it first invokes the existing managed stop procedure, which may delete owned compute; uncertain cleanup blocks shutdown. `uninstall` stops that gateway and retains private state. No LaunchAgent is installed by the new setup.
+`./sanctum setup` creates isolated configuration, installs the host runtimes and
+prepares the pinned local model without starting services. `./sanctum start`,
+`status`, `logs` and `stop` are the normal whole-stack interface. The existing
+`make doctor`, gateway-only `make up|down` and `scripts/component.py` interfaces
+remain available for diagnosis and upgrades. Do not mix gateway-only or
+foreground starts with an already managed stack.
 
 Foreground components use `scripts/component.py`. Start only one owner for each socket/port. An occupied gateway port fails rather than adopting or killing an unknown process. A startup timeout is not permission to start a duplicate. Inspect the private log and process state.
 
 ## Routine startup and shutdown
 
-Start the foreground components in dependency order: MLX, gateway, broker
-group, then WebUI. Always pass the same private prefix:
+Always pass the same private prefix:
 
 ```sh
-# Terminal 1
-.venv/bin/python scripts/component.py mlx \
-  --prefix /absolute/private/prefix \
-  --cache-only
-
-# Terminal 2
-.venv/bin/python scripts/component.py mlx \
-  --prefix /absolute/private/prefix \
-  --health
-make up PREFIX=/absolute/private/prefix
-make doctor PREFIX=/absolute/private/prefix
-
-# Terminal 3
-.venv/bin/python scripts/component.py brokers \
-  --prefix /absolute/private/prefix
-
-# Terminal 4
-.venv/bin/python scripts/component.py webui \
-  --prefix /absolute/private/prefix
+./sanctum start --prefix /absolute/private/prefix
+./sanctum status --prefix /absolute/private/prefix
 ```
 
-The broker group starts all enabled personal-source brokers together with the
-Markdown and file brokers. Ctrl-C or SIGTERM stops only the exact children it
-started. An unexpected broker exit stops its peers and returns a nonzero status
-so a partial tool set is visible. Use an individual broker component only for
-focused diagnosis.
+The detached supervisor starts MLX first and checks the exact model identity,
+then starts the gateway, configured broker group and WebUI. It records its own
+identity and every child PID/command in `state/stack-process.json`, writes
+separate private logs and reports a failed phase if a component exits. An
+occupied port or a separately managed gateway is refused rather than adopted.
+Use an individual component only for focused diagnosis after the managed stack
+is stopped.
 
-For shutdown, end or cancel active Gate and Work Mode sessions first, then run
-`make down PREFIX=/absolute/private/prefix`. Stop WebUI, the broker group and MLX
-with Ctrl-C in their own terminals. Stop MLX last so an in-flight local request
-is not cut off. The complete first-install and WebUI enrollment path is in the
+For shutdown, end or cancel active Gate and Work Mode sessions first, then run:
+
+```sh
+./sanctum stop --prefix /absolute/private/prefix
+```
+
+The command first runs the existing guarded gateway shutdown. Unresolved GPU
+ownership or active leases block the stop and leave supervision intact. After
+gateway shutdown succeeds, only the exact recorded WebUI, broker and MLX
+processes are signaled; stale or unknown processes are not killed. The complete
+first-install and WebUI enrollment path is in the
 [end-to-end quickstart](quickstart.md).
 
 The GPU controller's rendered `manage.py status|stop|resume|sweep` remains an explicit owner interface. Stop can delete owned compute; do not invoke it against an unrelated production deployment. If deletion is uncertain, keep cleanup supervision intact. Never clear allocation intent just because one provider query found no Pod.
@@ -55,7 +51,18 @@ Use the validated configuration amendment command with the gateway stopped; it r
 
 ## Measured lifecycle behavior
 
-Cold gateway startup now waits up to 60 seconds. Shutdown verifies the candidate process has exited within 15 seconds; a timeout remains an explicit pending/error state. MLX and WebUI remain foreground components. `component.py mlx|webui --health --prefix ...` checks only that component’s loopback health/identity, not end-to-end inference. `make doctor PREFIX=/absolute/private/prefix` also reports `webui_function_sync`; `pass` means the active imported guard and pipe exactly match the reviewed rendered files, while `stale`, `missing`, `inactive`, `unsafe`, or `unavailable` requires owner inspection and re-import rather than silent database replacement.
+Whole-stack startup permits up to five minutes for a cold cached MLX load, 60
+seconds for the gateway, 30 seconds for broker sockets and three minutes for
+WebUI. The foreground component commands retain their existing behavior for
+diagnosis. `component.py mlx|webui --health --prefix ...` checks only that
+component's loopback health/identity, not end-to-end inference. Shutdown
+verifies the candidate gateway process has exited within 15 seconds; a timeout
+remains an explicit pending/error state. `make doctor
+PREFIX=/absolute/private/prefix` also reports `webui_function_sync`; `pass`
+means the active imported guard and pipe exactly match the reviewed rendered
+files, while `stale`, `missing`, `inactive`, `unsafe`, or `unavailable`
+requires owner inspection and re-import rather than silent database
+replacement.
 
 The WebUI bridge waits beyond the gate's bounded local execution deadline before it closes its authenticated loopback connection. This prevents the UI transport from cancelling a still-valid MLX request; the gate and model deadlines remain bounded and no request is automatically replayed.
 

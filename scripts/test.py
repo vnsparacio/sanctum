@@ -96,6 +96,7 @@ def release(env: dict[str, str]) -> None:
             "-m",
             "unittest",
             "tests.test_release",
+            "tests.test_lifecycle",
             "tests.test_documentation_impact",
         ],
         ".",

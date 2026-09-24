@@ -17,7 +17,7 @@ Choose one absolute, owner-private prefix and use it consistently. The examples
 below keep it outside the repository:
 
 ```sh
-SANCTUM_PREFIX="$HOME/.local/share/sanctum-v1"
+export SANCTUM_PREFIX="$HOME/.local/share/sanctum-v1"
 mkdir -p "$SANCTUM_PREFIX"
 chmod 700 "$SANCTUM_PREFIX"
 ```
@@ -25,81 +25,50 @@ chmod 700 "$SANCTUM_PREFIX"
 The directory must be empty for the first setup. Do not point it at an existing
 OpenClaw home, an existing Open WebUI database or another Sanctum deployment.
 
-## 2. Verify and install the source
+## 2. Set up Sanctum
 
 ```sh
 git clone https://github.com/vnsparacio/sanctum.git
 cd sanctum
 
-make deps
-make build
-make test
-make audit
-make setup PREFIX="$SANCTUM_PREFIX"
-make doctor PREFIX="$SANCTUM_PREFIX"
+./sanctum setup
 ```
 
-`make setup` creates authentication material, rendered configuration, private
-state directories and an integrity receipt. It does not import accounts, start
-models or contact a paid provider. Re-running setup is safe only while the
-installed receipt still matches; drift is refused rather than overwritten.
+The resumable runner installs repository dependencies if absent, verifies the
+reviewed source, creates authentication material and private state, installs
+the separate pinned MLX and Open WebUI environments, and downloads the pinned
+Qwen weights only when they are absent. Use `--cache-only` to require an
+existing model cache and refuse network download. Existing complete runtimes
+are verified and retained; partial or unexpected runtimes are never overwritten.
 
-## 3. Install the local model and WebUI runtimes
+Optional sources are configured with one owner-private proposal. The runner
+installs the reviewed web runtime before applying a proposal that enables web:
 
 ```sh
-.venv/bin/python scripts/bootstrap.py mlx --prefix "$SANCTUM_PREFIX"
-.venv/bin/python scripts/bootstrap.py webui --prefix "$SANCTUM_PREFIX"
-make doctor PREFIX="$SANCTUM_PREFIX"
+./sanctum setup \
+  --proposal /absolute/private/setup-proposal.json \
+  --authorize
 ```
 
-The MLX environment and Open WebUI environment are separate and live beneath
-the prefix. The first MLX start may download the pinned Qwen weights. Use
-`--cache-only` when the weights already exist and no download should occur.
+`--authorize` accepts a web API key through hidden input and launches only the
+read-only Google OAuth scopes named by configured Gmail or Calendar accounts.
+Never put secrets in the proposal or command line. The proposal schema and
+examples are in [configuration](configuration.md). Hosted Qwen/frontier routes
+are optional; setup reports whether the isolated OpenRouter profile is still an
+owner checkpoint, while local operation requires no hosted API key.
 
-## 4. Start Sanctum
-
-Keep the foreground component terminals open. Start only one heavy model
-server on a memory-constrained Mac.
-
-Terminal 1 — local Qwen through MLX:
+## 3. Start Sanctum
 
 ```sh
 cd /absolute/path/to/sanctum
-.venv/bin/python scripts/component.py mlx \
-  --prefix "$SANCTUM_PREFIX" \
-  --cache-only
+./sanctum start
 ```
 
-Terminal 2 — verify MLX, then start the authenticated gateway:
-
-```sh
-cd /absolute/path/to/sanctum
-.venv/bin/python scripts/component.py mlx \
-  --prefix "$SANCTUM_PREFIX" \
-  --health
-make up PREFIX="$SANCTUM_PREFIX"
-make doctor PREFIX="$SANCTUM_PREFIX"
-```
-
-Terminal 3 — all configured brokers:
-
-```sh
-cd /absolute/path/to/sanctum
-.venv/bin/python scripts/component.py brokers \
-  --prefix "$SANCTUM_PREFIX"
-```
-
-This starts enabled Messages, Gmail and Calendar integrations together with the
-local Markdown and file brokers. If one broker exits, the command stops its
-peers and returns a failure instead of silently leaving a partial tool set.
-
-Terminal 4 — Open WebUI:
-
-```sh
-cd /absolute/path/to/sanctum
-.venv/bin/python scripts/component.py webui \
-  --prefix "$SANCTUM_PREFIX"
-```
+The command returns when MLX has loaded the exact local model, the authenticated
+gateway is listening, every configured broker socket is reachable and Open
+WebUI is healthy. It runs one detached, owner-scoped supervisor and stores logs
+beneath `$SANCTUM_PREFIX/logs`. It refuses unknown listeners instead of adopting
+or killing them.
 
 The default loopback endpoints are:
 
@@ -112,7 +81,7 @@ The default loopback endpoints are:
 If a port is occupied, stop and identify the exact listener. Do not launch a
 duplicate gateway or a competing model server.
 
-## 5. Complete the Open WebUI checkpoint
+## 4. Complete the Open WebUI checkpoint
 
 Open `http://127.0.0.1:28000` and create the local owner administrator. In
 Open WebUI **Functions**:
@@ -132,7 +101,7 @@ Open WebUI stores imported functions in its database. Updating the rendered
 file on disk does not update an already imported function. Re-import or replace
 the pipe after an upgrade that changes `gate/webui/pipe.py`.
 
-## 6. Talk to Assistant Mode
+## 5. Talk to Assistant Mode
 
 Send ordinary text in the saved chat. The pipe turns it into a local gate
 request; `/gate ask` remains available but is not required.
@@ -155,7 +124,7 @@ Private 80B is retired and cannot be selected. Hosted models are reasoning-only
 and never receive Mac tools or action authority. Sanctum does not silently fall
 back when a selected model is unavailable.
 
-## 7. Understand consent dialogs
+## 6. Understand consent dialogs
 
 Local Qwen answers do not require disclosure approval. When the gate proposes
 sending current prompt text to a hosted model, the WebUI pipe presents an
@@ -172,7 +141,7 @@ revoke` to remove it. Raw `/gate approve <id>` commands remain a protocol and
 diagnostic path, but an up-to-date WebUI pipe presents the normal owner choice
 as a dialog.
 
-## 8. Use Work Mode
+## 7. Use Work Mode
 
 Work Mode is separate from Assistant Mode and always requires an explicit owner
 command:
@@ -198,21 +167,24 @@ install it through the stopped-gateway amendment described in
 [installation](installation.md#install-or-upgrade-work-mode). That amendment
 requires the independent janitor, verified offline GPU ownership and Docker.
 
-## 9. Stop or restart
+## 8. Stop or restart
 
 Before shutdown, finish or cancel active work. A terminal Work Mode result keeps
 its worktree and lease until `/work end` so it can be inspected.
 
 ```sh
-make down PREFIX="$SANCTUM_PREFIX"
+./sanctum status
+./sanctum stop
 ```
 
-Then stop WebUI and the broker group with Ctrl-C in their terminals, and stop
-MLX last with Ctrl-C in its terminal. Keep the independent GPU janitor loaded
-whenever ownership could be uncertain. Do not delete the prefix to stop the
-application.
+The stop command first uses the existing gateway shutdown guard, including
+lease and GPU-ownership checks. Only after it succeeds does the supervisor stop
+the exact WebUI, broker-group and MLX processes it recorded. Private state,
+credentials, WebUI data and model caches are retained. If ownership or an
+active lease is uncertain, shutdown refuses and supervision remains in place.
+Do not delete the prefix to stop the application.
 
-For the next session, repeat section 4. Open WebUI state persists, so account
+For the next session, repeat section 3. Open WebUI state persists, so account
 creation and function import are not repeated unless an upgrade changed the
 rendered guard or pipe.
 

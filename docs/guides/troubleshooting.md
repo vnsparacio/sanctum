@@ -6,6 +6,8 @@
 | Plugin metadata generator rejects entry | Hook plugins use definePluginEntry; tool-only metadata generation does not apply. Use make build. |
 | Source/runtime drift | Compare reviewed hashes and changes. Do not auto-refresh pins. |
 | Setup refuses nonempty prefix | Preserve the contents and inspect partial installation; choose an empty private directory. |
+| Managed stack start refuses an occupied port or separate gateway | Run `./sanctum status --prefix ...`, inspect the exact listener and private logs, then stop the known owner. The runner never adopts or broadly kills an unknown process. |
+| Managed stack reports `failed` | Run `./sanctum status --prefix ...` and `./sanctum logs --prefix ...`; inspect `stack.log` and the named component log. Resolve the exact failure before restarting. A stale broker socket still requires owner inspection of its listener. |
 | Gateway exits | Inspect `make status PREFIX=...` and the private gateway log; validate configuration with `make doctor PREFIX=...`. Do not start a duplicate while startup is pending. |
 | Gate plugin reports `Cannot find module './ajv.mjs'` | An existing prefix has an incomplete content-telemetry runtime closure. Stop the candidate gateway, run `.venv/bin/python scripts/upgrade_content_telemetry_runtime.py --prefix /absolute/private/prefix`, run `make doctor PREFIX=/absolute/private/prefix`, then restart it. Current Work Mode amendments include this closure. |
 | Local answer unavailable | Confirm MLX model identity and health, run doctor, check the selected loopback port, gateway authentication and agent model, and confirm Open WebUI is using **Mac prompt gate**, not the raw MLX provider. Bare-model health does not establish the authenticated agent path. After a Work Mode upgrade, reapply the supported amendment so `main` owns local requests and ambient model resolution. |
@@ -31,6 +33,8 @@ Distinguish model selection, plugin dispatch, broker/wrapper response, provider 
 Run these checks from the source tree with the same prefix used at startup:
 
 ```sh
+./sanctum status --prefix /absolute/private/prefix
+./sanctum logs --prefix /absolute/private/prefix
 .venv/bin/python scripts/component.py mlx \
   --prefix /absolute/private/prefix \
   --health

@@ -51,6 +51,30 @@ operational prefix and unknown fields, including embedded credential fields.
 
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 
+For a fresh installation, the setup runner can apply that same private proposal
+after installing any required optional web runtime:
+
+```sh
+./sanctum setup --prefix /absolute/private/prefix \
+  --proposal /absolute/private/setup-proposal.json \
+  --authorize
+```
+
+The proposal never contains secrets. `--authorize` reads the Parallel key with
+terminal echo disabled and passes it over standard input to the isolated
+OpenClaw secret store. For configured Gmail and Calendar accounts it launches
+`gog` with `--readonly` and Gmail sending disabled. OAuth browser consent,
+Messages Full Disk Access and Open WebUI owner/function enrollment remain
+visible owner actions. Re-running with the same proposal digest skips the
+configuration amendment; changed proposals still pass through the stopped-
+gateway validator and private rollback record.
+
+The runner also checks, without printing secret data, whether exactly one
+OpenRouter API-key profile is present for optional hosted Qwen/frontier routes.
+It reports a checkpoint when absent; local-only operation does not require that
+credential. Provider authentication remains in the isolated OpenClaw auth
+store because it may not be copied into a proposal, command line or source.
+
 Project 3G installs Work Mode only through the stopped-gateway, reversible `scripts/upgrade_work_mode.py` amendment. The amendment verifies source and installed receipts, confirms both managed GPU releases are offline with no leases, confirms the independent janitor is loaded, builds and records the exact local runner image, and writes private work profiles outside Git. It installs the complete current Gate runtime closure, including content-telemetry validators and their schemas, so applying Work Mode cannot leave a newly imported Gate dependency absent. It enables PRIVATE_LEAD for explicit signed Work Mode proposals while leaving background GPU autostart disabled. OpenClaw ownership is explicit: `main` remains the system owner and receives ordinary Assistant/local-answer work, while a separate `workmode-broker` agent receives only the five Work Mode semantic capabilities plus the two internal Source-First adapters. The `main` agent pins thinking off both in OpenClaw and in MLX chat-template arguments. Its model catalog also pins a 4,096-token output limit that applies independently to every internal tool-selection and final-answer turn. Gate deliberately omits an outer OpenAI-compatible completion cap because OpenClaw treats that cap as a shared budget across the complete multi-turn agent request. A local answer remains bounded to four minutes, with a 270-second worker ceiling and longer WebUI transport ceilings so the transports cannot cancel MLX first. This per-agent setting does not change the Work Mode broker. The ordinary `/gate` Assistant path and its tool policy otherwise remain unchanged. After an amendment changes the rendered WebUI pipe or guard, replace the imported function in Open WebUI; its database does not automatically reload the on-disk file.
 
 The local Qwen catalog now uses a 24,576-token context window while retaining its 4,096-token per-turn output limit. OpenClaw estimates input conservatively for loopback proxy endpoints; with the previous 16,384-token catalog window, a tool-heavy Gmail search/read exchange could reduce the final generation allowance to one token even though MLX had room to answer. This change does not alter weights, tools, routing, or fallback policy. Existing private Work Mode installations receive the reviewed catalog change through the stopped-gateway amendment, then require a gateway restart.
