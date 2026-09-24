@@ -47,6 +47,10 @@ class SourcePolicyTests(unittest.TestCase):
         d = decide(packet("What is the current API pricing?"), validate(audit()))
         self.assertEqual((d.need, d.query_mode), ("WEB_REQUIRED", "PUBLIC_GENERALIZED"))
 
+    def test_latest_local_mail_is_not_sent_to_public_source_first(self):
+        d = decide(packet("What is my latest email?"), validate(audit()))
+        self.assertEqual((d.need, d.query_mode), ("NONE", "NONE"))
+
     def test_required_needs_external_reason(self):
         with self.assertRaises(Exception):
             validate(audit("WEB_REQUIRED", ["TRANSFORMATION_ONLY"]))
@@ -64,7 +68,11 @@ class SourcePolicyTests(unittest.TestCase):
         d = minimize_query("My wife said secret 123456789 is broken")
         self.assertEqual(d.mode, "EXACT_APPROVAL_REQUIRED")
 
-    def test_public_weather_query_keeps_today_without_disclosing_zip(self):
+    def test_public_weather_query_keeps_explicit_location_and_today(self):
+        exact = minimize_query("What's the weather like in 94114 today?")
+        self.assertEqual(exact.mode, "PUBLIC_GENERALIZED")
+        self.assertIn("94114", exact.query)
+        self.assertIn("today", exact.query)
         d = minimize_query(
             "What is the weather forecast for ZIP 94114 in San Francisco today, "
             "September 24, 2026? Use current public evidence, preferably "
@@ -75,7 +83,15 @@ class SourcePolicyTests(unittest.TestCase):
         self.assertIn("today", d.query)
         self.assertIn("san francisco", d.query)
         self.assertIn("weather.gov", d.query)
-        self.assertNotIn("94114", d.query)
+        self.assertIn("94114", d.query)
+
+    def test_zip_is_not_sent_for_private_or_non_weather_context(self):
+        for prompt in [
+            "What is the weather at my home in 94114 today?",
+            "Look up current rules for ZIP 94114",
+            "Compare weather in 94114 and 10001 today",
+        ]:
+            self.assertNotIn("94114", minimize_query(prompt).query)
 
     def test_personal_source_terms_and_codenames_never_enter_public_query(self):
         for prompt in [

@@ -25,6 +25,8 @@ FILES = (
     "foundation/manifest.mjs",
     "plugin/core.mjs",
     "plugin/index.mjs",
+    "plugin/local-agent.mjs",
+    "plugin/local-tool-boundary.mjs",
     "plugin/source-retrieval.mjs",
     "src/schema.py",
     "src/dispatch.py",

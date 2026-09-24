@@ -7,10 +7,12 @@ const blocked=/(?:^(?:localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|198\
 const safeUrl=value=>{try{const u=new URL(value);u.hash='';const host=u.hostname.replace(/^\[|\]$/g,'');return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!blocked.test(host)&&u.href.length<=2048?u:null;}catch{return null;}};
 const sourceClass=url=>/\b(?:gov|edu)\b/i.test(url.hostname)?'AUTHORITATIVE_INSTITUTION':/(?:docs|developer|support|official)/i.test(url.hostname)?'OFFICIAL_PRIMARY':/(?:reddit|forum|community|stack)/i.test(url.hostname)?'COMMUNITY':'REPUTABLE_SECONDARY';
 const common=new Set(['about','and','are','for','from','has','how','the','this','use','what','when','where','with','zip']);
-const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}/g)??[]).filter(x=>!common.has(x));
+const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}|\b\d{5}\b/g)??[]).filter(x=>!common.has(x));
+const weatherZip=query=>/\b(?:weather|forecast|temperature|rain|conditions)\b/i.test(query)?query.match(/\b\d{5}\b/)?.[0]??null:null;
+const weatherFact=/\b(?:forecast|temperature|high|low|sunny|cloudy|rain|wind|degrees)\b|\b\d{2,3}\s?°?\s?F\b/i;
 const score=(row,query)=>{
- const terms=tokens(query), page=tokens(`${row.title??''} ${row.description??''}`), present=new Set(page), pairs=new Set(page.slice(1).map((x,i)=>`${page[i]} ${x}`));
- const matches=terms.reduce((n,t)=>n+(present.has(t)?4:0),0);
+ const terms=tokens(query), page=tokens(`${row.title??''} ${row.description??''} ${row.url??''}`), present=new Set(page), pairs=new Set(page.slice(1).map((x,i)=>`${page[i]} ${x}`));
+ const matches=terms.reduce((n,t)=>n+(present.has(t)?(t===weatherZip(query)?40:4):0),0);
  const phrases=terms.slice(1).reduce((n,t,i)=>n+(pairs.has(`${terms[i]} ${t}`)?8:0),0);
  const weight={AUTHORITATIVE_INSTITUTION:12,OFFICIAL_PRIMARY:10,REPUTABLE_SECONDARY:4,COMMUNITY:0}[sourceClass(new URL(row.url))];
  return matches+phrases+weight+(row.url.startsWith('https://')?1:0);
@@ -18,8 +20,12 @@ const score=(row,query)=>{
 const nowIso=()=>new Date().toISOString();
 
 export function rankCandidates(results,query){
- const seen=new Set(), valid=[];
- for(const row of Array.isArray(results)?results:[]){const u=safeUrl(row?.url);if(!u||seen.has(u.href))continue;seen.add(u.href);const snippet=typeof row.snippet==='string'?row.snippet:row.description;valid.push({url:u.href,title:typeof row.title==='string'?row.title.slice(0,512):'',description:typeof snippet==='string'?snippet.slice(0,4000):'',published:typeof row.published==='string'?row.published.slice(0,64):null,sourceClass:sourceClass(u),score:score({...row,description:snippet,url:u.href},query)});}
+ const seen=new Set(), valid=[],zip=weatherZip(query);
+ for(const row of Array.isArray(results)?results:[]){const u=safeUrl(row?.url);if(!u||seen.has(u.href))continue;seen.add(u.href);const snippet=typeof row.snippet==='string'?row.snippet:row.description;
+   // Search rank alone cannot establish a location. For an explicit weather
+   // ZIP, discard candidates that never identify that ZIP at all.
+   if(zip&&!`${u.href} ${row.title??''}`.includes(zip))continue;
+   valid.push({url:u.href,title:typeof row.title==='string'?row.title.slice(0,512):'',description:typeof snippet==='string'?snippet.slice(0,4000):'',published:typeof row.published==='string'?row.published.slice(0,64):null,sourceClass:sourceClass(u),score:score({...row,description:snippet,url:u.href},query)});}
  return valid.sort((a,b)=>b.score-a.score||a.url.localeCompare(b.url)).slice(0,MAX_CANDIDATES);
 }
 
@@ -40,11 +46,13 @@ export function createSourceRetrieval({manifest,invoke,now=nowIso}){
    const searchSpec=manifest?.byName?.web_search, queryDecision=queryEgressDecision(request,'web_search',searchSpec?.digest??'0'.repeat(64));
    if(queryDecision.outcome!=='ALLOW'||request.queryMode!=='PUBLIC_GENERALIZED'||typeof request.query!=='string')return createEvidencePack({...request,items:[],failureCodes:[queryDecision.outcome==='ASK'?'QUERY_APPROVAL_REQUIRED':'QUERY_DENIED'],adequacy:request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL',createdAt:now(),budget:{candidates:0,fetched:0,chars:0}});
    let found;try{found=await call('web_search',{query:request.query,count:MAX_CANDIDATES},request,{kind:'EXTERNAL_SERVICE',service:'parallel',model:'web_search'},'PUBLIC_SEARCH');}catch{return createEvidencePack({...request,items:[],failureCodes:['SEARCH_FAILED'],adequacy:request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL',createdAt:now(),budget:{candidates:0,fetched:0,chars:0}});}
-   const candidates=rankCandidates(found?.data?.results??found?.results,request.query), items=[], failures=[];let chars=0,fetched=0;
+   const candidates=rankCandidates(found?.data?.results??found?.results,request.query), items=[], failures=[];let chars=0,fetched=0,weatherFacts=0;
    for(let n=0;n<candidates.length;n++){const c=candidates[n];const base={sourceId:`s${n+1}`,url:c.url,finalUrl:null,title:c.title,sourceClass:c.sourceClass,publishedAt:c.published,retrievedAt:now(),fetchStatus:'CANDIDATE',fragments:[{kind:'LOCATOR',text:c.url},{kind:'METADATA',text:c.title},{kind:'SNIPPET',text:c.description}],truncated:false,untrusted:true,provenance:{capability:'web_search'}};if(fetched>=MAX_FETCHES||chars>=MAX_CHARS){items.push(base);continue;}
-     try{const value=await call('web_fetch',{url:c.url,extractMode:'text',maxChars:PER_SOURCE},request,{kind:'EXTERNAL_SERVICE',service:'openclaw-core',model:'web_fetch'},'PUBLIC_FETCH');const raw=value?.data??value;const final=safeUrl(raw?.finalUrl??raw?.url??c.url);if(!final)throw Error('redirect');const content=typeof raw?.text==='string'?raw.text.slice(0,Math.min(PER_SOURCE,MAX_CHARS-chars)):'';if(!content)throw Error('extract');const truncated=value?.truncated===true||raw?.truncated===true||raw.text.length>content.length;chars+=content.length;fetched++;items.push({...base,finalUrl:final.href,fetchStatus:truncated?'TRUNCATED':'FETCHED',truncated,fragments:[...base.fragments,{kind:'FETCHED_CONTENT',text:content}],provenance:{capability:'web_fetch'}});}catch(error){const status=error?.message==='redirect'?'REDIRECT_FAILED':error?.message==='extract'?'EXTRACTION_FAILED':'FETCH_FAILED';failures.push(status);items.push({...base,fetchStatus:status});}
+     try{const value=await call('web_fetch',{url:c.url,extractMode:'text',maxChars:PER_SOURCE},request,{kind:'EXTERNAL_SERVICE',service:'openclaw-core',model:'web_fetch'},'PUBLIC_FETCH');const raw=value?.data??value;const final=safeUrl(raw?.finalUrl??raw?.url??c.url);if(!final)throw Error('redirect');const content=typeof raw?.text==='string'?raw.text.slice(0,Math.min(PER_SOURCE,MAX_CHARS-chars)):'';if(!content)throw Error('extract');const truncated=value?.truncated===true||raw?.truncated===true||raw.text.length>content.length;chars+=content.length;fetched++;if(!weatherZip(request.query)||weatherFact.test(content))weatherFacts++;items.push({...base,finalUrl:final.href,fetchStatus:truncated?'TRUNCATED':'FETCHED',truncated,fragments:[...base.fragments,{kind:'FETCHED_CONTENT',text:content}],provenance:{capability:'web_fetch'}});}catch(error){const status=error?.message==='redirect'?'REDIRECT_FAILED':error?.message==='extract'?'EXTRACTION_FAILED':'FETCH_FAILED';failures.push(status);items.push({...base,fetchStatus:status});}
    }
-   const adequate=fetched?((request.sourceNeed==='WEB_REQUIRED'&&fetched<1)?'INADEQUATE':'ADEQUATE'):(request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL');
+   if(weatherZip(request.query)&&fetched&&!weatherFacts)failures.push('WEATHER_FACT_UNAVAILABLE');
+   if(weatherZip(request.query)&&!candidates.length)failures.push('WEATHER_LOCATION_UNVERIFIED');
+   const adequate=weatherFacts?'ADEQUATE':request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL';
    return createEvidencePack({...request,items,failureCodes:[...new Set(failures)],adequacy:adequate,createdAt:now(),budget:{candidates:candidates.length,fetched,chars}});
  }};
 }

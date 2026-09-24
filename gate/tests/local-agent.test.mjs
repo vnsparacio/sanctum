@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter,LOCAL_AGENT_TIMEOUT_MS } from '../plugin/local-agent.mjs';
+import {beginLocalToolRun,endLocalToolRun,localToolFamily,localToolGuard,localToolSurface,observeLocalTool} from '../plugin/local-tool-boundary.mjs';
 const model='local4b';
 const answerTokens=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url),'utf8')).max_answer_tokens;
 const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1',models:[{id:model,contextWindow:24576,maxTokens:4096}]}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
-const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Search Gmail for a synthetic query.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
+const body={operation:'answer_local',approval:'local_only',request:{scope:'a'.repeat(32),revision:2,messages:[{role:'assistant',content:'synthetic previous answer'},{role:'user',content:'Answer a synthetic local question.'}]},state:{scope:'a'.repeat(32),revision:2,privacy_floor:'PERSONAL',high_stakes:false}};
 const response=text=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}]}));
 test('handoff pins local model and supplies no new tools or system permissions',()=>{
  const r=buildLocalRequest(body,config,model,answerTokens);
@@ -19,6 +20,40 @@ test('scope isolates local sessions and revisions retain task context',()=>{
  const next=structuredClone(body);next.request.revision=3;next.state.revision=3;
  assert.equal(buildLocalRequest(next,config,model,answerTokens).headers['x-openclaw-session-key'],a);
  next.request.scope=next.state.scope='b'.repeat(32);assert.notEqual(buildLocalRequest(next,config,model,answerTokens).headers['x-openclaw-session-key'],a);
+});
+test('explicit personal source requests narrow both submitted and executable tools',()=>{
+ const expected=[['What is my most recent email?','gmail','gmail_search','messages_search'],['Show my latest text','messages','messages_search','gmail_search'],['Check my calendar today','calendar','calendar_events','gmail_search']];
+ for(const [prompt,family,allowed,denied] of expected){
+  assert.equal(localToolFamily(prompt),family);
+  const sample=structuredClone(body);sample.request.messages.at(-1).content=prompt;
+  const sessionKey=buildLocalRequest(sample,config,model,answerTokens).headers['x-openclaw-session-key'];
+  assert.match(sessionKey,new RegExp(`mac-gate-local-${family}-`));
+  assert.ok(localToolSurface(null,{sessionKey}).toolsAllow.includes(allowed));
+  assert.equal(localToolGuard({toolName:allowed},{sessionKey}),undefined);
+  assert.equal(localToolGuard({toolName:denied},{sessionKey}).block,true);
+ }
+ assert.equal(localToolFamily('How do I use Gmail?'),null);
+ assert.equal(localToolFamily('What is my latest email and text message?'),'mixed');
+ assert.equal(localToolFamily('Read the text of my latest email'),'gmail');
+ const evidence=structuredClone(body);evidence.request.messages.at(-1).content+='\nSOURCE-FIRST EVIDENCE';
+ const key=buildLocalRequest(evidence,config,model,answerTokens).headers['x-openclaw-session-key'];
+ assert.deepEqual(localToolSurface(null,{sessionKey:key}),{toolsAllow:[]});
+ assert.equal(localToolGuard({toolName:'web_search'},{sessionKey:key}).block,true);
+});
+test('personal-source answer is suppressed unless its requested tool succeeds',async()=>{
+ const mail=structuredClone(body);mail.request.messages.at(-1).content='What is my most recent email?';
+ const failed=createLocalAgent({getConfig:()=>config,localModel:model,maxAnswerTokens:answerTokens,fetchImpl:async(_url,{headers})=>{
+  observeLocalTool({toolName:'gmail_search',error:'synthetic broker failure'},{sessionKey:headers['x-openclaw-session-key']});
+  return response('A misleading answer about a text message.');
+ }});
+ assert.deepEqual(await failed(mail,new AbortController().signal),{status:'UNAVAILABLE',reason:'local_source_unavailable'});
+ const succeeded=createLocalAgent({getConfig:()=>config,localModel:model,maxAnswerTokens:answerTokens,fetchImpl:async(_url,{headers})=>{
+  observeLocalTool({toolName:'gmail_search',result:{isError:false}},{sessionKey:headers['x-openclaw-session-key']});
+  return response('Synthetic email result.');
+ }});
+ assert.deepEqual(await succeeded(mail,new AbortController().signal),{status:'OK',text:'Synthetic email result.'});
+ const key=buildLocalRequest(mail,config,model,answerTokens).headers['x-openclaw-session-key'];
+ beginLocalToolRun(key);assert.equal(endLocalToolRun(key),false);
 });
 test('non-normal or stale state cannot dispatch',()=>{
  for(const patch of [{high_stakes:true},{privacy_floor:'RESTRICTED'},{revision:1},{scope:'b'.repeat(32)}]){

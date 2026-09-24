@@ -33,6 +33,20 @@ test('bounded audit session grant covers repeated current-prompt text only',asyn
  const audits=f.calls.filter(x=>x.operation==='classify');assert.equal(audits.length,2);assert.ok(audits.every(x=>x.approval==='session_audit_prompt'));assert.equal(audits[1].packet.prompt,'second');assert.deepEqual(audits[1].packet.disclosed,{});
  assert.match((await f.send('audit status')).text,/6 call\(s\) remain/);assert.match((await f.send('status')).text,/grant active/);
 });
+test('one audit session grant covers ask and ask-strong, but not frontier answering',async()=>{
+ const f=fixture();
+ await f.result(await f.approveSession((await f.send('ask first')).text));
+ let pending=await f.send('ask-strong second');
+ assert.match(pending.text,/Mac gate job/);
+ assert.doesNotMatch(pending.text,/approve-session/);
+ pending=await f.result(pending);
+ assert.match(pending.text,/OpenAI frontier/);
+ assert.match(pending.text,/approve this exact disclosure once/);
+ await f.result(await f.approve(pending.text));
+ const audits=f.calls.filter(x=>x.operation==='classify');
+ assert.equal(audits.length,2);
+ assert.ok(audits.every(x=>x.approval==='session_audit_prompt'));
+});
 test('audit session consent states aggregate cap and stops at the call limit',async()=>{
  const f=fixture();let p=await f.send('ask first');assert.match(p.text,/aggregate cap \$8\.00/);
  await f.result(await f.approveSession(p.text));
