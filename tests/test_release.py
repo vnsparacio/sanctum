@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -110,6 +111,37 @@ class Setup(unittest.TestCase):
         self.assertNotIn(firecrawl, updated["plugins"]["load"]["paths"])
         self.assertNotIn("firecrawl", updated["plugins"]["allow"])
         self.assertNotIn("firecrawl", updated["plugins"]["entries"])
+
+    def test_doctor_detects_stale_imported_webui_functions(self):
+        op.setup(self.prefix)
+        self.assertEqual(op.webui_function_sync(self.prefix), "not-enrolled")
+        database = self.prefix / "state/webui/webui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "create table function (id text primary key, content text, is_active boolean)"
+            )
+            connection.executemany(
+                "insert into function values (?, ?, ?)",
+                [
+                    (
+                        "sanctum_gate_guard",
+                        (self.prefix / "gate/webui/guard.py").read_text(),
+                        True,
+                    ),
+                    ("sanctum_gate_pipe", "stale pipe", True),
+                ],
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "stale:sanctum_gate_pipe")
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "update function set content = ? where id = ?",
+                (
+                    (self.prefix / "gate/webui/pipe.py").read_text(),
+                    "sanctum_gate_pipe",
+                ),
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "pass")
 
     def test_nonempty_prefix_is_preserved(self):
         self.prefix.mkdir(mode=0o700)

@@ -13,6 +13,7 @@
 | Personal tool unavailable | Configure the read-only account/permission, marker, socket and explicitly allowed tool; do not broaden API/shell access. |
 | Unknown contact | Add an explicit local mapping after review; do not broaden the search automatically. |
 | WebUI prints `/gate approve <id>` instead of a dialog | Re-import the rendered prefix `gate/webui/pipe.py` into Open WebUI Functions and confirm version `2.1.0`. Updating the file on disk does not replace the function stored in the WebUI database. Exact commands remain valid for protocol diagnosis, but the current owner flow uses confirmation dialogs. |
+| Doctor reports stale `webui_function_sync` | Open WebUI **Functions**, replace the named stale function with the matching rendered prefix file, keep the gate guard enabled, then rerun doctor. Sanctum detects the drift read-only and never edits the owner UI database automatically. |
 | Approval unavailable/expired | Deny/stop and obtain a fresh exact approval. The optional audit grant is limited to current-prompt classification, eight calls and 15 minutes; inspect it with `/gate audit status` and remove it with `/gate audit revoke`. |
 | GPU allocation unresolved | Reconcile persisted intent; do not blindly create another Pod. |
 | Deletion unconfirmed | Keep janitor running and reconcile provider state. Cached OFFLINE alone is insufficient. |
