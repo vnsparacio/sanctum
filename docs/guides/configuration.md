@@ -51,6 +51,18 @@ operational prefix and unknown fields, including embedded credential fields.
 
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 
+For a reviewed Source-First code update on an existing prefix, stop the managed
+stack and run `scripts/upgrade_source_first.py` with
+`--prefix /absolute/private/prefix --apply`. This narrow amendment backs up
+the installed gate files and receipt to a private rollback record. It accepts
+an offline GPU, or the main GPU's
+confirmed `RETIRED` state, only when no pod, uncertain allocation, or main or
+private-lead lease remains; any private-lead GPU must be offline. It does not
+change GPU settings, credentials, or provider resources. Run
+`make doctor PREFIX=/absolute/private/prefix` after applying it, then restart
+the stack and perform a fresh gate canary. Do not change GPU state to satisfy
+the check.
+
 For a fresh installation, the setup runner can apply that same private proposal
 after installing any required optional web runtime:
 

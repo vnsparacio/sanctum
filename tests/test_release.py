@@ -26,6 +26,11 @@ work_mode_spec = importlib.util.spec_from_file_location(
 )
 work_mode = importlib.util.module_from_spec(work_mode_spec)
 work_mode_spec.loader.exec_module(work_mode)
+source_first_spec = importlib.util.spec_from_file_location(
+    "source_first_tools", ROOT / "scripts/upgrade_source_first.py"
+)
+source_first = importlib.util.module_from_spec(source_first_spec)
+source_first_spec.loader.exec_module(source_first)
 
 
 class Setup(unittest.TestCase):
@@ -1281,3 +1286,67 @@ class IntegrationAmendments(unittest.TestCase):
         changed = json.loads(json.dumps(base))
         changed["servers"][2]["snapshot"]["server"]["volumes"] = ["/:/mcp-input"]
         self.assertNotEqual(mod.signature(base), mod.signature(changed))
+
+
+class SourceFirstUpgradeSafety(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.prefix = Path(self.tmp.name) / "install"
+        (self.prefix / "state/gate").mkdir(parents=True)
+
+    def gpu(self, **changes):
+        value = {
+            "phase": "RETIRED",
+            "retired_confirmed_at": 1.0,
+            "pod_id": None,
+            "pod_name": None,
+            "allocation_uncertain": False,
+        }
+        value.update(changes)
+        (self.prefix / "state/gate/gpu.json").write_text(json.dumps(value))
+
+    def test_accepts_only_confirmed_retirement_or_offline_without_ownership(self):
+        self.gpu()
+        source_first.safe(self.prefix)
+        self.gpu(phase="OFFLINE", retired_confirmed_at=None)
+        source_first.safe(self.prefix)
+
+        for changes in (
+            {"phase": "RETIRED", "retired_confirmed_at": None},
+            {"phase": "RETIRED", "retired_confirmed_at": "unverified"},
+            {"phase": "RETIRED", "retired_confirmed_at": float("inf")},
+            {"phase": "READY"},
+            {"pod_id": "owned-pod"},
+            {"pod_name": "owned-pod"},
+            {"allocation_uncertain": True},
+        ):
+            with self.subTest(changes=changes):
+                self.gpu(**changes)
+                with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+                    source_first.safe(self.prefix)
+
+    def test_refuses_main_or_private_lead_leases_and_active_private_lead(self):
+        self.gpu()
+        for name in ("control.sqlite", "private-lead/control.sqlite"):
+            database = self.prefix / "state/gate" / name
+            database.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(database) as connection:
+                connection.execute("create table leases (scope text)")
+                connection.execute("insert into leases values ('active')")
+            with self.subTest(database=name):
+                with self.assertRaisesRegex(ValueError, "Close gate leases"):
+                    source_first.safe(self.prefix)
+            with sqlite3.connect(database) as connection:
+                connection.execute("delete from leases")
+
+        private_state = self.prefix / "state/gate/private-lead/gpu.json"
+        private_state.write_text(json.dumps({"phase": "READY"}))
+        with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+            source_first.safe(self.prefix)
+
+    def test_refuses_running_gateway(self):
+        self.gpu()
+        with patch.object(source_first.op, "owns_process", return_value=True):
+            with self.assertRaisesRegex(ValueError, "Stop candidate gateway"):
+                source_first.safe(self.prefix)

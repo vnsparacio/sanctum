@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -44,13 +46,38 @@ def atomic(path, data):
 def safe(prefix):
     if op.owns_process(op.process_record(prefix)):
         raise ValueError("Stop candidate gateway before source upgrade")
-    state = prefix / "state/gate/gpu.json"
-    if state.exists():
+    for name in ("gpu.json", "private-lead/gpu.json"):
+        state = prefix / "state/gate" / name
+        if state.is_symlink():
+            raise ValueError("Unsafe GPU state")
+        if not state.exists():
+            continue
         d = json.loads(state.read_text())
-        if d.get("phase") != "OFFLINE" or any(
-            d.get(k) for k in ("pod_id", "pod_name", "allocation_uncertain")
+        phase = d.get("phase")
+        retired = name == "gpu.json" and phase == "RETIRED"
+        allowed_phases = ("OFFLINE", "RETIRED") if name == "gpu.json" else ("OFFLINE",)
+        if (
+            phase not in allowed_phases
+            or (
+                retired
+                and (
+                    type(d.get("retired_confirmed_at")) not in (int, float)
+                    or d["retired_confirmed_at"] <= 0
+                    or not math.isfinite(d["retired_confirmed_at"])
+                )
+            )
+            or any(d.get(k) for k in ("pod_id", "pod_name", "allocation_uncertain"))
         ):
             raise ValueError("Unresolved GPU ownership; preserve cleanup")
+    for name in ("control.sqlite", "private-lead/control.sqlite"):
+        database = prefix / "state/gate" / name
+        if database.is_symlink():
+            raise ValueError("Unsafe GPU database")
+        if not database.exists():
+            continue
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+            if connection.execute("select count(*) from leases").fetchone()[0]:
+                raise ValueError("Close gate leases before source upgrade")
 
 
 def apply(prefix):
