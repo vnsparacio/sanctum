@@ -22,6 +22,25 @@ const score=(row,query)=>{
 };
 const nowIso=()=>new Date().toISOString();
 
+// Search metadata is not factual evidence. Keep it only while it fits the
+// evidence contract; never let provider-sized snippets discard fetched facts.
+function boundedPack(input){
+ const attempt=items=>createEvidencePack({...input,items});
+ let items=input.items;
+ try{return attempt(items);}catch(error){if(error?.message!=='evidence_pack_limit')throw error;}
+ items=items.map(item=>({...item,fragments:item.fragments.map(fragment=>fragment.kind==='SNIPPET'?{...fragment,text:fragment.text.slice(0,256)}:fragment)}));
+ try{return attempt(items);}catch(error){if(error?.message!=='evidence_pack_limit')throw error;}
+ items=items.map(item=>({...item,fragments:item.fragments.filter(fragment=>fragment.kind==='FETCHED_CONTENT')}));
+ try{return attempt(items);}catch(error){if(error?.message!=='evidence_pack_limit')throw error;}
+ items=items.filter(item=>['FETCHED','TRUNCATED'].includes(item.fetchStatus));
+ try{return attempt(items);}catch(error){if(error?.message!=='evidence_pack_limit')throw error;}
+ for(let pass=0;pass<12;pass++){
+   items=items.map(item=>({...item,fetchStatus:'TRUNCATED',truncated:true,fragments:item.fragments.map(fragment=>({...fragment,text:fragment.text.slice(0,Math.max(1,Math.floor(fragment.text.length/2)))}))}));
+   try{return attempt(items);}catch(error){if(error?.message!=='evidence_pack_limit')throw error;}
+ }
+ return createEvidencePack({...input,items:[],adequacy:input.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL',failureCodes:[...input.failureCodes,'PACK_LIMIT']});
+}
+
 export function rankCandidates(results,query){
  const seen=new Set(), valid=[],zip=weatherZip(query);
  for(const row of Array.isArray(results)?results:[]){const u=safeUrl(row?.url);if(!u||seen.has(u.href))continue;seen.add(u.href);const snippet=typeof row.snippet==='string'?row.snippet:row.description;
@@ -56,6 +75,6 @@ export function createSourceRetrieval({manifest,invoke,now=nowIso}){
    if(weatherZip(request.query)&&fetched&&!weatherFacts)failures.push('WEATHER_FACT_UNAVAILABLE');
    if(weatherZip(request.query)&&!candidates.length)failures.push('WEATHER_LOCATION_UNVERIFIED');
    const adequate=weatherFacts?'ADEQUATE':request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL';
-   return createEvidencePack({...request,items,failureCodes:[...new Set(failures)],adequacy:adequate,createdAt:now(),budget:{candidates:candidates.length,fetched,chars}});
+   return boundedPack({...request,items,failureCodes:[...new Set(failures)],adequacy:adequate,createdAt:now(),budget:{candidates:candidates.length,fetched,chars}});
  }};
 }
