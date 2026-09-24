@@ -1,6 +1,6 @@
 {
   "plugins/browser-guard/dist/index.js": "f57b97c690efa18611fe11d9ee4ae820c01a09201a3a66e5d28c7f7458674be4",
-  "plugins/messages-read-tools/dist/index.js": "c13ac4d117417fc4950f32fb2f6057e4ebee6b57092f339e5f932d438085627b",
+  "plugins/messages-read-tools/dist/index.js": "7c04ba2e97098a8af8c799ee63124e0fe5cef4dfdbe4f93b6697a5690248b187",
   "plugins/gmail-read-tools/dist/index.js": "a28dde1eb779614e8ca4bcce8101839d64aedaa0ee825083656ed4ccce393c2c",
   "plugins/local-markdown-tools/dist/index.js": "5538fbb5e8d6bf52cfaaa24d9603df74e15aa6d7002fdc97c0d5aa67c340a9a7",
   "plugins/file-steward/dist/index.js": "8529e1c0a339714b13d2f3897c5950b7b6f6b82366f0b4a66c0ba655e08f98d3",
@@ -24,7 +24,7 @@
   "node_modules/openclaw/dist/tool-results-la_KkjCS.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
   "node_modules/openclaw/dist/tool-schema-projection-ZrMdwk4s.js": "59fed25c641bcab5f17135b38ce3df732e7a7aadfbbb246198324e8912c4b32b",
   "node_modules/openclaw/dist/tools-BDL8RM7L.js": "5919ce363c33799cc78cc23af48ccc3b4343b589770a80e60259903c41336e53",
-  "reliability/schema-snapshot.json": "ab19cce02d76f7c5a7ed92f274568f70865b008534cd000b167b739b31f39a4a",
+  "reliability/schema-snapshot.json": "1f5d0a01654a2d63b3a4865871b6931a00eb037c58555a29c502ffea0b17a261",
   "node_modules/openclaw/dist/mcp-content-Ef9quind.js": "fa24b2ce3cf3edf3a83b21a679296c1693d1ddcaea618f4a8ece074ef920a649",
   "node_modules/openclaw/dist/lifecycle-hook-helpers-DbVxaJtA.js": "21e5e2e912e8b4e9f188b05739cfd2b696d36686702f52aea048e4303c03f6d8",
   "node_modules/openclaw/dist/hook-runner-global-BphT2xdR.js": "e9aefe0f33cd22f45b51e763c6f78e395eb74c67f85f9266e3dd476dc71b3d27",

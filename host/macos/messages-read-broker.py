@@ -2,8 +2,12 @@
 
 import json
 import os
+import re
+import sqlite3
 import subprocess
+import time
 import urllib.parse
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from socketserver import UnixStreamServer
@@ -14,6 +18,9 @@ SOCKET_PATH = str(
 )
 
 BROKER = str(Path(__file__).with_name("ai-imsg-read"))
+MESSAGE_DB = Path.home() / "Library/Messages/chat.db"
+E164_PHONE = re.compile(r"\+[1-9][0-9]{7,14}\Z")
+APPLE_EPOCH_SECONDS = 978307200
 
 
 def run_broker(args):
@@ -71,8 +78,79 @@ def sanitize_messages(records):
         "created_at",
         "is_from_me",
         "participants",
+        "content_unavailable",
+        "text_truncated",
     )
     return [keep_fields(record, fields) for record in records]
+
+
+def apple_message_time(value):
+    """Convert the Messages database's Apple-epoch seconds or subsecond ticks."""
+    if not isinstance(value, int):
+        return None
+    magnitude = abs(value)
+    divisor = (
+        1_000_000_000
+        if magnitude >= 10**17
+        else 1_000_000 if magnitude >= 10**14 else 1_000 if magnitude >= 10**11 else 1
+    )
+    try:
+        return (
+            datetime.fromtimestamp(APPLE_EPOCH_SECONDS + value / divisor, UTC)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def sender_history(sender, limit, database=MESSAGE_DB):
+    """Read only inbound, ordinary messages from one exact E.164 sender."""
+    if not E164_PHONE.fullmatch(sender):
+        raise ValueError("sender must be an exact E.164 phone number")
+    if not 1 <= limit <= 12:
+        raise ValueError("invalid sender history limit")
+    started = time.monotonic()
+    uri = "file:" + urllib.parse.quote(str(database)) + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=2) as connection:
+        connection.execute("PRAGMA query_only=ON")
+        connection.set_progress_handler(
+            lambda: int(time.monotonic() - started > 10), 1000
+        )
+        rows = connection.execute(
+            """
+            SELECT message.text, message.date
+            FROM message JOIN handle ON handle.ROWID = message.handle_id
+            WHERE handle.id = ? AND message.is_from_me = 0
+              AND COALESCE(message.is_system_message, 0) = 0
+              AND COALESCE(message.is_service_message, 0) = 0
+              AND (COALESCE(message.is_empty, 0) = 0
+                   OR COALESCE(message.cache_has_attachments, 0) != 0)
+              AND COALESCE(message.associated_message_type, 0) = 0
+              AND COALESCE(message.date_retracted, 0) = 0
+            ORDER BY message.date DESC, message.ROWID DESC
+            LIMIT ?
+            """,
+            (sender, limit),
+        ).fetchall()
+    records = []
+    for body, date in rows:
+        timestamp = apple_message_time(date)
+        truncated = isinstance(body, str) and len(body) > 2000
+        if truncated:
+            text = body[:1970] + "\n[message text truncated]"
+        else:
+            text = body if isinstance(body, str) and body else None
+        records.append(
+            {
+                "sender": sender,
+                "text": text,
+                "created_at": timestamp,
+                "content_unavailable": text is None,
+                "text_truncated": truncated,
+            }
+        )
+    return records
 
 
 def integer(value, default, minimum, maximum):
@@ -206,6 +284,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(
                     200,
                     {"ok": True, "records": records},
+                )
+                return
+
+            if parsed.path == "/sender-history":
+                sender = params.get("sender", [""])[0]
+                limit = integer(params.get("limit", ["10"])[0], 10, 1, 12)
+                self.reply(
+                    200,
+                    {"ok": True, "records": sender_history(sender, limit)},
                 )
                 return
 
