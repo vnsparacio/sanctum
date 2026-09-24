@@ -86,7 +86,7 @@ def minimize_query(prompt):
     raw = re.sub(r'(["\']).{0,512}?\1', " ", raw)
     words = []
     for word in WORDS.findall(raw):
-        lower = word.lower()
+        lower = word.lower().strip(".:/#-")
         if lower in {
             "please",
             "could",
@@ -94,6 +94,8 @@ def minimize_query(prompt):
             "should",
             "tell",
             "about",
+            "an",
+            "and",
             "what",
             "when",
             "where",
@@ -101,11 +103,23 @@ def minimize_query(prompt):
             "from",
             "this",
             "that",
+            "the",
+            "for",
+            "is",
+            "in",
+            "of",
+            "on",
+            "at",
             "have",
             "does",
             "said",
             "yesterday",
-            "today",
+            "use",
+            "report",
+            "public",
+            "evidence",
+            "preferably",
+            "zip",
         }:
             continue
         if private and lower not in SAFE_PRIVATE_TERMS:
