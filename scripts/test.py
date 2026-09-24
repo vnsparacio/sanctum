@@ -88,7 +88,18 @@ def plugins(env: dict[str, str]) -> None:
 
 
 def release(env: dict[str, str]) -> None:
-    run([sys.executable, "-B", "-m", "unittest", "tests.test_release"], ".", env)
+    run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "unittest",
+            "tests.test_release",
+            "tests.test_documentation_impact",
+        ],
+        ".",
+        env,
+    )
 
 
 def agents(env: dict[str, str]) -> None:
