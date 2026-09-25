@@ -31,6 +31,7 @@ export function localSessionKey(scope,family){
 
 export function localToolSurface(_event,ctx){
   const family=SESSION.exec(ctx?.sessionKey??'')?.[1];
+  if(family==='calendar'&&ACTIVE.get(ctx.sessionKey)?.unconstrainedNext)return {toolsAllow:['calendar_events']};
   return family?{toolsAllow:[...ALLOWED[family]]}:undefined;
 }
 
@@ -39,11 +40,12 @@ export function localToolGuard(event,ctx){
   if(!family)return;
   if(!ALLOWED[family].includes(event?.toolName))return {block:true,blockReason:'Mac gate local source boundary'};
   const state=ACTIVE.get(ctx.sessionKey);
-  if(family==='calendar'&&state?.unconstrainedNext&&['calendar_events','calendar_search'].includes(event.toolName)){
-    // A model-selected "today" window includes events that have already ended.
-    // For an unconstrained next-event request, the Mac owns the lower bound.
-    const {to:_ignored,...params}=event.params??{};
-    return {params:{...params,from:new Date().toISOString(),days:90}};
+  if(family==='calendar'&&state?.unconstrainedNext){
+    if(event.toolName!=='calendar_events')return {block:true,blockReason:'Next event requires the unfiltered calendar agenda'};
+    // OpenClaw shallow-merges hook params over model params. Explicit undefined
+    // removes a model-invented search term or end bound from this agenda lookup.
+    return {params:{...event.params,query:undefined,to:undefined,calendar:'all',
+      from:new Date().toISOString(),days:90,limit:1}};
   }
 }
 

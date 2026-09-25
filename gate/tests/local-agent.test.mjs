@@ -42,19 +42,20 @@ test('explicit personal source requests narrow both submitted and executable too
  assert.deepEqual(localToolSurface(null,{sessionKey:key}),{toolsAllow:[]});
  assert.equal(localToolGuard({toolName:'web_search'},{sessionKey:key}).block,true);
 });
-test('unconstrained next-calendar calls use a future Mac-owned window without changing source or query',()=>{
+test('unconstrained next-calendar calls use an unfiltered future Mac-owned agenda',()=>{
  const key=localSessionKey('a'.repeat(32),'calendar');
  beginLocalToolRun(key,"What's next on my calendar?");
+ assert.deepEqual(localToolSurface(null,{sessionKey:key}),{toolsAllow:['calendar_events']});
  const before=Date.now();
- const rewrite=localToolGuard({toolName:'calendar_events',params:{calendar:'all',from:'today',days:1,limit:12}},{sessionKey:key});
+ const rewrite=localToolGuard({toolName:'calendar_events',params:{calendar:'personal',query:'invented',from:'today',to:'tomorrow',days:1,limit:1}},{sessionKey:key});
  const after=Date.now();
  assert.ok(Date.parse(rewrite.params.from)>=before&&Date.parse(rewrite.params.from)<=after);
  assert.equal(rewrite.params.days,90);
  assert.equal(rewrite.params.calendar,'all');
- assert.equal(rewrite.params.limit,12);
+ assert.equal(rewrite.params.limit,1);
  assert.equal(rewrite.params.to,undefined);
- const search=localToolGuard({toolName:'calendar_search',params:{query:'synthetic',from:'today',to:'tomorrow'}},{sessionKey:key});
- assert.equal(search.params.query,'synthetic');assert.equal(search.params.to,undefined);
+ assert.equal(rewrite.params.query,undefined);
+ assert.equal(localToolGuard({toolName:'calendar_search',params:{query:'synthetic'}},{sessionKey:key}).block,true);
  endLocalToolRun(key);
  beginLocalToolRun(key,'What is on my calendar tomorrow?');
  assert.equal(localToolGuard({toolName:'calendar_events',params:{from:'tomorrow'}},{sessionKey:key}),undefined);
