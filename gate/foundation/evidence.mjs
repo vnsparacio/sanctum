@@ -13,6 +13,10 @@ const text=(v,n=4000)=>typeof v==='string'&&v.length<=n&&!v.includes('\0');
 const url=v=>typeof v==='string'&&v.length>0&&v.length<=2048&&/^https?:\/\//.test(v);
 const id=v=>typeof v==='string'&&/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v);
 const code=v=>typeof v==='string'&&/^[A-Z][A-Z0-9_:-]{0,79}$/.test(v);
+const sourceDirective=/(?:\b(?:system|developer|assistant)\s+(?:override|instruction|message)\b|\bignore\s+(?:all\s+)?(?:previous|prior|the)\s+\w+|\b(?:reveal|send|share|ask for)\b.{0,60}\b(?:passwords?|secrets?|credentials?|api\s+keys?)\b)/i;
+export const isSourceDirectiveSpan=value=>sourceDirective.test(value);
+const instructionStopwords=new Set(['and','are','for','from','has','have','into','not','the','this','that','with','you','your']);
+const instructionWords=value=>new Set((value.toLowerCase().match(/[a-z][a-z0-9]{2,}/g)??[]).filter(word=>!instructionStopwords.has(word)));
 
 export const EVIDENCE_PROFILES=Object.freeze({
  LOCAL_4B:Object.freeze({id:'LOCAL_COMPACT',maxSources:2,maxChars:6000}),
@@ -53,6 +57,15 @@ function claimGuard(answer,presented,prompt){
  if(typeof prompt!=='string'||!presented)return null;
  const cited=presented.items.filter(item=>answer.citations.some(c=>c.sourceId===item.sourceId));
  const evidence=cited.flatMap(item=>item.fragments.filter(f=>f.kind==='FETCHED_CONTENT').map(f=>f.text)).join('\n');
+ if(!/\b(?:prompt injection|injected instruction|malicious instruction|source instruction)\b/i.test(prompt)){
+   const spans=evidence.split(/(?<=[.!?])\s+|\n+/).map(x=>x.trim()).filter(Boolean);
+   const ordinary=instructionWords(prompt+' '+spans.filter(x=>!isSourceDirectiveSpan(x)).join(' '));
+   const answerWords=instructionWords(answer.text);
+   for(const span of spans.filter(isSourceDirectiveSpan)){
+     const novel=[...instructionWords(span)].filter(word=>!ordinary.has(word));
+     if(novel.filter(word=>answerWords.has(word)).length>=2)return 'SOURCE_INSTRUCTION_ECHO';
+   }
+ }
  if(/\b(?:weather|forecast)\b/i.test(prompt)&&/Forecast for ZIP \d{5} on \d{4}-\d{2}-\d{2}/.test(evidence)){
    const supported=new Set(evidence.match(/\b\d+(?:\.\d+)?\b/g)??[]);
    for(const number of answer.text.match(/\b\d+(?:\.\d+)?\b/g)??[])if(!supported.has(number))return 'CLAIM_NUMBER_UNSUPPORTED';

@@ -2,7 +2,7 @@ import { randomBytes, createHash, createHmac } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import {CONTRACT_VERSION,digest as contractDigest,egressMatches,validateEgressDecision} from '../foundation/contracts.mjs';
-import {presentEvidence,validateGroundedAnswer} from '../foundation/evidence.mjs';
+import {isSourceDirectiveSpan,presentEvidence,validateGroundedAnswer} from '../foundation/evidence.mjs';
 import {createObservability} from './observability.mjs';
 import {emitOperational} from './telemetry-client.mjs';
 import {createContentInteractionRecorder} from '../content-telemetry/interaction.mjs';
@@ -36,7 +36,8 @@ export function sourceExcerpt(view,question){
  for(const item of view?.items??[]){
   const content=item.fragments?.find(f=>f.kind==='FETCHED_CONTENT')?.text;
   if(!content)continue;
-  const fragments=content.split(/(?<=[.!?])\s+|\n+/).map(x=>x.trim()).filter(x=>x.length>=20&&!/^(?:SECURITY NOTICE:|<<<|Source: Web Fetch|[-*] DO NOT|[-*] Respond helpfully)/i.test(x));
+  const fragments=content.split(/(?<=[.!?])\s+|\n+/).map(x=>x.trim()).filter(x=>x.length>=20&&!isSourceDirectiveSpan(x)&&!/^(?:SECURITY NOTICE:|<<<|Source: Web Fetch|[-*] DO NOT|[-*] Respond helpfully)/i.test(x));
+  if(!fragments.length)continue;
   const scored=fragments.map((value,index)=>({value,index,score:[...terms].filter(term=>value.toLowerCase().includes(term)).length}));
   scored.sort((a,b)=>b.score-a.score||a.index-b.index);
   const excerpt=(scored[0]?.value??content.trim()).slice(0,400);

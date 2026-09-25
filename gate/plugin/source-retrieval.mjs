@@ -5,12 +5,18 @@ import {CONTRACT_VERSION,digest,egressMatches,validateEgressDecision,validateToo
 const MAX_CANDIDATES=6, MAX_FETCHES=3, MAX_CHARS=12000, PER_SOURCE=4000;
 const blocked=/(?:^(?:localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|198\.1[89]\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|f[cd][0-9a-f:]*$|fe[89ab][0-9a-f:]*$)|\.(?:local|internal)$)/i;
 const safeUrl=value=>{try{const u=new URL(value);u.hash='';const host=u.hostname.replace(/^\[|\]$/g,'');return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!blocked.test(host)&&u.href.length<=2048?u:null;}catch{return null;}};
-const sourceClass=url=>/\b(?:gov|edu)\b/i.test(url.hostname)?'AUTHORITATIVE_INSTITUTION':/(?:docs|developer|support|official)/i.test(url.hostname)?'OFFICIAL_PRIMARY':/(?:reddit|forum|community|stack)/i.test(url.hostname)?'COMMUNITY':'REPUTABLE_SECONDARY';
+const sourceClass=url=>/\.(?:gov|edu)$/i.test(url.hostname)?'AUTHORITATIVE_INSTITUTION':/(?:docs|developer|support|official)/i.test(url.hostname)?'OFFICIAL_PRIMARY':/(?:reddit|forum|community|stack)/i.test(url.hostname)?'COMMUNITY':'REPUTABLE_SECONDARY';
 const common=new Set(['about','and','are','for','from','has','how','the','this','use','what','when','where','with','zip']);
 const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}|\b\d{5}\b/g)??[]).filter(x=>!common.has(x));
 const queryScaffolding=new Set(['latest','recent','current','today','tomorrow','headline','headlines','news','documentation','documented','docs','product','official','source','sources','information','find','report','tell','show','give','please']);
 const newsAnswerScaffolding=new Set(['cite','fetched','publication','date','available','its']);
 export const newsSubject=query=>[...new Set(tokens(query).filter(x=>!queryScaffolding.has(x)&&!newsAnswerScaffolding.has(x)))].slice(0,6).join(' ');
+const subjectPublisherHost=(url,subject)=>{
+ const words=subject.split(' ').filter(Boolean);if(words.length!==1)return null;
+ const labels=url.hostname.split('.');const at=labels.indexOf(words[0]);
+ const remainder=labels.length-at-1;
+ return at>=0&&(remainder===1||remainder===2&&/^(?:co|com|org|gov|ac|edu)$/.test(labels[at+1]))?labels.slice(at).join('.'):null;
+};
 const fetchedTitle=value=>{
  if(typeof value!=='string')return null;
  const wrapped=value.match(/---\s*\n([^\n]+)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT\b/);
@@ -37,11 +43,14 @@ const publishedInBody=content=>{
 // final path can corroborate the independent search publication date, but a
 // path or search date alone is not enough and conflicts must fail closed.
 const publishedInDatedPath=(final,published)=>{
- const match=final.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
- if(!match)return null;
- const day=isoDay(`${match[1]}-${match[2]}-${match[3]}`);
+ const day=datedArticlePath(final);
  return day&&day===isoDay(String(published??'').slice(0,10))?day:null;
 };
+const datedArticlePath=final=>{
+ const match=final.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})\/([^/]+)\/?$/);
+ return match&&/[a-z]{3,}/i.test(match[4])?isoDay(`${match[1]}-${match[2]}-${match[3]}`):null;
+};
+const sameArticle=(left,right)=>{const a=safeUrl(left),b=safeUrl(right);return !!a&&!!b&&a.hostname===b.hostname&&a.pathname.replace(/\/+$/,'')===b.pathname.replace(/\/+$/,'');};
 const verifiedPublication=(content,final,published)=>{
  const body=publishedInBody(content),search=isoDay(String(published??'').slice(0,10));
  if(body&&search&&body!==search)return null;
@@ -107,10 +116,10 @@ export function rankCandidates(results,query,at=nowIso()){
    // Search rank alone cannot establish a location. For an explicit weather
    // ZIP, discard candidates that never identify that ZIP at all.
    if(zip&&!`${u.href} ${row.title??''}`.includes(zip))continue;
-   if(news&&subject&&!subject.split(' ').some(term=>tokens(row.title??'').includes(term)))continue;
-   valid.push({url:u.href,title:typeof row.title==='string'?row.title.slice(0,512):'',description:typeof snippet==='string'?snippet.slice(0,4000):'',published:typeof row.published==='string'?row.published.slice(0,64):null,sourceClass:sourceClass(u),score:score({...row,description:snippet,url:u.href},query)});}
+   if(news&&subject&&!subject.split(' ').some(term=>tokens(row.title??'').includes(term))&&!subjectPublisherHost(u,subject))continue;
+   valid.push({url:u.href,title:fetchedTitle(row.title)??'',description:typeof snippet==='string'?snippet.slice(0,4000):'',published:typeof row.published==='string'?row.published.slice(0,64):null,sourceClass:sourceClass(u),score:score({...row,title:fetchedTitle(row.title),description:snippet,url:u.href},query)});}
  return valid.sort((a,b)=>{
-   if(news){const af=fresh(a.published,at),bf=fresh(b.published,at);if(af!==bf)return af?-1:1;const ap=!!publishedInDatedPath(new URL(a.url),a.published),bp=!!publishedInDatedPath(new URL(b.url),b.published);if(ap!==bp)return ap?-1:1;const ad=dateMs(a.published),bd=dateMs(b.published);if(ad!==null&&bd!==null&&ad!==bd)return bd-ad;}
+   if(news){const priority=row=>{const path=datedArticlePath(new URL(row.url));return path&&fresh(path,at)?row.published===path?3:2:fresh(row.published,at)?1:0;};const ap=priority(a),bp=priority(b);if(ap!==bp)return bp-ap;const ad=dateMs(a.published),bd=dateMs(b.published);if(ad!==null&&bd!==null&&ad!==bd)return bd-ad;}
    return b.score-a.score||a.url.localeCompare(b.url);
  }).slice(0,MAX_CANDIDATES);
 }
@@ -137,8 +146,20 @@ export function createSourceRetrieval({manifest,invoke,now=nowIso}){
    const searchSpec=manifest?.byName?.web_search, queryDecision=queryEgressDecision({...request,query},'web_search',searchSpec?.digest??'0'.repeat(64));
    if(queryDecision.outcome!=='ALLOW'||request.queryMode!=='PUBLIC_GENERALIZED'||typeof request.query!=='string')return createEvidencePack({...request,items:[],failureCodes:[queryDecision.outcome==='ASK'?'QUERY_APPROVAL_REQUIRED':'QUERY_DENIED'],adequacy:request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL',createdAt:now(),budget:{candidates:0,fetched:0,chars:0}});
    const foundResults=[];let searchesSucceeded=0;
-   for(const variant of queries){try{const found=await call('web_search',{query:variant,count:MAX_CANDIDATES},request,{kind:'EXTERNAL_SERVICE',service:'parallel',model:'web_search'},'PUBLIC_SEARCH');searchesSucceeded++;foundResults.push(...(found?.data?.results??found?.results??[]));}catch{/* Other bounded public variant may still succeed. */}}
+   for(const variant of queries){try{const found=await call('web_search',{query:variant,count:MAX_CANDIDATES},request,{kind:'EXTERNAL_SERVICE',service:'parallel',model:'web_search'},'PUBLIC_SEARCH');searchesSucceeded++;foundResults.push(...(found?.data?.results??found?.results??[]).map(row=>({...row})));}catch{/* Other bounded public variant may still succeed. */}}
    if(!searchesSucceeded)return createEvidencePack({...request,items:[],failureCodes:['SEARCH_FAILED'],adequacy:request.sourceNeed==='WEB_REQUIRED'?'INADEQUATE':'PARTIAL',createdAt:now(),budget:{candidates:0,fetched:0,chars:0}});
+   if(news&&subject&&day&&!rankCandidates(foundResults,query,now()).some(row=>fresh(row.published,now())&&publishedInDatedPath(new URL(row.url),row.published))){
+     const publisher=foundResults.map(row=>safeUrl(row?.url)).filter(Boolean).map(url=>subjectPublisherHost(url,subject)).find(Boolean);
+     const freshDay=rankCandidates(foundResults,query,now()).map(row=>isoDay(String(row.published??'').slice(0,10))).filter(value=>value&&fresh(value,now())).sort().at(-1)??day;
+     if(publisher)try{const targeted=`${subject} news ${freshDay} site:${publisher}`;const found=await call('web_search',{query:targeted,count:MAX_CANDIDATES},request,{kind:'EXTERNAL_SERVICE',service:'parallel',model:'web_search'},'PUBLIC_SEARCH');foundResults.push(...(found?.data?.results??found?.results??[]).map(row=>({...row})));}catch{/* Original public searches remain usable. */}
+   }
+   if(news&&subject){const undated=rankCandidates(foundResults,query,now()).find(row=>datedArticlePath(new URL(row.url))&&fresh(datedArticlePath(new URL(row.url)),now())&&!row.published);
+     if(undated){const publisher=subjectPublisherHost(new URL(undated.url),subject),title=undated.title.replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim().slice(0,160);
+       if(publisher&&title.split(' ').length>=4)try{const found=await call('web_search',{query:`"${title}" site:${publisher}`,count:MAX_CANDIDATES},request,{kind:'EXTERNAL_SERVICE',service:'parallel',model:'web_search'},'PUBLIC_SEARCH');
+         for(const result of found?.data?.results??found?.results??[]){if(sameArticle(result?.url,undated.url)&&isoDay(String(result.published??'').slice(0,10))===datedArticlePath(new URL(undated.url))){for(const original of foundResults)if(sameArticle(original?.url,undated.url))original.published=result.published;break;}}
+       }catch{/* An uncorroborated URL remains inadequate. */}
+     }
+   }
    const candidates=rankCandidates(foundResults,query,now()), items=[], failures=[];let chars=0,fetched=0,usable=0;
    for(let n=0;n<candidates.length;n++){const c=candidates[n];const base={sourceId:`s${n+1}`,url:c.url,finalUrl:null,title:c.title,sourceClass:c.sourceClass,publishedAt:c.published,retrievedAt:now(),fetchStatus:'CANDIDATE',fragments:[{kind:'LOCATOR',text:c.url},{kind:'METADATA',text:c.title},{kind:'SNIPPET',text:c.description}],truncated:false,untrusted:true,provenance:{capability:'web_search'}};if(fetched>=MAX_FETCHES||chars>=MAX_CHARS){items.push(base);continue;}
      try{const value=await call('web_fetch',{url:c.url,extractMode:'text',maxChars:PER_SOURCE},request,{kind:'EXTERNAL_SERVICE',service:'openclaw-core',model:'web_fetch'},'PUBLIC_FETCH');const raw=value?.data??value;const final=safeUrl(raw?.finalUrl??raw?.url??c.url);if(!final)throw Error('redirect');let content=typeof raw?.text==='string'?raw.text.slice(0,Math.min(PER_SOURCE,MAX_CHARS-chars)):'';if(!content)throw Error('extract');const truncated=value?.truncated===true||raw?.truncated===true||raw.text.length>content.length;chars+=content.length;fetched++;

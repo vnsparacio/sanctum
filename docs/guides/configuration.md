@@ -103,14 +103,16 @@ For an explicit calendar-date ZIP forecast, the gate accepts fetched evidence
 only from the matching daytime period of a National Weather Service forecast
 page; if that period cannot be isolated, it refuses to assert a forecast. The
 local answer validator also rejects numbers and sky conditions absent from
-the selected period. "Latest headline" requests use at most two public,
-date-focused searches (current UTC day and previous day), merge at most six
-ranked candidates, and still fetch at most three pages. They prioritize recent
-subject-matching candidates with corroborable publication dates and require a
-recent publication date labeled in fetched page
-content or corroborated by matching search metadata and the fetched
-publisher's dated final URL. A conflicting date or an event date in article
-prose is not a verified publication date. These
+the selected period. "Latest headline" requests start with two public
+date-focused searches (current UTC day and previous day), and may use one
+publisher-constrained search plus one exact-article-title search if those
+results lack corroborated fresh article evidence. They merge at most six
+ranked candidates and still fetch at most three pages. A publisher article
+whose title omits the publisher name can be selected by its matching hostname.
+They require a recent publication date labeled in fetched page content or
+corroborated by matching search metadata and the fetched publisher's dated
+*article* final URL. A bare dated archive path, a conflicting date, or an
+event date in article prose is not a verified publication date. These
 checks improve two observed failure modes but do not certify every sentence
 of an arbitrary web answer.
 
