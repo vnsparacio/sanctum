@@ -8,6 +8,7 @@ import {emitOperational} from './telemetry-client.mjs';
 import {createContentInteractionRecorder} from '../content-telemetry/interaction.mjs';
 import {localToolFamily} from './local-tool-boundary.mjs';
 import {newsSubject,weatherTargetDate} from './source-retrieval.mjs';
+import {calendarWeekIntent} from './calendar-week.mjs';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
@@ -92,7 +93,7 @@ export function createExecutor(base,settings,key){
   });
 }
 
-export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(),observability=createObservability({enabled:false}),emit=emitOperational,contentTelemetry=null}){
+export function createGate({settings,key,execute,retrieve=null,calendarAgenda=null,now=()=>Date.now(),observability=createObservability({enabled:false}),emit=emitOperational,contentTelemetry=null}){
   const sessions=new Map();let active=0;
   const content=createContentInteractionRecorder({spool:contentTelemetry,settings,now});
   const excluded=s=>new Set([...s.excluded,'PRIVATE_80B']);
@@ -210,6 +211,29 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
             s.revision++;job.result=ticket(s,'classify','GEMINI_AUDIT',{...packet,revision:s.revision,semantic_state:{high_stakes:s.state.high_stakes,privacy_floor:'PERSONAL'},disclosed},{contextRound:true});return;
           }
           if(result.urgency==='UNKNOWN'||result.route==='UNAVAILABLE'||result.route==='URGENT_SAFETY')throw Error(FAIL);
+          // A plain owner week-list request is a deterministic local read. Do
+          // not let the 4B choose a search term, rolling window or incomplete
+          // one-page agenda, and never send private Calendar data to web search.
+          const week=calendarWeekIntent(s.prompt,new Date(now()));
+          if(week&&!s.state.high_stakes&&!s.strong&&!s.requested&&!s.media
+            &&result.audit.context_need.answer.prior_context==='NONE'
+            &&result.audit.context_need.answer.attachments==='NONE'){
+            try{
+              if(typeof calendarAgenda!=='function')throw Error('calendar_week_unavailable');
+              const agenda=await calendarAgenda(week,controller.signal);
+              if(!valid())return;
+              if(typeof agenda?.text!=='string'||!agenda.text.trim()||Buffer.byteLength(agenda.text)>32768)throw Error('calendar_week_invalid_answer');
+              s.messages.push({role:'assistant',content:agenda.text});
+              if(s.mode==='shadow')s.shadowRoute=result.route;
+              job.result={text:inertAnswer(agenda.text)+'\n\n[Mac gate · read-only local Calendar agenda]'+(s.mode==='shadow'&&s.shadowRoute?'\n[Shadow quality recommendation: '+s.shadowRoute+']':'')};
+              content.complete(s.interaction,{outcome:'success',failure:null});return;
+            }catch{
+              if(!valid())return;
+              requestOutcome='failure';requestError='CALENDAR_AGENDA_INCOMPLETE';
+              job.result={text:'The local Calendar agenda could not be verified as complete. No partial event list was delivered.'};
+              content.complete(s.interaction,{outcome:'failure',failure:{stage:'ROUTING_SOURCE',category:'RETRIEVAL',code:'CALENDAR_AGENDA_INCOMPLETE'}});return;
+            }
+          }
           let evidencePack=null;
           const source=await observability.withSpan('source_need.classify',{'sanctum.component':'source-first','sanctum.source_need':result.source_decision?.need??'UNKNOWN'},async()=>result.source_decision);
           if(source?.need&&source.need!=='NONE'){

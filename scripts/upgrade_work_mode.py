@@ -65,6 +65,7 @@ FILES = (
     "content-telemetry/delivery.mjs",
     "plugin/index.mjs",
     "plugin/core.mjs",
+    "plugin/calendar-week.mjs",
     "plugin/local-agent.mjs",
     "plugin/local-synthesis.mjs",
     "plugin/local-tool-boundary.mjs",

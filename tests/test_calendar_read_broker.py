@@ -41,6 +41,15 @@ class CalendarReadBrokerTests(unittest.TestCase):
         events = [{"start": {"date": "2026-09-24"}}]
         self.assertEqual(broker.future_events(events, "today", 1), events)
 
+    def test_provider_cap_survives_instant_filter(self):
+        past = [{"startLocal": "2026-09-23T09:00:00-07:00"}] * 18
+        future = [{"startLocal": "2026-09-25T09:00:00-07:00"}] * 2
+        rows, reached = broker.bounded_agenda(
+            past + future, "2026-09-25T00:00:00-07:00", 20, 20
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(reached)
+
     def test_wrapper_raw_cap_is_separate_from_compact_response_cap(self):
         payload = json.dumps([{"description": "x" * (100 * 1024)}])
         with patch.object(

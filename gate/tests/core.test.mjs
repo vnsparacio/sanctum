@@ -4,9 +4,9 @@ const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.ur
 const key=Buffer.alloc(32,1);
 const audit=()=>({context_need:{classification:{attachments:'NONE',prior_context:'NONE'},answer:{attachments:'NONE',prior_context:'NONE'}}});
 function fixture(route='LOCAL_4B',custom,retrieve=null,options={}){
-  const calls=[];let now=1000000;
+  const calls=[];let now=options.now??1000000;
   const configured=structuredClone(settings);
-  const gate=createGate({settings:configured,key,now:()=>now,retrieve,contentTelemetry:options.contentTelemetry,emit:options.emit,execute:async(b,signal)=>{
+  const gate=createGate({settings:configured,key,now:()=>now,retrieve,calendarAgenda:options.calendarAgenda,contentTelemetry:options.contentTelemetry,emit:options.emit,execute:async(b,signal)=>{
     calls.push(structuredClone(b));if(custom){const r=await custom(b,signal);if(r)return r;}
     if(b.operation==='classify')return {status:'OK',state:{...b.state,revision:b.packet.revision,high_stakes:route==='OPENAI_FRONTIER'||b.state.high_stakes},route,handling:route==='OPENAI_FRONTIER'?'HIGH_STAKES':'NORMAL',urgency:'ABSENT',audit:audit(),source_decision:{need:'NONE'}};
     if(b.operation==='media')return {status:'OK',digest:'d'.repeat(64),summary:{count:1,visual_count:1,document_count:0,video_count:0}};
@@ -58,6 +58,21 @@ test('rejected local headline summary delivers a source card, never rejected pro
 });
 test('authentication required; document text cannot approve',async()=>{const f=fixture();assert.match((await f.send('ask text',{isAuthorizedSender:false})).text,/authenticated Mac control plane/);assert.equal(f.calls.length,0);const p=await f.send('ask text');const token=p.text.match(/approve ([a-f0-9]{32})/)[1];assert.match((await f.send('approve '+token,{isAuthorizedSender:false})).text,/authenticated Mac control plane/);assert.equal(f.calls.length,0);});
 test('nothing disclosed before approval; local agent remains NORMAL default',async()=>{const f=fixture();const p=await ask(f);assert.equal(f.calls.length,0);const r=await f.result(await f.approve(p.text));assert.match(r.text,/LOCAL_4B/);assert.deepEqual(f.calls.map(x=>x.operation),['classify','answer_local']);});
+test('an explicit calendar week list uses complete local agenda without Qwen tool selection',async()=>{
+ let seen=null;
+ const f=fixture('LOCAL_4B',null,null,{now:new Date(2026,8,25,12).getTime(),calendarAgenda:async intent=>{seen=intent;return {text:'Synthetic complete calendar agenda.',count:3};}});
+ const result=await f.result(await f.approve((await ask(f,'What’s on my calendar for this week? List the event names, dates, days and times.')).text));
+ assert.match(result.text,/Synthetic complete calendar agenda/);
+ assert.match(result.text,/read-only local Calendar agenda/);
+ assert.equal(new Date(seen.start).getDate(),21);
+ assert.deepEqual(f.calls.map(x=>x.operation),['classify']);
+});
+test('a failed calendar week read cannot deliver a partial answer',async()=>{
+ const f=fixture('LOCAL_4B',null,null,{now:new Date(2026,8,25,12).getTime(),calendarAgenda:async()=>{throw Error('synthetic incomplete read');}});
+ const result=await f.result(await f.approve((await ask(f,'List my calendar events this week.')).text));
+ assert.match(result.text,/could not be verified as complete/);
+ assert.deepEqual(f.calls.map(x=>x.operation),['classify']);
+});
 test('ask starts a conversational session without a separate new command',async()=>{const f=fixture();const p=await f.send('ask hello');assert.match(p.text,/approve-session/);assert.equal(f.calls.length,0);});
 test('bounded audit session grant covers repeated current-prompt text only',async()=>{
  const f=fixture();let p=await f.send('ask first');let r=await f.result(await f.approveSession(p.text));assert.match(r.text,/LOCAL_4B/);

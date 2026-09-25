@@ -7,6 +7,7 @@ import { createLocalAgent } from './local-agent.mjs';
 import { createLocalSynthesis } from './local-synthesis.mjs';
 import {localToolSurface,localToolGuard,observeLocalTool} from './local-tool-boundary.mjs';
 import { createSourceRetrieval } from './source-retrieval.mjs';
+import { createCalendarWeekAgenda,createCalendarBrokerReader } from './calendar-week.mjs';
 import { createWorkCommand } from './work-command.mjs';
 import {boundedShutdown,gatewayObservability} from './observability.mjs';
 import { currentCapabilityManifest } from '../foundation/manifest.mjs';
@@ -39,7 +40,8 @@ export default {
       return body.result?.details??body.result;
     };
     let retrieval=null;
-    const gate=createGate({settings,key,observability,contentTelemetry,execute:(body,signal)=>body.operation==='answer_local'?(body.request?.mode==='synthesis'?synthesis(body,signal):body.request?.mode==='agent'?local(body,signal):{status:'UNAVAILABLE'}):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
+    const calendarAgenda=createCalendarWeekAgenda({readEvents:createCalendarBrokerReader()});
+    const gate=createGate({settings,key,observability,contentTelemetry,calendarAgenda,execute:(body,signal)=>body.operation==='answer_local'?(body.request?.mode==='synthesis'?synthesis(body,signal):body.request?.mode==='agent'?local(body,signal):{status:'UNAVAILABLE'}):remote(body,signal),retrieve:request=>{retrieval??=createSourceRetrieval({manifest:currentCapabilityManifest(),invoke:invokeWeb});return retrieval.retrieve(request);}});
     api.registerCommand({name:'gate',description:'Mac-owned hybrid reasoning with exact disclosure approvals',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:gate});
     const work=createWorkCommand({api,base,settings,key,remote});
     api.registerCommand({name:'work',description:'Owner-selected bounded PRIVATE_LEAD Work Mode',acceptsArgs:true,requireAuth:true,requiredScopes:['operator.admin'],handler:work});
