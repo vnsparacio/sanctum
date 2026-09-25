@@ -10,7 +10,13 @@ const common=new Set(['about','and','are','for','from','has','how','the','this',
 const tokens=value=>(String(value).toLowerCase().match(/[a-z][a-z0-9]{2,}|\b\d{5}\b/g)??[]).filter(x=>!common.has(x));
 const queryScaffolding=new Set(['latest','recent','current','today','tomorrow','headline','headlines','news','documentation','documented','docs','product','official','source','sources','information','find','report','tell','show','give','please']);
 const newsAnswerScaffolding=new Set(['cite','fetched','publication','date','available','its']);
-const newsSubject=query=>[...new Set(tokens(query).filter(x=>!queryScaffolding.has(x)&&!newsAnswerScaffolding.has(x)))].slice(0,6).join(' ');
+export const newsSubject=query=>[...new Set(tokens(query).filter(x=>!queryScaffolding.has(x)&&!newsAnswerScaffolding.has(x)))].slice(0,6).join(' ');
+const fetchedTitle=value=>{
+ if(typeof value!=='string')return null;
+ const wrapped=value.match(/---\s*\n([^\n]+)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT\b/);
+ const title=(wrapped?.[1]??value).replace(/[\x00-\x1f\x7f]/g,' ').trim();
+ return title&&title.length<=512&&!title.includes('<<<')?title:null;
+};
 function fetchedTopicMatch(query,content){
  const terms=[...new Set(tokens(query).filter(x=>!queryScaffolding.has(x)&&(!datedNews(query)||!newsAnswerScaffolding.has(x))))];
  if(!terms.length)return true;
@@ -141,7 +147,8 @@ export function createSourceRetrieval({manifest,invoke,now=nowIso}){
        else if(!zip&&!fetchedTopicMatch(request.query,content)){failures.push('FETCHED_TOPIC_MISMATCH');items.push({...base,finalUrl:final.href,fetchStatus:'REJECTED_IRRELEVANT',truncated,provenance:{capability:'web_fetch'}});continue;}
        const verifiedPublished=news?verifiedPublication(content,final,c.published):c.published;
        if(news&&!fresh(verifiedPublished,now())){failures.push('FRESH_PUBLICATION_UNAVAILABLE');items.push({...base,finalUrl:final.href,fetchStatus:'REJECTED_IRRELEVANT',truncated,provenance:{capability:'web_fetch'}});continue;}
-       usable++;items.push({...base,publishedAt:verifiedPublished,finalUrl:final.href,fetchStatus:truncated?'TRUNCATED':'FETCHED',truncated,fragments:[...base.fragments,{kind:'FETCHED_CONTENT',text:content}],provenance:{capability:'web_fetch'}});}catch(error){const status=error?.message==='redirect'?'REDIRECT_FAILED':error?.message==='extract'?'EXTRACTION_FAILED':'FETCH_FAILED';failures.push(status);items.push({...base,fetchStatus:status});}
+       const title=fetchedTitle(raw?.title);
+       usable++;items.push({...base,title:title??base.title,publishedAt:verifiedPublished,finalUrl:final.href,fetchStatus:truncated?'TRUNCATED':'FETCHED',truncated,fragments:[...base.fragments,{kind:'FETCHED_CONTENT',text:content}],provenance:{capability:'web_fetch',titleSource:title?'web_fetch':'web_search'}});}catch(error){const status=error?.message==='redirect'?'REDIRECT_FAILED':error?.message==='extract'?'EXTRACTION_FAILED':'FETCH_FAILED';failures.push(status);items.push({...base,fetchStatus:status});}
    }
    if(zip&&fetched&&!usable)failures.push(targetDate?'WEATHER_PERIOD_UNAVAILABLE':'WEATHER_FACT_UNAVAILABLE');
    if(zip&&!candidates.length)failures.push('WEATHER_LOCATION_UNVERIFIED');

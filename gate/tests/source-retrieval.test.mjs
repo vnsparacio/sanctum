@@ -199,11 +199,13 @@ test('dated publisher URL and matching search date recover a headline when fetch
  const results=[{url,title:'ExampleAI research announcement',published:'2026-09-24'}];
  const article='ExampleAI announced a research partnership with a university. The collaboration will study model evaluation.';
  const searchQueries=[];
- const invoke=async(name,args)=>{if(name==='web_search'){searchQueries.push(args.query);return {results};}return {url:args.url,finalUrl:args.url,text:article};};
+ const invoke=async(name,args)=>{if(name==='web_search'){searchQueries.push(args.query);return {results};}return {url:args.url,finalUrl:args.url,title:'\n<<<EXTERNAL_UNTRUSTED_CONTENT id="test">>>\nSource: Web Fetch\n---\nExampleAI research announcement\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="test">>>',text:article};};
  const pack=await createSourceRetrieval({manifest,invoke,now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
  assert.deepEqual(searchQueries,['What is the latest headline about exampleai? 2026-09-24','What is the latest headline about exampleai? 2026-09-23']);
  assert.equal(pack.adequacy,'ADEQUATE');
  assert.equal(pack.items[0].publishedAt,'2026-09-24');
+ assert.equal(pack.items[0].title,'ExampleAI research announcement');
+ assert.equal(pack.items[0].provenance.titleSource,'web_fetch');
  const mismatch=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[{...results[0],published:'2026-09-23'}]}:{url:args.url,text:article},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
  assert.equal(mismatch.adequacy,'INADEQUATE');
  const bodyConflict=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results}:{url:args.url,text:article+' Published September 23, 2026.'},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);

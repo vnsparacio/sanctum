@@ -7,7 +7,7 @@ import {createObservability} from './observability.mjs';
 import {emitOperational} from './telemetry-client.mjs';
 import {createContentInteractionRecorder} from '../content-telemetry/interaction.mjs';
 import {localToolFamily} from './local-tool-boundary.mjs';
-import {weatherTargetDate} from './source-retrieval.mjs';
+import {newsSubject,weatherTargetDate} from './source-retrieval.mjs';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const id=()=>randomBytes(16).toString('hex');
@@ -44,6 +44,19 @@ export function sourceExcerpt(view,question){
   if(excerpts.length===2)break;
  }
  return excerpts.length?`\n\nFetched source excerpts (uninterpreted; not a verified model answer):\n${excerpts.join('\n\n')}`:'';
+}
+export function headlineSourceCard(pack,view,question){
+ if(pack?.sourceNeed!=='WEB_REQUIRED'||pack.adequacy!=='ADEQUATE'||!/\b(?:latest|newest|most recent)\b/i.test(question??'')||!/\bheadline\b/i.test(question))return null;
+ const subject=newsSubject(question),terms=subject.split(' ').filter(Boolean);
+ if(!terms.length)return null;
+ const delivered=new Map((view?.items??[]).map(item=>[item.sourceId,item]));
+ const candidates=(pack.items??[]).filter(item=>{
+  const shown=delivered.get(item.sourceId),title=item.title?.toLowerCase()??'';
+  return ['FETCHED','TRUNCATED'].includes(item.fetchStatus)&&item.provenance?.titleSource==='web_fetch'&&/^\d{4}-\d{2}-\d{2}$/.test(item.publishedAt??'')&&shown?.url===(item.finalUrl??item.url)&&shown.fragments?.some(f=>f.kind==='FETCHED_CONTENT')&&terms.some(term=>title.includes(term));
+ }).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+ const item=candidates[0];if(!item)return null;
+ const title=inertAnswer(item.title).replace(/\[/g,'&#91;').replace(/\]/g,'&#93;').replace(/[*_`]/g,'');
+ return `The local summary did not pass grounding checks. A recent dated headline verified in this search is:\n\n“${title}”\n\nPublished ${item.publishedAt}. Source: [${item.sourceId}] ${item.finalUrl??item.url}\n\n[Mac gate · fetched source card; not a model summary]`;
 }
 export const executorDeadlineSeconds=(body,settings)=>body.packet?.experiment
   ?Math.max(0,body.packet.experiment.deadline-Date.now()/1000-120)
@@ -246,7 +259,7 @@ export function createGate({settings,key,execute,retrieve=null,now=()=>Date.now(
   function finishAnswer(s,result,tier,packet={prompt:s.prompt},evidencePack=null,evidenceView=null){
     if(result?.status!=='OK'||typeof result.text!=='string'||!result.text.trim()||Buffer.byteLength(result.text)>32768){const sourceUnavailable=result?.reason==='local_source_unavailable';content.complete(s.interaction,{outcome:'failure',failure:{stage:sourceUnavailable?'ROUTING_SOURCE':'MODEL_PROVIDER',category:'UPSTREAM',code:sourceUnavailable?'LOCAL_SOURCE_UNAVAILABLE':'ANSWER_UNAVAILABLE'}});return {text:sourceUnavailable?'The requested local source did not return usable evidence. No answer from another source was delivered.':`${tier} answering was unavailable. No automatic fallback was used.`};}
     let answer=result.text, escalation=result.escalation;
-    if(evidencePack){let grounded=result.grounded;try{if(!grounded)grounded=JSON.parse(result.text);}catch{content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:'GROUNDING_PARSE_FAILED'}});return {text:`${tier} grounding validation failed. No ungrounded answer was delivered.`+sourceExcerpt(evidenceView,s.prompt)};}const checked=validateGroundedAnswer(grounded,evidencePack,evidenceView,{prompt:s.prompt});if(!checked.ok){content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:checked.code??'GROUNDING_VALIDATION_FAILED'}});return {text:`${tier} grounding validation failed (${checked.code}). No ungrounded answer was delivered.`+sourceExcerpt(evidenceView,s.prompt)};}answer=checked.value.text;escalation=checked.value.escalation;const sources=checked.value.citations.map(c=>`[${c.sourceId}] ${c.url}`);if(sources.length)answer+=`\n\nSources:\n${sources.join('\n')}`;}
+    if(evidencePack){let grounded=result.grounded;try{if(!grounded)grounded=JSON.parse(result.text);}catch{content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:'GROUNDING_PARSE_FAILED'}});return {text:headlineSourceCard(evidencePack,evidenceView,s.prompt)??`${tier} grounding validation failed. No ungrounded answer was delivered.`+sourceExcerpt(evidenceView,s.prompt)};}const checked=validateGroundedAnswer(grounded,evidencePack,evidenceView,{prompt:s.prompt});if(!checked.ok){content.complete(s.interaction,{outcome:'failure',failure:{stage:'VERIFICATION_EVALUATION',category:'VALIDATION',code:checked.code??'GROUNDING_VALIDATION_FAILED'}});return {text:headlineSourceCard(evidencePack,evidenceView,s.prompt)??`${tier} grounding validation failed (${checked.code}). No ungrounded answer was delivered.`+sourceExcerpt(evidenceView,s.prompt)};}answer=checked.value.text;escalation=checked.value.escalation;const sources=checked.value.citations.map(c=>`[${c.sourceId}] ${c.url}`);if(sources.length)answer+=`\n\nSources:\n${sources.join('\n')}`;}
     s.messages.push({role:'assistant',content:answer});
     let text=inertAnswer(answer)+`\n\n[Mac gate · ${tier} · ${tier==='LOCAL_4B'?'existing local tool permissions':'reasoning only; no tools'}]`;
     if(s.mode==='shadow'&&s.shadowRoute)text+=`\n[Shadow quality recommendation: ${s.shadowRoute}]`;

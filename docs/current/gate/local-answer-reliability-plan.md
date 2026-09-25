@@ -109,8 +109,15 @@ event dates into a long summary, so the host rejected it rather than treating
 any event date as publication evidence. The labeled source fallback now
 suppresses retrieval-warning boilerplate, selects a subject-relevant excerpt,
 and shows the verified publication date. This is a useful partial result, not
-a passing headline answer. Broader requalification remains required before
-this follow-up can merge.
+a passing headline answer. A further candidate now renders a deterministic
+source card from the fetched publisher title and corroborated date when a
+local latest-headline summary fails validation. It does not claim global
+recency or forward the rejected summary. The saved-WebUI test returned a
+fetched Fortune headline with its corroborated September 24 publication date
+and source link, labeled as a source card after local summary validation
+failed. This qualifies that source-card canary, not general claim-level
+synthesis or arbitrary questions.
+Broader requalification remains required before this follow-up can merge.
 
 After review and owner merge, deploy only through the stopped-stack
 Source-First amendment and `make doctor`. Then run fresh saved-WebUI-chat

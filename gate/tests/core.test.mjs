@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute,executorDeadlineSeconds,ORDINARY_EXECUTOR_DEADLINE_SECONDS,sourceExcerpt} from '../plugin/core.mjs';import {prepareContentTelemetryRecord} from '../content-telemetry/contract.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createGate,inertAnswer,eligibleRoute,executorDeadlineSeconds,ORDINARY_EXECUTOR_DEADLINE_SECONDS,sourceExcerpt,headlineSourceCard} from '../plugin/core.mjs';import {prepareContentTelemetryRecord} from '../content-telemetry/contract.mjs';
 import {createEvidencePack} from '../foundation/evidence.mjs';
 const settings=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url)));settings.gpu.enabled=true; // Explicit legacy opt-in must not revive retirement.
 const key=Buffer.alloc(32,1);
@@ -30,6 +30,25 @@ test('fallback excerpt prefers subject facts over fetched-content warning boiler
  const excerpt=sourceExcerpt(view,'What is the latest headline about OpenAI? Cite the fetched source and publication date.');
  assert.match(excerpt,/Published 2026-09-24\. OpenAI announced a new research partnership/);
  assert.doesNotMatch(excerpt,/SECURITY NOTICE|DO NOT/);
+});
+test('headline source card quotes only delivered fetched title with verified date',()=>{
+ const url='https://news.example.test/2026/09/24/exampleai-story';
+ const item={sourceId:'s1',url,finalUrl:url,title:'ExampleAI announces research results',sourceClass:'REPUTABLE_SECONDARY',publishedAt:'2026-09-24',retrievedAt:'2026-09-24T20:00:00Z',fetchStatus:'FETCHED',fragments:[{kind:'FETCHED_CONTENT',text:'ExampleAI announced new research results.'}],truncated:false,untrusted:true,provenance:{capability:'web_fetch',titleSource:'web_fetch'}};
+ const pack=createEvidencePack({requestDigest:'c'.repeat(64),scope:'a'.repeat(32),revision:0,sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],items:[item],adequacy:'ADEQUATE',budget:{candidates:1,fetched:1,chars:42}});
+ const view={items:[{sourceId:'s1',url,publishedAt:'2026-09-24',fragments:[{kind:'FETCHED_CONTENT',text:'ExampleAI announced new research results.'}]}]};
+ const prompt='What is the latest headline about ExampleAI? Give its publication date.';
+ assert.match(headlineSourceCard(pack,view,prompt),/ExampleAI announces research results[\s\S]*Published 2026-09-24/);
+ assert.equal(headlineSourceCard(pack,{items:[]},prompt),null);
+ assert.equal(headlineSourceCard(createEvidencePack({...pack,items:[{...item,provenance:{capability:'web_fetch',titleSource:'web_search'}}]}),view,prompt),null);
+ assert.equal(headlineSourceCard(pack,view,'Summarize ExampleAI'),null);
+});
+test('rejected local headline summary delivers a source card, never rejected prose',async()=>{
+ const url='https://news.example.test/2026/09/24/exampleai-story',prompt='What is the latest headline about ExampleAI? Give its publication date.';
+ const f=fixture('LOCAL_4B',async b=>b.operation==='classify'?sourcedClassification(b):b.operation==='answer_local'?{status:'OK',text:JSON.stringify({kind:'GROUNDED_FINAL',text:'Wrong publication date: September 23, 2026.',grounding:'GROUNDED',citations:[{sourceId:'s1',url}],inferences:[],missingReasons:[],escalation:'NONE'})}:null,async request=>createEvidencePack({requestDigest:request.requestDigest,scope:request.scope,revision:request.revision,sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],items:[{sourceId:'s1',url,finalUrl:url,title:'ExampleAI announces research results',sourceClass:'REPUTABLE_SECONDARY',publishedAt:'2026-09-24',retrievedAt:'2026-09-24T20:00:00Z',fetchStatus:'FETCHED',fragments:[{kind:'FETCHED_CONTENT',text:'ExampleAI announced new research results.'}],truncated:false,untrusted:true,provenance:{capability:'web_fetch',titleSource:'web_fetch'}}],adequacy:'ADEQUATE',budget:{candidates:1,fetched:1,chars:42}}));
+ const result=await f.result(await f.approve((await ask(f,prompt)).text));
+ assert.match(result.text,/fetched source card/);
+ assert.match(result.text,/Published 2026-09-24/);
+ assert.doesNotMatch(result.text,/Wrong publication date/);
 });
 test('authentication required; document text cannot approve',async()=>{const f=fixture();assert.match((await f.send('ask text',{isAuthorizedSender:false})).text,/authenticated Mac control plane/);assert.equal(f.calls.length,0);const p=await f.send('ask text');const token=p.text.match(/approve ([a-f0-9]{32})/)[1];assert.match((await f.send('approve '+token,{isAuthorizedSender:false})).text,/authenticated Mac control plane/);assert.equal(f.calls.length,0);});
 test('nothing disclosed before approval; local agent remains NORMAL default',async()=>{const f=fixture();const p=await ask(f);assert.equal(f.calls.length,0);const r=await f.result(await f.approve(p.text));assert.match(r.text,/LOCAL_4B/);assert.deepEqual(f.calls.map(x=>x.operation),['classify','answer_local']);});

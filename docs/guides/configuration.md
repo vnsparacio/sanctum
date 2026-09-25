@@ -114,10 +114,14 @@ prose is not a verified publication date. These
 checks improve two observed failure modes but do not certify every sentence
 of an arbitrary web answer.
 
-A failed answer may show labeled, subject-relevant source excerpts and verified
-publication dates, but the rejected model prose is never presented as an
-answer. The Mac does not rewrite model-authored dates or use a correct source
-date to launder an otherwise unsupported summary.
+If a latest-headline summary fails grounding, a fetched publisher title with
+a corroborated date may be shown as a source card. This card says it is a
+recent dated result found in the bounded search, not the globally newest
+headline or a verified model summary. It requires a delivered fetched page,
+fetched title, subject match and verified date; otherwise the gate shows
+labeled source excerpts. Rejected model prose is never presented as an answer.
+The Mac does not rewrite model-authored dates or use a correct source date to
+launder an otherwise unsupported summary.
 
 For a fetched source that supports only part of a request, the answer prompts require a cited answer for supported facts and an explicit statement that an omitted field is not stated. `GROUNDED` describes support for claims actually made, not completeness of requested fields; the response still records `EVIDENCE_GAP`. Neither local nor hosted reasoning may infer a precipitation probability or no-rain claim merely from sunny conditions. The citation and `WEB_REQUIRED` validation rules are unchanged.
 
