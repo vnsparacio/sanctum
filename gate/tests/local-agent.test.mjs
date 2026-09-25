@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter,LOCAL_AGENT_TIMEOUT_MS } from '../plugin/local-agent.mjs';
-import {beginLocalToolRun,endLocalToolRun,localToolFamily,localToolGuard,localToolSurface,observeLocalTool} from '../plugin/local-tool-boundary.mjs';
+import { buildLocalRequest,createLocalAgent,createLocalReasonerAdapter,normalizeWeekdayLabels,LOCAL_AGENT_TIMEOUT_MS } from '../plugin/local-agent.mjs';
+import {beginLocalToolRun,endLocalToolRun,localSessionKey,localToolFamily,localToolGuard,localToolSurface,observeLocalTool} from '../plugin/local-tool-boundary.mjs';
 const model='local4b';
 const answerTokens=JSON.parse(readFileSync(new URL('../SETTINGS.json',import.meta.url),'utf8')).max_answer_tokens;
 const config={agents:{ownership:'explicit',defaults:{model:{primary:'mlx-local/'+model},systemAgent:{agentId:'main'}},entries:{main:{thinkingDefault:'off',params:{chat_template_kwargs:{enable_thinking:false}}},'workmode-broker':{}}},models:{providers:{'mlx-local':{baseUrl:'http://127.0.0.1:8080/v1',models:[{id:model,contextWindow:24576,maxTokens:4096}]}}},gateway:{bind:'loopback',port:18789,auth:{mode:'token',token:'synthetic-only'},http:{endpoints:{chatCompletions:{enabled:true}}}}};
@@ -35,10 +35,36 @@ test('explicit personal source requests narrow both submitted and executable too
  assert.equal(localToolFamily('How do I use Gmail?'),null);
  assert.equal(localToolFamily('What is my latest email and text message?'),'mixed');
  assert.equal(localToolFamily('Read the text of my latest email'),'gmail');
+ assert.equal(localToolFamily('What is my next event?'),'calendar');
+ assert.equal(localToolFamily('Read my email about an event'),'gmail');
  const evidence=structuredClone(body);evidence.request.messages.at(-1).content+='\nSOURCE-FIRST EVIDENCE';
  const key=buildLocalRequest(evidence,config,model,answerTokens).headers['x-openclaw-session-key'];
  assert.deepEqual(localToolSurface(null,{sessionKey:key}),{toolsAllow:[]});
  assert.equal(localToolGuard({toolName:'web_search'},{sessionKey:key}).block,true);
+});
+test('unconstrained next-calendar calls use an unfiltered future Mac-owned agenda',()=>{
+ const key=localSessionKey('a'.repeat(32),'calendar');
+ beginLocalToolRun(key,"What's next on my calendar?");
+ assert.deepEqual(localToolSurface(null,{sessionKey:key}),{toolsAllow:['calendar_events']});
+ const before=Date.now();
+ const rewrite=localToolGuard({toolName:'calendar_events',params:{calendar:'personal',query:'invented',from:'today',to:'tomorrow',days:1,limit:1}},{sessionKey:key});
+ const after=Date.now();
+ assert.ok(Date.parse(rewrite.params.from)>=before&&Date.parse(rewrite.params.from)<=after);
+ assert.equal(rewrite.params.days,90);
+ assert.equal(rewrite.params.calendar,'all');
+ assert.equal(rewrite.params.limit,1);
+ assert.equal(rewrite.params.to,undefined);
+ assert.equal(rewrite.params.query,undefined);
+ assert.equal(localToolGuard({toolName:'calendar_search',params:{query:'synthetic'}},{sessionKey:key}).block,true);
+ endLocalToolRun(key);
+ beginLocalToolRun(key,'What is on my calendar tomorrow?');
+ assert.equal(localToolGuard({toolName:'calendar_events',params:{from:'tomorrow'}},{sessionKey:key}),undefined);
+ endLocalToolRun(key);
+});
+test('personal answer weekday labels agree with full calendar dates',()=>{
+ assert.equal(normalizeWeekdayLabels('Tuesday, September 24, 2026'),'Thursday, September 24, 2026');
+ assert.equal(normalizeWeekdayLabels('Friday, September 25, 2026'),'Friday, September 25, 2026');
+ assert.equal(normalizeWeekdayLabels('Tuesday, February 30, 2026'),'Tuesday, February 30, 2026');
 });
 test('personal-source answer is suppressed unless its requested tool succeeds',async()=>{
  const mail=structuredClone(body);mail.request.messages.at(-1).content='What is my most recent email?';

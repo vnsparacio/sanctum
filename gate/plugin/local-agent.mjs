@@ -44,6 +44,21 @@ export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
 // deadline instead of racing the native request during a long local prefill.
 export const LOCAL_AGENT_TIMEOUT_MS=240000;
 
+const WEEKDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const LABELED_DATE=new RegExp(`\\b(${WEEKDAYS.join('|')}),?\\s+(${MONTHS.join('|')})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`,'gi');
+
+// A weekday is a deterministic property of the stated calendar date. Correct
+// this narrow self-contradiction without asking a 4B model to recalculate it.
+export function normalizeWeekdayLabels(text){
+  return text.replace(LABELED_DATE,(match,_weekday,month,day,year)=>{
+    const index=MONTHS.findIndex(x=>x.toLowerCase()===month.toLowerCase());
+    const instant=new Date(Date.UTC(Number(year),index,Number(day)));
+    if(instant.getUTCFullYear()!==Number(year)||instant.getUTCMonth()!==index||instant.getUTCDate()!==Number(day))return match;
+    return match.replace(/^\w+/,WEEKDAYS[instant.getUTCDay()]);
+  });
+}
+
 export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=LOCAL_AGENT_TIMEOUT_MS}) {
   return async(body,signal)=>{
     let abort, timer, sessionKey=null;
@@ -52,7 +67,7 @@ export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl
       if(signal.aborted)return {status:'UNAVAILABLE'};
       const request=buildLocalRequest(body,getConfig(),localModel,maxAnswerTokens);
       sessionKey=request.headers['x-openclaw-session-key'];
-      beginLocalToolRun(sessionKey);
+      beginLocalToolRun(sessionKey,request.payload.messages[0].content);
       abort=()=>controller.abort();signal.addEventListener('abort',abort,{once:true});
       timer=setTimeout(abort,timeoutMs);
       const response=await fetchImpl(request.url,{method:'POST',headers:request.headers,
@@ -67,7 +82,8 @@ export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl
       if(typeof text!=='string' || !text.trim() || Buffer.byteLength(text)>32768 || controller.signal.aborted)throw Error('invalid_answer');
       if(!endLocalToolRun(sessionKey)){sessionKey=null;return {status:'UNAVAILABLE',reason:'local_source_unavailable'};}
       sessionKey=null;
-      return {status:'OK',text};
+      const family=localToolFamily(request.payload.messages[0].content);
+      return {status:'OK',text:family&&family!=='evidence'?normalizeWeekdayLabels(text):text};
     }catch{return {status:'UNAVAILABLE'};}
     finally{if(sessionKey)endLocalToolRun(sessionKey);clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
   };

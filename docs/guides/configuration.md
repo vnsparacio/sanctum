@@ -99,9 +99,44 @@ The supported amendment schema also accepts `notes_dir`: an existing absolute di
 
 For current public requests, Source-First keeps a public `today` cue in its minimized search query. A single ZIP explicitly supplied for a non-private weather request is retained as the requested location; unrelated numeric identifiers and ZIPs in private context remain omitted. Current-day ZIP weather searches use a short location/forecast query so surrounding instructions cannot dilute retrieval. For that weather case, candidates must identify the ZIP, authoritative forecast pages are tried first, and fetched content must contain a concrete numeric weather condition before evidence is marked adequate. Search/fetch success or generic mentions of forecasting do not suffice: the Mac gate requires a grounded, delivered citation for `WEB_REQUIRED` requests and refuses an unsupported forecast.
 
+For an explicit calendar-date ZIP forecast, the gate accepts fetched evidence
+only from the matching daytime period of a National Weather Service forecast
+page; if that period cannot be isolated, it refuses to assert a forecast. The
+local answer validator also rejects numbers and sky conditions absent from
+the selected period. "Latest headline" requests start with two public
+date-focused searches (current UTC day and previous day), and may use one
+publisher-constrained search plus one exact-article-title search if those
+results lack corroborated fresh article evidence. They merge at most six
+ranked candidates and still fetch at most three pages. A publisher article
+whose title omits the publisher name can be selected by its matching hostname.
+They require a recent publication date labeled in fetched page content or
+corroborated by matching search metadata and the fetched publisher's dated
+*article* final URL. A bare dated archive path, a conflicting date, or an
+event date in article prose is not a verified publication date. These
+checks improve two observed failure modes but do not certify every sentence
+of an arbitrary web answer.
+
+If a latest-headline summary fails grounding, a fetched publisher title with
+a corroborated date may be shown as a source card. This card says it is a
+recent dated result found in the bounded search, not the globally newest
+headline or a verified model summary. It requires a delivered fetched page,
+fetched title, subject match and verified date; otherwise the gate shows
+labeled source excerpts. Rejected model prose is never presented as an answer.
+The Mac does not rewrite model-authored dates or use a correct source date to
+launder an otherwise unsupported summary.
+
 For a fetched source that supports only part of a request, the answer prompts require a cited answer for supported facts and an explicit statement that an omitted field is not stated. `GROUNDED` describes support for claims actually made, not completeness of requested fields; the response still records `EVIDENCE_GAP`. Neither local nor hosted reasoning may infer a precipitation probability or no-rain claim merely from sunny conditions. The citation and `WEB_REQUIRED` validation rules are unchanged.
 
 The gate's local-agent handoff narrows the per-turn OpenClaw tool surface for explicit Gmail, Messages, and Calendar requests to the requested source family. A second pre-tool guard blocks a wrong-family call, and no personal-source answer is delivered without a successful requested-family tool call. The Source-First evidence answer has no optional local tools. These restrictions do not grant new capabilities or replace owner permissions.
+
+Tool-free local answers now use a fresh request to the same pinned, already
+running MLX model. They carry no OpenClaw session history or tool schemas.
+Explicit personal-source, local-tool and retained-context requests still use
+the OpenClaw agent. The direct local route does not start another model server
+or authorize a provider fallback. It does not make the model's factual claims
+independently verified; see the
+[local answer reliability plan](../current/gate/local-answer-reliability-plan.md)
+for live probe limits and post-merge acceptance.
 
 Messages search accepts `from:+E164` (or a bare exact `+E164` number) for a bounded, read-only history of inbound messages from that sender across chats. It does not treat a participant in a group chat as the sender, infer a contact identity, scan message bodies for a phone number, or broaden a failed lookup. The default is ten messages and the maximum is twelve. Text is capped per message; missing or truncated text is identified rather than inferred. This path reads the local Messages database through the existing user-only broker and still requires the Mac's Messages permission. A reviewed source update to this broker and plugin requires a stopped-stack restart; it is not a private contact-mapping amendment.
 

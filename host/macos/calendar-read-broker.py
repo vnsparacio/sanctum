@@ -20,6 +20,7 @@ import socketserver
 import subprocess
 import sys
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ SOCKET_PATH = (
 )
 
 MAX_RESPONSE_BYTES = 96 * 1024
+MAX_WRAPPER_BYTES = 256 * 1024
 SUBPROCESS_TIMEOUT = 20
 
 os.umask(0o077)
@@ -90,7 +92,7 @@ def run_wrapper(args: list[str]) -> Any:
         raise RuntimeError(f"calendar wrapper failed rc={proc.returncode}")
 
     encoded = proc.stdout.encode("utf-8", errors="replace")
-    if len(encoded) > MAX_RESPONSE_BYTES:
+    if len(encoded) > MAX_WRAPPER_BYTES:
         raise RuntimeError("calendar response exceeded size cap")
 
     try:
@@ -150,25 +152,68 @@ def event_time(item: dict[str, Any], side: str) -> Any:
     return value
 
 
+def event_start_instant(item: Any) -> datetime | None:
+    if not isinstance(item, dict):
+        return None
+    value = event_time(item, "start")
+    if not isinstance(value, str):
+        return None
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if instant.tzinfo is None:
+            instant = instant.astimezone()
+        return instant
+    except ValueError:
+        return None
+
+
+def future_events(values: list[Any], from_value: str, limit: int) -> list[Any]:
+    # Only an explicit instant, not a relative or date-only window, triggers
+    # next-event filtering. gog can include already-started or overlapping items.
+    if "T" not in from_value:
+        return values[:limit]
+    try:
+        cutoff = datetime.fromisoformat(from_value.replace("Z", "+00:00"))
+        if cutoff.tzinfo is None:
+            return values[:limit]
+    except ValueError:
+        return values[:limit]
+    dated = [
+        (start, item)
+        for item in values
+        if (start := event_start_instant(item)) and start >= cutoff
+    ]
+    dated.sort(key=lambda pair: pair[0])
+    return [item for _, item in dated[:limit]]
+
+
 def compact_event(item: Any) -> dict[str, Any]:
     if not isinstance(item, dict):
         return {"value": str(item)[:1000]}
 
     attendees = item.get("attendees")
     attendee_count = len(attendees) if isinstance(attendees, list) else None
+    start = event_time(item, "start")
+    # A date-only Calendar start is all-day even if no explicit flag is supplied.
+    date_only = (
+        isinstance(start, str)
+        and len(start) == 10
+        and start[4] == "-"
+        and start[7] == "-"
+    )
 
     out = {
         "calendarId": pick(item, "calendarId", "calendar_id", "calendar"),
         "id": pick(item, "id", "eventId"),
         "summary": pick(item, "summary", "title"),
-        "start": event_time(item, "start"),
+        "start": start,
         "end": event_time(item, "end"),
         "startDayOfWeek": pick(item, "startDayOfWeek"),
         "endDayOfWeek": pick(item, "endDayOfWeek"),
         "timeZone": pick(item, "timezone", "timeZone", "eventTimezone"),
         "location": pick(item, "location"),
         "status": pick(item, "status"),
-        "allDay": pick(item, "allDay"),
+        "allDay": True if date_only else pick(item, "allDay"),
         "attendeeCount": attendee_count,
     }
     return {k: v for k, v in out.items() if v is not None}
@@ -292,6 +337,7 @@ class Handler(BaseHTTPRequestHandler):
                 if parsed.path == "/search":
                     query = bounded_text(first(qs, "q"), "", 200, required=True)
 
+                provider_limit = 20 if "T" in from_value else limit
                 payload = primary(
                     run_wrapper(
                         [
@@ -300,12 +346,13 @@ class Handler(BaseHTTPRequestHandler):
                             from_value,
                             to_value,
                             str(days),
-                            str(limit),
+                            str(provider_limit),
                             query,
                         ]
                     )
                 )
                 values = payload if isinstance(payload, list) else [payload]
+                values = future_events(values, from_value, limit)
                 self.send_json(
                     200,
                     {
@@ -313,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                         "untrusted": True,
                         "source": "google_calendar",
                         "content_is_untrusted": True,
-                        "data": [compact_event(v) for v in values[:limit]],
+                        "data": [compact_event(v) for v in values],
                     },
                 )
                 return
