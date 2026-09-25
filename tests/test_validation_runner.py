@@ -115,6 +115,29 @@ class HostValidationRunnerTests(unittest.TestCase):
         self.assertNotIn("LINEAR_API_KEY", self.runner._environment("TTE-14"))
         self.assertNotIn("GH_TOKEN", self.runner._environment("TTE-14"))
 
+    def test_dependency_caches_are_shared_without_sharing_issue_home(self):
+        first = self.runner._environment("TTE-14")
+        second = self.runner._environment("TTE-15")
+
+        self.assertNotEqual(first["HOME"], second["HOME"])
+        self.assertNotEqual(first["XDG_CACHE_HOME"], second["XDG_CACHE_HOME"])
+        shared_cache = self.validation_state / "cache"
+        expected = {
+            "NPM_CONFIG_CACHE": shared_cache / "npm",
+            "UV_CACHE_DIR": shared_cache / "uv",
+            "UV_PYTHON_INSTALL_DIR": shared_cache / "uv-python",
+        }
+        for name, path in expected.items():
+            self.assertEqual(str(path), first[name])
+            self.assertEqual(first[name], second[name])
+            self.assertTrue(path.is_dir())
+            self.assertEqual(0o700, path.stat().st_mode & 0o777)
+
+        for environment in (first, second):
+            home = Path(environment["HOME"])
+            self.assertTrue(home.is_relative_to(self.validation_state / "runtime"))
+            self.assertFalse(shared_cache.is_relative_to(home))
+
     def test_failed_process_inspection_preflight_stops_before_expensive_validation(
         self,
     ):
