@@ -49,15 +49,19 @@ The resumable setup runner installs source dependencies when needed, creates
 the isolated private prefix, installs the pinned MLX and Open WebUI runtimes,
 and downloads the pinned local model only when it is absent. `start` supervises
 MLX, the gateway, every configured broker and WebUI behind one command. Use
-`./sanctum status --prefix ...` and `./sanctum stop --prefix ...` for inspection
-and clean shutdown. Credentials, Google OAuth, macOS privacy grants and first
-WebUI enrollment remain explicit owner checkpoints. The [end-to-end
+`./sanctum status --prefix ...`, `./sanctum ready --prefix ...` and
+`./sanctum stop --prefix ...` for service inspection, end-to-end setup
+readiness and clean shutdown. Startup safely quarantines exact owner-controlled
+broker sockets only after proving they have no listener. Credentials, Google
+OAuth, macOS privacy grants and first WebUI enrollment remain explicit owner
+checkpoints. The [end-to-end
 quickstart](docs/guides/quickstart.md) covers optional integrations, model
 selection and those one-time checkpoints.
 
 `--prefix` defaults to `$SANCTUM_PREFIX` when set, otherwise to
 `$HOME/.local/share/sanctum-v1`. Exporting `SANCTUM_PREFIX` once makes routine
-operation simply `./sanctum start`, `./sanctum status` and `./sanctum stop`.
+operation simply `./sanctum start`, `./sanctum ready`, `./sanctum status` and
+`./sanctum stop`.
 
 ## How it works
 

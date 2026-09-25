@@ -336,6 +336,8 @@ def main():
 
     try:
         server.serve_forever()
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()
 

@@ -2,7 +2,7 @@
 
 `./sanctum setup` creates isolated configuration, installs the host runtimes and
 prepares the pinned local model without starting services. `./sanctum start`,
-`status`, `logs` and `stop` are the normal whole-stack interface. The existing
+`status`, `ready`, `logs` and `stop` are the normal whole-stack interface. The existing
 `make doctor`, gateway-only `make up|down` and `scripts/component.py` interfaces
 remain available for diagnosis and upgrades. Do not mix gateway-only or
 foreground starts with an already managed stack.
@@ -16,6 +16,7 @@ Always pass the same private prefix:
 ```sh
 ./sanctum start --prefix /absolute/private/prefix
 ./sanctum status --prefix /absolute/private/prefix
+./sanctum ready --prefix /absolute/private/prefix
 ```
 
 The detached supervisor starts MLX first and checks the exact model identity,
@@ -23,6 +24,12 @@ then starts the gateway, configured broker group and WebUI. It records its own
 identity and every child PID/command in `state/stack-process.json`, writes
 separate private logs and reports a failed phase if a component exits. An
 occupied port or a separately managed gateway is refused rather than adopted.
+Before launching the broker group, the runner inspects only the exact selected
+broker socket paths. An owner-controlled socket that is old and refuses two
+connection attempts is atomically moved into a mode-0700
+`state/amendments/stale-broker-sockets-*` recovery directory. A live listener,
+new socket, non-socket path, changed inode or unsafe ownership/mode is refused
+for manual inspection. Brokers also remove their own sockets on clean exit.
 Use an individual component only for focused diagnosis after the managed stack
 is stopped.
 
@@ -64,11 +71,24 @@ files, while `stale`, `missing`, `inactive`, `unsafe`, or `unavailable`
 requires owner inspection and re-import rather than silent database
 replacement.
 
+`./sanctum ready --prefix ...` combines the service report with privacy-safe
+readiness metadata for the WebUI owner, imported guard/pipe, configured brokers,
+Google OAuth, web search and optional hosted models. It does not read personal
+messages or account content, auto-grant macOS permissions, modify the WebUI
+database or select a model for the owner. A `ready` result means required
+services, imported functions and configured credentials are present; the report
+still reminds the owner about Messages Full Disk Access and the per-chat **Mac
+prompt gate** selection.
+
 The WebUI bridge waits beyond the gate's bounded local execution deadline before it closes its authenticated loopback connection. This prevents the UI transport from cancelling a still-valid MLX request; the gate and model deadlines remain bounded and no request is automatically replayed.
 
 After disk recovery, the uniquely named test janitor executed an offline sweep and another after restart. It was loaded and confirmed active before the approved GPU test, and remained available until provider-side deletion and zero leases were confirmed. Only then was it unloaded and its exact test plist removed. The earlier xpcproxy failure is retained as historical evidence. Repeat this validation for a new deployment; no production service was replaced.
 
-An interrupted foreground broker can leave a stale Unix socket. Inspect its owner and confirm no listener remains before removing that exact socket. Do not delete a socket merely because a new launch failed, and never use a broad process-name kill.
+An interrupted foreground broker can leave a stale Unix socket. Normal managed
+startup now performs the bounded exact-path recovery described above and
+preserves the socket as rollback evidence. If it refuses recovery, inspect that
+exact path and listener; do not delete a socket merely because launch failed,
+and never use a broad process-name kill.
 
 ## Content telemetry delivery deployment
 

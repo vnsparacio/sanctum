@@ -42,7 +42,10 @@ def selected_brokers(prefix):
 def stop_children(children):
     for child in children:
         if child.poll() is None:
-            child.terminate()
+            # Let Python brokers run their socket-cleanup finally blocks. SIGTERM's
+            # default action exits immediately and was the source of routine stale
+            # socket files after an otherwise clean managed shutdown.
+            child.send_signal(signal.SIGINT)
     deadline = time.monotonic() + 5
     for child in children:
         if child.poll() is not None:

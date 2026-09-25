@@ -91,6 +91,7 @@ its health endpoint behind one owner-scoped supervisor:
 ```sh
 ./sanctum start --prefix /absolute/private/prefix
 ./sanctum status --prefix /absolute/private/prefix
+./sanctum ready --prefix /absolute/private/prefix
 ```
 
 The runner refuses to adopt an occupied port, a separately managed gateway or
@@ -99,6 +100,11 @@ a stale supervisor identity. Logs are split into `logs/stack.log`, `mlx.log`,
 `scripts/component.py` commands remain supported for focused diagnosis, but do
 not mix them with a managed stack. Component health establishes loopback
 identity and readiness, not a successful end-to-end answer.
+
+`ready` adds privacy-safe WebUI enrollment, imported-function and configured
+integration checks to the component health report. It does not inspect personal
+content or silently change macOS permissions, OAuth state, the WebUI database or
+the per-chat model selection.
 
 ## Install or upgrade Work Mode
 

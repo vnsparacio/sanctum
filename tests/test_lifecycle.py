@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import signal
 import socket
 import sys
 import tempfile
@@ -53,6 +54,67 @@ class Lifecycle(unittest.TestCase):
         self.assertTrue(lifecycle.broker_ready(self.prefix, "files"))
         thread.join(timeout=2)
         self.assertFalse(thread.is_alive())
+
+    def test_stale_broker_socket_is_moved_to_private_recovery(self):
+        cache = self.prefix / "cache"
+        cache.mkdir()
+        path = lifecycle.broker_socket(self.prefix, "files")
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(path))
+        server.close()
+        path.chmod(0o600)
+        old = lifecycle.time.time() - 10
+        os.utime(path, (old, old))
+        with (
+            patch.object(
+                lifecycle.component_tools,
+                "selected_brokers",
+                return_value=["files"],
+            ),
+            patch.object(lifecycle.time, "sleep"),
+        ):
+            recovery = lifecycle.recover_stale_broker_sockets(self.prefix)
+        self.assertFalse(path.exists())
+        self.assertTrue((recovery / path.name).exists())
+        self.assertEqual(recovery.stat().st_mode & 0o777, 0o700)
+
+    def test_live_broker_socket_is_never_adopted_or_moved(self):
+        cache = self.prefix / "cache"
+        cache.mkdir()
+        path = lifecycle.broker_socket(self.prefix, "files")
+        server = socket.socket(socket.AF_UNIX)
+        self.addCleanup(server.close)
+        server.bind(str(path))
+        server.listen(1)
+        path.chmod(0o600)
+        with patch.object(
+            lifecycle.component_tools,
+            "selected_brokers",
+            return_value=["files"],
+        ):
+            with self.assertRaisesRegex(ValueError, "live listener"):
+                lifecycle.recover_stale_broker_sockets(self.prefix)
+        self.assertTrue(path.exists())
+
+    def test_non_socket_broker_path_requires_manual_inspection(self):
+        cache = self.prefix / "cache"
+        cache.mkdir()
+        path = lifecycle.broker_socket(self.prefix, "files")
+        path.write_text("synthetic\n")
+        with patch.object(
+            lifecycle.component_tools,
+            "selected_brokers",
+            return_value=["files"],
+        ):
+            with self.assertRaisesRegex(ValueError, "not a socket"):
+                lifecycle.recover_stale_broker_sockets(self.prefix)
+
+    def test_broker_group_uses_interrupt_for_socket_cleanup(self):
+        child = Mock()
+        child.poll.side_effect = [None, 0, 0]
+        lifecycle.component_tools.stop_children([child])
+        child.send_signal.assert_called_once_with(signal.SIGINT)
+        child.terminate.assert_not_called()
 
     def test_authorization_checks_use_metadata_without_returning_secrets(self):
         account = self.prefix / "config/gmail-read/account"
@@ -177,10 +239,23 @@ class Lifecycle(unittest.TestCase):
             patch.object(lifecycle.op, "process_record", return_value=None),
             patch.object(lifecycle.op, "owns_process", return_value=False),
             patch.object(lifecycle, "tcp_ready", return_value=False),
+            patch.object(
+                lifecycle, "recover_stale_broker_sockets", return_value=None
+            ) as recover,
             patch.object(lifecycle, "http_ready", return_value=True),
+            patch.object(
+                lifecycle,
+                "readiness_report",
+                return_value={
+                    "readiness": "ready",
+                    "next_actions": [],
+                    "owner_checks": [],
+                },
+            ),
             patch.object(lifecycle.subprocess, "Popen", return_value=process) as popen,
         ):
             lifecycle.start(self.prefix)
+        recover.assert_called_once_with(self.prefix)
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         command = popen.call_args.args[0]
         self.assertIn("_supervise", command)
@@ -348,6 +423,50 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(report["supervisor"], "current")
         self.assertEqual(report["brokers"], {"messages": True, "files": True})
         self.assertTrue(report["webui"])
+
+    def test_readiness_reports_owner_actions_without_exposing_credentials(self):
+        services = {
+            "supervisor": "current",
+            "phase": "ready",
+            "mlx": True,
+            "gateway": True,
+            "brokers": {"messages": True, "gmail": True, "files": True},
+            "webui": True,
+            "url": "http://127.0.0.1:28000",
+        }
+        enabled = {"messages": True, "gmail": True, "calendar": False}
+        with (
+            patch.object(lifecycle, "service_status", return_value=services),
+            patch.object(lifecycle, "webui_owner_enrollment", return_value="pass"),
+            patch.object(lifecycle.op, "webui_function_sync", return_value="pass"),
+            patch.object(
+                lifecycle.component_tools,
+                "integration_enabled",
+                side_effect=lambda _prefix, name: enabled[name],
+            ),
+            patch.object(
+                lifecycle, "google_authorized", side_effect=lambda _prefix, name: False
+            ),
+            patch.object(lifecycle, "web_enabled", return_value=True),
+            patch.object(lifecycle, "web_authorized", return_value=True),
+            patch.object(lifecycle, "openrouter_authorized", return_value=False),
+        ):
+            report = lifecycle.readiness_report(self.prefix)
+        self.assertEqual(report["readiness"], "owner-action-required")
+        self.assertEqual(report["integrations"]["gmail"]["authorization"], "missing")
+        self.assertEqual(
+            report["integrations"]["messages"]["authorization"],
+            "owner-permission-check-required",
+        )
+        self.assertNotIn("owner@example", json.dumps(report))
+
+    def test_webui_owner_enrollment_requires_exactly_one_admin(self):
+        database = self.prefix / "state/webui/webui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        with lifecycle.sqlite3.connect(database) as connection:
+            connection.execute("create table user (role text)")
+            connection.execute("insert into user values ('admin')")
+        self.assertEqual(lifecycle.webui_owner_enrollment(self.prefix), "pass")
 
 
 if __name__ == "__main__":

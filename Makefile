@@ -1,6 +1,6 @@
 PYTHON ?= .venv/bin/python
 PREFIX ?= $(CURDIR)/.local
-.PHONY: deps build ensure-build setup doctor up status logs start stop format format-check lint test test-gate test-gate-js test-gate-python test-reliability test-mcp test-plugins test-release test-agents down uninstall audit verify-source
+.PHONY: deps build ensure-build setup doctor up status logs start ready stop format format-check lint test test-gate test-gate-js test-gate-python test-reliability test-mcp test-plugins test-release test-agents down uninstall audit verify-source
 
 deps:
 	npm ci --ignore-scripts
@@ -13,7 +13,7 @@ ensure-build:
 	$(PYTHON) -B scripts/build.py --if-needed
 setup doctor up status logs down uninstall:
 	$(PYTHON) -B scripts/release_operator.py $@ --prefix "$(PREFIX)"
-start stop:
+start ready stop:
 	./sanctum $@ --prefix "$(PREFIX)"
 format:
 	$(PYTHON) -m black .
