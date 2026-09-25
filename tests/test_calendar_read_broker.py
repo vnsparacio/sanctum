@@ -30,11 +30,11 @@ class CalendarReadBrokerTests(unittest.TestCase):
     def test_explicit_instant_excludes_past_and_sorts_future(self):
         events = [
             {"startLocal": "2026-09-25T16:00:00-07:00"},
-            {"startLocal": "2026-09-24T19:00:00-07:00"},
+            {"startLocal": "2026-09-23T19:00:00-07:00"},
             {"startLocal": "2026-09-25T07:30:00-07:00"},
             {"start": {"date": "2026-09-25"}},
         ]
-        result = broker.future_events(events, "2026-09-25T04:00:00Z", 2)
+        result = broker.future_events(events, "2026-09-24T12:00:00Z", 2)
         self.assertEqual(result, [events[3], events[2]])
 
     def test_relative_window_does_not_apply_instant_filter(self):

@@ -449,7 +449,7 @@
   "tests/fixtures/reviewer-packet.json": "2621773936d6ceb1449dcb2b4d3e9616fa9d962aa7e3a041121a9a4d55d5db55",
   "tests/fixtures/splunk-content-events.jsonl": "d3659f14476ceb162f2e200c880a0e86be681cfcb8a54355218214b25e623866",
   "tests/test_agent_system.py": "6d924d172151feb0ece4f77e43a6cafd3c463a09311f71de50d8c2d10bb91d93",
-  "tests/test_calendar_read_broker.py": "1e1994fe08ce078c1c8487d57e1f56e46ea21ef61da032e987b5f04149c656d4",
+  "tests/test_calendar_read_broker.py": "8d9787b487bff2d799c0a748c629e4b9ace98de94c1d44e75f4a7fb838e56429",
   "tests/test_codex_token_baseline.py": "0138c3ffeac91c7fcc06abdc96e99d556558cbd9030f7c69373fea60e35fb9d5",
   "tests/test_documentation_impact.py": "2cdf7f95367dec945044142a3d84abd6255fd741b61e0b20aa2117fb4efbcab7",
   "tests/test_git_control_plane.py": "28772d6819958666d2bd151e8327d6e13034bba2c1db5828d5c015114fb1dc10",
