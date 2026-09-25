@@ -636,7 +636,9 @@ class DispatchTests(Fixture):
         import worker
 
         now = time.time()
-        binding = {**self.binding, "experiment_id": "f" * 32, "deadline": now + 121.5}
+        # Leave setup headroom under loaded CI runners before the real SIGALRM
+        # deadline; the test exercises interruption, not subsecond timing.
+        binding = {**self.binding, "experiment_id": "f" * 32, "deadline": now + 127.5}
         # Independent private synthetic state with real wall time for SIGALRM.
         root = private_dir(self.root / "alarm")
         settings = {**self.settings, "state_directory": str(root)}

@@ -265,7 +265,7 @@
   "gate/tests/test_command_runner.py": "455d55ffac2c5a06daaf59f192d1c6fcc7577ac7ccddc6269524c9acdc46b127",
   "gate/tests/test_media_video.py": "16227289ae235fff9e0de66fa3cc8bea2d49091ac431da84e9b7b54776486ff5",
   "gate/tests/test_messages_sender.py": "a2d8414982e6bb44302a16c4c0143ec61b984d7e7bde2c0b17e1f820741552e5",
-  "gate/tests/test_prelive.py": "cb5206db5d068b885a91929d59fd99af93ee302249e400411135bd13e53fe126",
+  "gate/tests/test_prelive.py": "fa4755204953255f59373a91d1e1d1f86abb7cf6f8230c8ea6f54d2467fa0dc1",
   "gate/tests/test_prelive_cleanup.py": "b250520894c89d9b068e76ec313a0fcce734926305d9b86a8b9f642bb9ad004e",
   "gate/tests/test_prelive_package.py": "8d0b25f30a341ea308a6e1fca9c5dd194c8ebc9951105dfefc9549ed02e0c6f6",
   "gate/tests/test_prelive_targeted.py": "acd56be6ca24329f7d7bcb1e43c70c09e8c1cbe2185fbd3ed68e670a2a2245c4",
