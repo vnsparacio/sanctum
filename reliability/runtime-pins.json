@@ -1,7 +1,7 @@
 {
   "plugins/browser-guard/dist/index.js": "f57b97c690efa18611fe11d9ee4ae820c01a09201a3a66e5d28c7f7458674be4",
-  "plugins/messages-read-tools/dist/index.js": "7c04ba2e97098a8af8c799ee63124e0fe5cef4dfdbe4f93b6697a5690248b187",
-  "plugins/gmail-read-tools/dist/index.js": "a28dde1eb779614e8ca4bcce8101839d64aedaa0ee825083656ed4ccce393c2c",
+  "plugins/messages-read-tools/dist/index.js": "09fcb1320b325a56a8f09a92115adc1594ee8431d6b039f66f13ad4012eb2dd8",
+  "plugins/gmail-read-tools/dist/index.js": "7c0e32a685a754d4607f7b9aeb438a35c962b321887e805f97a04851a35c6124",
   "plugins/local-markdown-tools/dist/index.js": "5538fbb5e8d6bf52cfaaa24d9603df74e15aa6d7002fdc97c0d5aa67c340a9a7",
   "plugins/file-steward/dist/index.js": "8529e1c0a339714b13d2f3897c5950b7b6f6b82366f0b4a66c0ba655e08f98d3",
   "plugins/calendar-read-tools/dist/index.js": "9cbbab74ad7ab602fc4068ed8d0bb5877aabf7f5d57635e5bdab5912a4f0673b",
