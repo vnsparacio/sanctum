@@ -7,7 +7,8 @@ import sqlite3
 import subprocess
 import time
 import urllib.parse
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from socketserver import UnixStreamServer
@@ -23,12 +24,12 @@ E164_PHONE = re.compile(r"\+[1-9][0-9]{7,14}\Z")
 APPLE_EPOCH_SECONDS = 978307200
 
 
-def run_broker(args):
+def run_broker(args, timeout=20):
     result = subprocess.run(
         [BROKER, *args],
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=timeout,
         check=False,
     )
 
@@ -104,6 +105,33 @@ def apple_message_time(value):
         return None
 
 
+def recover_attributed_text(message_id, chat_id, date, sender):
+    """Use imsg's decoder for one exact database row; never broaden sender scope."""
+    if not isinstance(chat_id, int) or chat_id < 1:
+        return None
+    timestamp = apple_message_time(date)
+    if timestamp is None:
+        return None
+    instant = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    start = (instant - timedelta(seconds=2)).isoformat().replace("+00:00", "Z")
+    end = (instant + timedelta(seconds=2)).isoformat().replace("+00:00", "Z")
+    try:
+        records = run_broker(["history-window", str(chat_id), start, end], timeout=5)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError, TypeError):
+        return None
+    for record in records:
+        if (
+            isinstance(record, dict)
+            and record.get("id") == message_id
+            and record.get("sender") == sender
+            and record.get("is_from_me") is False
+            and isinstance(record.get("text"), str)
+            and record["text"]
+        ):
+            return record["text"]
+    return None
+
+
 def sender_history(sender, limit, database=MESSAGE_DB):
     """Read only inbound, ordinary messages from one exact E.164 sender."""
     if not E164_PHONE.fullmatch(sender):
@@ -119,7 +147,10 @@ def sender_history(sender, limit, database=MESSAGE_DB):
         )
         rows = connection.execute(
             """
-            SELECT message.text, message.date
+            SELECT message.ROWID, message.text, message.date,
+                   message.attributedBody IS NOT NULL,
+                   (SELECT chat_id FROM chat_message_join
+                    WHERE message_id = message.ROWID ORDER BY chat_id LIMIT 1)
             FROM message JOIN handle ON handle.ROWID = message.handle_id
             WHERE handle.id = ? AND message.is_from_me = 0
               AND COALESCE(message.is_system_message, 0) = 0
@@ -133,8 +164,25 @@ def sender_history(sender, limit, database=MESSAGE_DB):
             """,
             (sender, limit),
         ).fetchall()
+    recovered = {}
+    missing = [
+        (message_id, chat_id, date, sender)
+        for message_id, body, date, has_attributed_body, chat_id in rows
+        if not body and has_attributed_body and chat_id is not None
+    ]
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(6, len(missing))) as executor:
+            recovered = dict(
+                zip(
+                    (item[0] for item in missing),
+                    executor.map(lambda item: recover_attributed_text(*item), missing),
+                    strict=True,
+                )
+            )
     records = []
-    for body, date in rows:
+    for message_id, body, date, _, _ in rows:
+        if not body:
+            body = recovered.get(message_id)
         timestamp = apple_message_time(date)
         truncated = isinstance(body, str) and len(body) > 2000
         if truncated:
