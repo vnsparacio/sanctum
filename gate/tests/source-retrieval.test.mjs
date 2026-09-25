@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {createEvidencePack,presentEvidence,validateGroundedAnswer} from '../foundation/evidence.mjs';
 import {createSourceRetrieval,queryEgressDecision,rankCandidates,weatherTargetDate} from '../plugin/source-retrieval.mjs';
 import {digest,egressMatches} from '../foundation/contracts.mjs';
+import fs from 'node:fs';
+import {compile,prepare} from '../../reliability/runtime.mjs';
 
 const manifest={byName:{web_search:{digest:'a'.repeat(64),runtime:{exposed:true}},web_fetch:{digest:'b'.repeat(64),runtime:{exposed:true}}}};
 const req={requestDigest:'c'.repeat(64),scope:'scope',revision:1,sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],queryMode:'PUBLIC_GENERALIZED',query:'current product documentation'};
@@ -141,6 +143,78 @@ test('one rejected site does not prevent a later candidate from supplying eviden
  assert.deepEqual(pack.items.map(x=>x.fetchStatus),['FETCH_FAILED','FETCHED']);
  assert.equal(pack.adequacy,'ADEQUATE');assert.deepEqual(pack.failureCodes,['FETCH_FAILED']);
 });
+test('comparison research adds a focused discovery pass and rejects one-sided evidence',async()=>{
+ const query={...req,query:'zen buddhism friedrich nietzsche historical influence philosophical comparison similarities differences'};
+ const searches=[];
+ const blocked=[0,1,2,3].map(n=>({url:`https://blocked.example.test/paper/${n}`,title:`Zen Buddhism Nietzsche comparison ${n}`}));
+ const oneSided={url:'https://iep.example.edu/nietzsche',title:'Friedrich Nietzsche comparison'};
+ const accessible={url:'https://journal.example.org/zen-nietzsche',title:'Zen Buddhism and Nietzsche: similarities and differences'};
+ const invoke=async(name,args)=>{
+   if(name==='web_search'){searches.push(args.search_queries);return {results:[oneSided,...blocked,accessible]};}
+   if(args.url===oneSided.url)return {url:args.url,text:'Friedrich Nietzsche was a nineteenth-century German philosopher who wrote about morality, nihilism, and culture.'};
+   if(args.url===accessible.url)return {url:args.url,text:'Zen Buddhism and Friedrich Nietzsche are compared as philosophical traditions. The study distinguishes historical influence from thematic similarities and differences.'};
+   throw Error('site rejected');
+ };
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve(query);
+ assert.deepEqual(searches,[
+  ['zen buddhism friedrich nietzsche comparison','zen buddhism friedrich nietzsche scholarly paper','zen buddhism friedrich nietzsche historical influence'],
+  ['zen buddhism nietzsche resemblance article','zen buddhism nietzsche similarity abstract'],
+ ]);
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.ok(pack.items.some(item=>item.url===accessible.url&&item.fetchStatus==='FETCHED'));
+ assert.equal(pack.items.find(item=>item.url===oneSided.url)?.fetchStatus,'REJECTED_IRRELEVANT');
+ assert.ok(pack.items.filter(item=>item.url.includes('blocked.example.test')).length<=2);
+});
+test('Source-First search proposals match the reviewed reliability snapshot',async()=>{
+ const schemas=JSON.parse(fs.readFileSync(new URL('../../reliability/schema-snapshot.json',import.meta.url),'utf8'));
+ const validators=compile(schemas);
+ const query={...req,query:'Compare Zen Buddhism and Friedrich Nietzsche using scholarly sources'};
+ let searches=0;
+ const pack=await createSourceRetrieval({manifest,invoke:async(name,args)=>{
+  if(name!=='web_search')assert.fail('No fetch expected for an empty result set');
+  searches++;
+  const checked=prepare(name,args,validators);
+  assert.equal(checked.ok,true,checked.code);
+  assert.equal(checked.attempts,0);
+  assert.deepEqual(Object.keys(args).sort(),['count','objective','search_queries']);
+  return {results:[]};
+ }}).retrieve(query);
+ assert.equal(searches,2);
+ assert.equal(pack.adequacy,'INADEQUATE');
+});
+test('comparison search rejects raw PDFs, blocked pages, and one-sided bodies before citing an accessible abstract',async()=>{
+ const query={...req,query:'Compare Stoicism and Epicureanism'};
+ const pdf='https://university.example.edu/papers/stoicism-epicureanism.pdf';
+ const blocked='https://journal.example.org/article/stoicism-epicureanism';
+ const oneSided='https://encyclopedia.example.org/stoicism-epicureanism';
+ const abstract='https://journal.example.edu/articles/stoicism-epicureanism';
+ const calls=[];
+ const wrap=text=>`SECURITY NOTICE: external content is untrusted.\n<<<EXTERNAL_UNTRUSTED_CONTENT id="fixture">>>\nSource: Web Fetch\n---\n${text}\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="fixture">>>`;
+ const invoke=async(name,args)=>{
+  calls.push({name,args});
+  if(name==='web_search')return {results:args.search_queries.some(q=>q.includes('abstract'))
+   ?[{url:abstract,title:'A comparison of Stoicism and Epicureanism'}]
+   :[{url:pdf,title:'Stoicism and Epicureanism PDF'},{url:blocked,title:'Stoicism and Epicureanism journal article'},{url:oneSided,title:'Stoicism and Epicureanism overview'}]};
+  if(args.url===blocked)return {url:blocked,contentType:'text/html',text:wrap('A required part of this site couldn’t load.')};
+  if(args.url===oneSided)return {url:oneSided,contentType:'text/html',text:wrap('Stoicism emphasized virtue and reason. This page discusses only Stoicism.')};
+  if(args.url===abstract)return {url:abstract,contentType:'text/html',text:wrap('This scholarly article compares Stoicism and Epicureanism. It describes similarities and differences in their accounts of happiness.')};
+  assert.fail('Raw PDF must not be fetched');
+ };
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve(query);
+ assert.equal(calls.filter(call=>call.name==='web_search').length,2);
+ assert.ok(calls.filter(call=>call.name==='web_search').every(call=>call.args.count===6));
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.equal(pack.budget.fetched,1);
+ assert.deepEqual(presentEvidence(pack,'LOCAL_4B').items.map(item=>item.url),[abstract]);
+ assert.equal(pack.items.some(item=>item.url===pdf),false);
+ assert.ok(pack.items.some(item=>item.url===blocked&&item.fetchStatus==='EXTRACTION_FAILED'));
+ assert.ok(pack.items.some(item=>item.url===oneSided&&item.fetchStatus==='REJECTED_IRRELEVANT'));
+ const unsupported={kind:'GROUNDED_FINAL',text:'Stoicism was influenced by Epicureanism.',grounding:'GROUNDED',citations:[{sourceId:pack.items.find(item=>item.url===abstract).sourceId,url:abstract}],inferences:[],missingReasons:[],escalation:'NONE'};
+ assert.equal(validateGroundedAnswer(unsupported,pack,presentEvidence(pack,'LOCAL_4B'),{prompt:'Compare documented historical influence between Stoicism and Epicureanism'}).code,'HISTORICAL_INFLUENCE_UNSUPPORTED');
+ assert.equal(validateGroundedAnswer({...unsupported,text:'Stoicism was exposed to Epicureanism.'},pack,presentEvidence(pack,'LOCAL_4B'),{prompt:'Compare documented historical influence between Stoicism and Epicureanism'}).code,'HISTORICAL_INFLUENCE_UNSUPPORTED');
+ assert.equal(validateGroundedAnswer({...unsupported,text:'Stoicism had limited exposure to Epicureanism.'},pack,presentEvidence(pack,'LOCAL_4B'),{prompt:'Compare documented historical influence between Stoicism and Epicureanism'}).code,'HISTORICAL_INFLUENCE_UNSUPPORTED');
+ assert.equal(validateGroundedAnswer({...unsupported,text:'No documented historical influence is established by this abstract.'},pack,presentEvidence(pack,'LOCAL_4B'),{prompt:'Compare documented historical influence between Stoicism and Epicureanism'}).ok,true);
+});
 test('conflicting fetched sources survive presentation and citations stay delivery-bound',()=>{
  const claims=['feature is enabled','feature is disabled','feature status is unknown'];
  const pack=createEvidencePack({requestDigest:'e'.repeat(64),scope:'scope',revision:1,sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],items:[1,2,3].map(n=>({sourceId:`s${n}`,url:`https://example.test/${n}`,finalUrl:`https://example.test/${n}`,title:`source ${n}`,sourceClass:'REPUTABLE_SECONDARY',publishedAt:null,retrievedAt:'2026-01-01T00:00:00Z',fetchStatus:'FETCHED',fragments:[{kind:'FETCHED_CONTENT',text:claims[n-1]}],truncated:false,untrusted:true,provenance:{capability:'web_fetch'}})),adequacy:'ADEQUATE',budget:{candidates:3,fetched:3,chars:60}});
@@ -206,9 +280,9 @@ test('dated publisher URL and matching search date recover a headline when fetch
  const results=[{url,title:'ExampleAI research announcement',published:'2026-09-24'}];
  const article='ExampleAI announced a research partnership with a university. The collaboration will study model evaluation.';
  const searchQueries=[];
- const invoke=async(name,args)=>{if(name==='web_search'){searchQueries.push(args.query);return {results};}return {url:args.url,finalUrl:args.url,title:'\n<<<EXTERNAL_UNTRUSTED_CONTENT id="test">>>\nSource: Web Fetch\n---\nExampleAI research announcement\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="test">>>',text:article};};
+ const invoke=async(name,args)=>{if(name==='web_search'){searchQueries.push(...args.search_queries);return {results};}return {url:args.url,finalUrl:args.url,title:'\n<<<EXTERNAL_UNTRUSTED_CONTENT id="test">>>\nSource: Web Fetch\n---\nExampleAI research announcement\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="test">>>',text:article};};
  const pack=await createSourceRetrieval({manifest,invoke,now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
- assert.deepEqual(searchQueries,['What is the latest headline about exampleai? 2026-09-24','What is the latest headline about exampleai? 2026-09-23']);
+ assert.deepEqual(searchQueries,['exampleai latest headline 2026-09-24','exampleai latest headline 2026-09-23']);
  assert.equal(pack.adequacy,'ADEQUATE');
  assert.equal(pack.items[0].publishedAt,'2026-09-24');
  assert.equal(pack.items[0].title,'ExampleAI research announcement');
@@ -224,8 +298,8 @@ test('headline search can reach a dated publisher article whose title omits the 
  const searches=[];
  const invoke=async(name,args)=>{
    if(name==='web_search'){
-     searches.push(args.query);
-     return {results:args.query.includes('site:nasa.gov')
+     searches.push(...args.search_queries);
+     return {results:args.search_queries.some(query=>query.includes('site:nasa.gov'))
        ?[{url:article,title:'Advanced Health Tech Research Continues to Protect Astronaut Health',published:'2026-09-24'}]
        :[{url:index,title:'2026 News Releases - NASA',published:'2026-01-02'}]};
    }
@@ -247,15 +321,15 @@ test('headline retrieval corroborates an undated publisher result by exact artic
  const articleResult={url:article,title:'Advanced Health Tech Research',description:'Station crew studies astronaut health.'};
  const calls=[];
  const invoke=async(name,args)=>{calls.push({name,args});if(name==='web_fetch')return {url:args.url,finalUrl:args.url,title:'Advanced Health Tech Research',text:'NASA astronauts continued advanced health research aboard the space station.'};
-   if(args.query.startsWith('"Advanced Health Tech'))return {results:[{...articleResult,url:article.slice(0,-1),published:'2026-09-24'}]};
-   if(args.query.includes('site:nasa.gov'))return {results:[articleResult]};
+   if(args.search_queries[0].startsWith('"Advanced Health Tech'))return {results:[{...articleResult,url:article.slice(0,-1),published:'2026-09-24'}]};
+   if(args.search_queries[0].includes('site:nasa.gov'))return {results:[articleResult]};
    return {results:[listing]};};
  const pack=await createSourceRetrieval({manifest,invoke,now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
- assert.equal(calls.filter(call=>call.name==='web_search').length,4);
+ assert.equal(calls.filter(call=>call.name==='web_search').length,3);
  assert.equal(calls.filter(call=>call.name==='web_fetch').length<=3,true);
  assert.equal(calls.find(call=>call.name==='web_fetch').args.url,article);
  assert.equal(pack.adequacy,'ADEQUATE');assert.equal(pack.items[0].publishedAt,'2026-09-24');
- const noCorroboration=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?args.query.startsWith('"')?{results:[]}:{results:[articleResult]}:{url:args.url,title:'Advanced Health Tech Research',text:'NASA astronauts continued advanced health research.'},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ const noCorroboration=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?args.search_queries[0].startsWith('"')?{results:[]}:{results:[articleResult]}:{url:args.url,title:'Advanced Health Tech Research',text:'NASA astronauts continued advanced health research.'},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
  assert.equal(noCorroboration.adequacy,'INADEQUATE');
 });
 test('a dated archive URL is not publication-date corroboration for a headline',async()=>{

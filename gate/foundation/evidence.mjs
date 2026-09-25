@@ -53,8 +53,17 @@ export function presentEvidence(pack,tier){
  return deepFreeze({schema:EVIDENCE_VERSION,profile:profile.id,packDigest:pack.packDigest,sourceNeed:pack.sourceNeed,adequacy:pack.adequacy,items});
 }
 
+export function unsupportedHistoricalInfluence(answerText,presented,prompt){
+ if(typeof prompt!=='string'||!/(?:historical|documented)\s+influence/i.test(prompt)||typeof answerText!=='string')return false;
+ const assertion=/\b(?:was|were|is|are|has been|had been)\s+(?:(?:directly|indirectly|strongly|clearly)\s+)?(?:influenced by|exposed to)\b|\b(?:had|has|have)\s+(?:(?!no\b|not\b|without\b)\w+\s+){0,3}exposure to\b/i;
+ if(!assertion.test(answerText))return false;
+ const evidence=presented?.items?.flatMap(item=>item.fragments?.filter(f=>f.kind==='FETCHED_CONTENT').map(f=>f.text)??[]).join('\n')??'';
+ return !assertion.test(evidence);
+}
+
 function claimGuard(answer,presented,prompt){
  if(typeof prompt!=='string'||!presented)return null;
+ if(unsupportedHistoricalInfluence(answer.text,presented,prompt))return 'HISTORICAL_INFLUENCE_UNSUPPORTED';
  const cited=presented.items.filter(item=>answer.citations.some(c=>c.sourceId===item.sourceId));
  const evidence=cited.flatMap(item=>item.fragments.filter(f=>f.kind==='FETCHED_CONTENT').map(f=>f.text)).join('\n');
  if(!/\b(?:prompt injection|injected instruction|malicious instruction|source instruction)\b/i.test(prompt)){

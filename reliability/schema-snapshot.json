@@ -55,70 +55,47 @@
   },
   {
     "name": "web_search",
-    "description": "Search current web; normalized provider results. Supports freshness and date-range filters (freshness, date_after/date_before) and domain filtering (domain_filter).",
+    "description": "Search the web using Parallel. Returns ranked, LLM-optimized dense excerpts from web sources. Pass an `objective` describing the underlying question along with 2-3 short keyword `search_queries` (Parallel's recommended pairing). For multi-step research, thread the prior result's `sessionId` back in as `session_id` to keep Parallel's context grouped.",
     "parameters": {
       "type": "object",
-      "required": [
-        "query"
-      ],
       "properties": {
-        "query": {
+        "objective": {
           "type": "string",
-          "description": "Search query."
+          "description": "Natural-language description of the underlying question or goal driving the search. Should be self-contained with enough context to understand the intent. Used together with search_queries to focus results on the most relevant content.",
+          "maxLength": 5000
+        },
+        "search_queries": {
+          "type": "array",
+          "description": "Concise keyword search queries, 3-6 words each. Provide 2-3 diverse queries for best results (max 5). Vary entity names, synonyms, and angles. Each query is a keyword phrase, not a sentence; do not use site: operators.",
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 5
         },
         "count": {
-          "type": "number",
-          "description": "Result count.",
+          "type": "integer",
+          "description": "Number of results to return (1-40).",
           "minimum": 1,
-          "maximum": 10
+          "maximum": 40
         },
-        "country": {
+        "session_id": {
           "type": "string",
-          "description": "2-letter country code."
+          "description": "Optional session id returned by an earlier Parallel search. Pass it on follow-up searches that are part of the same task to keep Parallel's server-side context grouped (look for `sessionId` in the prior tool result).",
+          "maxLength": 1000
         },
-        "language": {
+        "client_model": {
           "type": "string",
-          "description": "ISO 639-1 language."
-        },
-        "freshness": {
-          "type": "string",
-          "description": "Time filter: day/week/month/year."
-        },
-        "date_after": {
-          "type": "string",
-          "description": "Published after YYYY-MM-DD."
-        },
-        "date_before": {
-          "type": "string",
-          "description": "Published before YYYY-MM-DD."
-        },
-        "search_lang": {
-          "type": "string",
-          "description": "Brave result language."
-        },
-        "ui_lang": {
-          "type": "string",
-          "description": "Brave UI locale."
-        },
-        "domain_filter": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Perplexity domain filter."
-        },
-        "max_tokens": {
-          "type": "number",
-          "description": "Perplexity total token budget.",
-          "minimum": 1,
-          "maximum": 1000000
-        },
-        "max_tokens_per_page": {
-          "type": "number",
-          "description": "Perplexity tokens per page.",
-          "minimum": 1
+          "description": "The identifier of the LLM model making this tool call (e.g. 'claude-opus-4-7', 'gpt-5.6-sol', 'gemini-3.1-pro'). Pass the exact active model slug verbatim; never shorten or substitute a family alias like 'gpt-5'. Lets Parallel tailor default settings for your model's capabilities.",
+          "maxLength": 100
         }
-      }
+      },
+      "required": [
+        "objective",
+        "search_queries"
+      ],
+      "additionalProperties": false
     }
   },
   {

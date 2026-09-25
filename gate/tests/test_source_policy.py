@@ -82,6 +82,19 @@ class SourcePolicyTests(unittest.TestCase):
         self.assertEqual(d.mode, "PUBLIC_GENERALIZED")
         self.assertEqual(d.query, "94114 weather forecast today")
 
+    def test_research_query_keeps_subject_and_comparison_not_prompt_scaffolding(self):
+        d = minimize_query(
+            "Search public scholarly sources comparing Zen Buddhism and Friedrich "
+            "Nietzsche. Distinguish documented historical influence from later "
+            "philosophical comparison, summarize the main similarities and differences, "
+            "and cite only sources that directly discuss both."
+        )
+        self.assertEqual(
+            d.query,
+            "scholarly zen buddhism friedrich nietzsche historical influence philosophical "
+            "comparison similarities differences",
+        )
+
     def test_zip_is_not_sent_for_private_or_non_weather_context(self):
         for prompt in [
             "What is the weather at my home in 94114 today?",
