@@ -148,6 +148,8 @@ For a fetched source that supports only part of a request, the answer prompts re
 
 The gate's local-agent handoff narrows the per-turn OpenClaw tool surface for explicit Gmail, Messages, and Calendar requests to the requested source family. A second pre-tool guard blocks a wrong-family call, and no personal-source answer is delivered without a successful requested-family tool call. The Source-First evidence answer has no optional local tools. These restrictions do not grant new capabilities or replace owner permissions.
 
+For a plain owner request to list Calendar events **this week** or **next week**, the Mac gate uses the already configured read-only Calendar broker after classification. The window is Monday through Sunday in Mac local time. It reads every day without a free-text query and splits a time window when the provider's 20-row cap is reached, including when broker filtering makes the returned list shorter than that cap. It formats event names, dates, weekdays, and times directly from returned fields. If a bounded read cannot establish a complete list, it reports the gap instead of presenting a partial list as complete. The list covers events starting within the requested week in calendars visible to the configured Google account; other calendar questions continue through the local agent's existing tool boundary.
+
 Tool-free local answers now use a fresh request to the same pinned, already
 running MLX model. They carry no OpenClaw session history or tool schemas.
 Explicit personal-source, local-tool and retained-context requests still use

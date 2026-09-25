@@ -25,6 +25,7 @@ FILES = (
     "foundation/manifest.mjs",
     "plugin/core.mjs",
     "plugin/index.mjs",
+    "plugin/calendar-week.mjs",
     "plugin/local-agent.mjs",
     "plugin/local-synthesis.mjs",
     "plugin/local-tool-boundary.mjs",

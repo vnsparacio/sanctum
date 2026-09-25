@@ -187,6 +187,17 @@ def future_events(values: list[Any], from_value: str, limit: int) -> list[Any]:
     return [item for _, item in dated[:limit]]
 
 
+def bounded_agenda(
+    payload: Any, from_value: str, limit: int, provider_limit: int
+) -> tuple[list[Any], bool]:
+    values = payload if isinstance(payload, list) else [payload]
+    # An instant-window filter can discard earlier provider rows after gog has
+    # applied --max. Report that raw cap so callers never mistake a short
+    # filtered response for a complete agenda.
+    provider_limit_reached = len(values) >= provider_limit
+    return future_events(values, from_value, limit), provider_limit_reached
+
+
 def compact_event(item: Any) -> dict[str, Any]:
     if not isinstance(item, dict):
         return {"value": str(item)[:1000]}
@@ -351,8 +362,9 @@ class Handler(BaseHTTPRequestHandler):
                         ]
                     )
                 )
-                values = payload if isinstance(payload, list) else [payload]
-                values = future_events(values, from_value, limit)
+                values, provider_limit_reached = bounded_agenda(
+                    payload, from_value, limit, provider_limit
+                )
                 self.send_json(
                     200,
                     {
@@ -360,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                         "untrusted": True,
                         "source": "google_calendar",
                         "content_is_untrusted": True,
+                        "providerLimitReached": provider_limit_reached,
                         "data": [compact_event(v) for v in values],
                     },
                 )
