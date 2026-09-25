@@ -169,13 +169,17 @@ class UnixServer(socketserver.UnixStreamServer):
 
 def main():
     os.makedirs(os.path.dirname(SOCKET), mode=0o700, exist_ok=True)
+    if os.path.lexists(SOCKET):
+        raise SystemExit("socket exists; lifecycle helper must resolve stale socket")
     try:
-        os.unlink(SOCKET)
-    except FileNotFoundError:
-        pass
-    with UnixServer(SOCKET, Handler) as server:
-        os.chmod(SOCKET, 0o600)
-        server.serve_forever(poll_interval=0.25)
+        with UnixServer(SOCKET, Handler) as server:
+            os.chmod(SOCKET, 0o600)
+            server.serve_forever(poll_interval=0.25)
+    finally:
+        try:
+            os.unlink(SOCKET)
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == "__main__":

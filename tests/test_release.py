@@ -321,6 +321,7 @@ for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
                 self.pid = 1000 + len(children)
                 self.code = None
                 self.terminated = False
+                self.signal = None
                 self.killed = False
 
             def poll(self):
@@ -329,6 +330,10 @@ for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
             def terminate(self):
                 self.terminated = True
                 self.code = -15
+
+            def send_signal(self, signum):
+                self.signal = signum
+                self.code = -signum
 
             def wait(self, timeout=None):
                 return self.code
@@ -354,7 +359,8 @@ for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
         self.assertEqual(result, 7)
         self.assertEqual(popen.call_count, 2)
         self.assertFalse(children[0].terminated)
-        self.assertTrue(children[1].terminated)
+        self.assertFalse(children[1].terminated)
+        self.assertEqual(children[1].signal, signal.SIGINT)
 
     def test_bootstrap_preserves_existing_runtime(self):
         op.setup(self.prefix)

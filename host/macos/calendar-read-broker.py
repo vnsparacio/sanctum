@@ -417,7 +417,7 @@ def main() -> int:
     os.chmod(SOCKET_PATH.parent, 0o700)
 
     # Lifecycle helper is responsible for proving a socket stale before startup.
-    if SOCKET_PATH.exists():
+    if os.path.lexists(SOCKET_PATH):
         print(
             "refusing to unlink existing socket; use calendar-read-control",
             file=sys.stderr,
@@ -428,6 +428,8 @@ def main() -> int:
     os.chmod(SOCKET_PATH, 0o600)
     try:
         server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()
         try:

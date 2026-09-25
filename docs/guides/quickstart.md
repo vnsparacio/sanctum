@@ -68,7 +68,10 @@ The command returns when MLX has loaded the exact local model, the authenticated
 gateway is listening, every configured broker socket is reachable and Open
 WebUI is healthy. It runs one detached, owner-scoped supervisor and stores logs
 beneath `$SANCTUM_PREFIX/logs`. It refuses unknown listeners instead of adopting
-or killing them.
+or killing them. If a previous broker crashed and left an exact private Unix
+socket behind, startup proves that the owner-controlled socket has no listener
+and moves it to a private recovery directory before continuing. It never
+removes or adopts a live, unsafe or unknown path.
 
 The default loopback endpoints are:
 
@@ -80,6 +83,20 @@ The default loopback endpoints are:
 
 If a port is occupied, stop and identify the exact listener. Do not launch a
 duplicate gateway or a competing model server.
+
+Run the combined readiness check after startup or whenever an integration
+changes:
+
+```sh
+./sanctum ready
+```
+
+It distinguishes healthy services from WebUI owner/function enrollment,
+read-only Google OAuth, the web-search credential and optional hosted-model
+authorization. It returns exact next actions without printing account names or
+secret values. Messages Full Disk Access and per-conversation selection of
+**Mac prompt gate** remain explicit owner checks because macOS and WebUI own
+those decisions.
 
 ## 4. Complete the Open WebUI checkpoint
 

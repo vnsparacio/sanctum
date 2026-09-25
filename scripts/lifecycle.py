@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import getpass
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import shutil
 import signal
 import socket
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -155,6 +157,84 @@ def broker_ready(prefix, name):
         return json.loads(body).get("ok") is True
     except (OSError, ValueError, json.JSONDecodeError):
         return False
+
+
+def unix_socket_listener(path):
+    """Return True for a live listener and False only for a refused connection."""
+    try:
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(0.5)
+            connection.connect(str(path))
+        return True
+    except FileNotFoundError:
+        return None
+    except ConnectionRefusedError:
+        return False
+    except OSError as exc:
+        if exc.errno == errno.ENOENT:
+            return None
+        if exc.errno == errno.ECONNREFUSED:
+            return False
+        raise ValueError(
+            f"Cannot prove broker socket is stale: {path.name} ({exc.strerror})"
+        ) from exc
+
+
+def recover_stale_broker_sockets(prefix):
+    """Quarantine exact, owner-controlled broker sockets with no listener."""
+    stale = []
+    for name in component_tools.selected_brokers(prefix):
+        path = broker_socket(prefix, name)
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISSOCK(before.st_mode):
+            raise ValueError(
+                f"Broker socket path is not a socket; inspect it manually: {path}"
+            )
+        if before.st_uid != os.getuid() or before.st_mode & 0o077:
+            raise ValueError(
+                f"Broker socket ownership or permissions are unsafe: {path}"
+            )
+        first = unix_socket_listener(path)
+        if first is None:
+            continue
+        if first:
+            raise ValueError(
+                f"Broker socket has a live listener; refusing adoption: {path}"
+            )
+        if time.time() - before.st_mtime < 2:
+            raise ValueError(
+                f"Broker socket is too new to prove stale; retry shortly: {path}"
+            )
+        time.sleep(0.05)
+        if unix_socket_listener(path) is not False:
+            raise ValueError(
+                f"Broker socket changed while checking it; inspect manually: {path}"
+            )
+        try:
+            after = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (before.st_dev, before.st_ino, before.st_uid, before.st_mode) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_uid,
+            after.st_mode,
+        ):
+            raise ValueError(
+                f"Broker socket changed while checking it; inspect manually: {path}"
+            )
+        stale.append(path)
+    if not stale:
+        return None
+    recovery = prefix / "state/amendments" / f"stale-broker-sockets-{time.time_ns()}"
+    recovery.mkdir(parents=True, mode=0o700)
+    os.chmod(recovery, 0o700)
+    for path in stale:
+        path.replace(recovery / path.name)
+    return recovery
 
 
 def wait_until(predicate, seconds, message, process=None):
@@ -460,11 +540,18 @@ def setup(prefix, proposal_path=None, authorize_now=False, cache_only=False):
             "OpenRouter credential in the isolated OpenClaw auth store. Local "
             "operation requires no hosted API key."
         )
-    print(
-        "CHECKPOINT after first start: create the local WebUI owner, import "
-        "gate/webui/guard.py and gate/webui/pipe.py, and select Mac prompt gate."
-    )
+    if (
+        webui_owner_enrollment(prefix) == "pass"
+        and op.webui_function_sync(prefix) == "pass"
+    ):
+        print("WebUI owner and reviewed functions are already enrolled; unchanged.")
+    else:
+        print(
+            "CHECKPOINT after first start: create the local WebUI owner, import "
+            "gate/webui/guard.py and gate/webui/pipe.py, and select Mac prompt gate."
+        )
     print("Start everything with: ./sanctum start --prefix " + str(prefix))
+    print("Then verify owner readiness with: ./sanctum ready --prefix " + str(prefix))
 
 
 def supervise(prefix):
@@ -607,6 +694,9 @@ def start(prefix):
     ):
         if tcp_ready(port):
             raise ValueError(f"{name} port {port} is occupied; refusing adoption")
+    recovery = recover_stale_broker_sockets(prefix)
+    if recovery:
+        print("Recovered stale broker sockets to: " + str(recovery))
     command = [
         str(Path(sys.executable).resolve()),
         "-B",
@@ -635,6 +725,12 @@ def start(prefix):
                 lambda value: value.get("status") is True,
             ):
                 print("Sanctum is ready: http://127.0.0.1:28000")
+                report = readiness_report(prefix)
+                print("Startup readiness: " + report["readiness"])
+                for action in report["next_actions"]:
+                    print("NEXT: " + action)
+                for check in report["owner_checks"]:
+                    print("CHECK: " + check)
                 return
             if state.get("phase") == "failed":
                 raise ValueError(
@@ -667,7 +763,7 @@ def stop(prefix):
     print("Sanctum stopped. Private state and model cache were retained.")
 
 
-def status(prefix):
+def service_status(prefix):
     receipt = op.verify_install(prefix)
     record = read_state(prefix)
     supervisor = "stopped"
@@ -692,7 +788,131 @@ def status(prefix):
     }
     if record and record.get("error"):
         report["error"] = record["error"]
+    return report
+
+
+def status(prefix):
+    report = service_status(prefix)
     print(json.dumps(report, indent=2))
+
+
+def webui_owner_enrollment(prefix):
+    database = prefix / "state/webui/webui.db"
+    if not database.exists():
+        return "not-enrolled"
+    if database.is_symlink() or not database.is_file():
+        return "unsafe"
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+            admins = connection.execute(
+                "select count(*) from user where role = 'admin'"
+            ).fetchone()[0]
+    except sqlite3.Error:
+        return "unavailable"
+    return "pass" if admins == 1 else ("not-enrolled" if admins == 0 else "unsafe")
+
+
+def readiness_report(prefix):
+    services = service_status(prefix)
+    owner = webui_owner_enrollment(prefix)
+    function_sync = op.webui_function_sync(prefix)
+    integrations = {}
+    for name in ("messages", "gmail", "calendar"):
+        configured = component_tools.integration_enabled(prefix, name)
+        value = {
+            "configured": configured,
+            "broker_healthy": services["brokers"].get(name) if configured else None,
+        }
+        if not configured:
+            value["authorization"] = "not-configured"
+        elif name == "messages":
+            value["authorization"] = "owner-permission-check-required"
+        else:
+            value["authorization"] = (
+                "pass" if google_authorized(prefix, name) else "missing"
+            )
+        integrations[name] = value
+    web_configured = web_enabled(prefix)
+    integrations["web"] = {
+        "configured": web_configured,
+        "authorization": (
+            "pass"
+            if web_configured and web_authorized(prefix)
+            else ("missing" if web_configured else "not-configured")
+        ),
+    }
+    integrations["hosted_models"] = {
+        "required": False,
+        "authorization": (
+            "pass" if openrouter_authorized(prefix) else "not-configured"
+        ),
+    }
+    service_ready = (
+        services["supervisor"] == "current"
+        and services["phase"] == "ready"
+        and services["mlx"]
+        and services["gateway"]
+        and services["webui"]
+        and all(services["brokers"].values())
+    )
+    required_authorization = all(
+        item["authorization"] != "missing"
+        for item in integrations.values()
+        if item.get("required", True)
+    )
+    owner_ready = owner == "pass" and function_sync == "pass"
+    actions = []
+    if not service_ready:
+        actions.append("Run ./sanctum status and inspect the private component logs.")
+    if owner != "pass":
+        actions.append("Open the local WebUI and create its first owner account.")
+    if function_sync != "pass":
+        actions.append(
+            "Import or replace gate/webui/guard.py and gate/webui/pipe.py "
+            "in Open WebUI Functions."
+        )
+    missing_google = [
+        name
+        for name in ("gmail", "calendar")
+        if integrations[name]["authorization"] == "missing"
+    ]
+    if missing_google:
+        actions.append(
+            "Stop the stack, then rerun setup with --authorize for read-only "
+            + " and ".join(missing_google)
+            + " OAuth."
+        )
+    if integrations["web"]["authorization"] == "missing":
+        actions.append(
+            "Stop the stack, then rerun setup with --authorize for the web API key."
+        )
+    owner_checks = []
+    if owner_ready:
+        owner_checks.append(
+            "Select Mac prompt gate in the saved chat; model selection remains "
+            "owner-controlled per conversation."
+        )
+    if integrations["messages"]["configured"]:
+        owner_checks.append(
+            "Confirm the launching terminal has Full Disk Access before using Messages."
+        )
+    return {
+        "readiness": (
+            "ready"
+            if service_ready and owner_ready and required_authorization
+            else "owner-action-required"
+        ),
+        "services": services,
+        "webui": {"owner_enrollment": owner, "function_sync": function_sync},
+        "integrations": integrations,
+        "next_actions": actions,
+        "owner_checks": owner_checks,
+    }
+
+
+def ready(prefix):
+    op.verify_install(prefix)
+    print(json.dumps(readiness_report(prefix), indent=2))
 
 
 def default_prefix():
@@ -713,7 +933,7 @@ def main(argv=None):
         return
     parser = argparse.ArgumentParser(prog="sanctum")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("start", "status", "stop", "logs"):
+    for name in ("start", "status", "ready", "stop", "logs"):
         command = commands.add_parser(name)
         command.add_argument("--prefix", type=Path, default=default_prefix())
     setup_command = commands.add_parser("setup")
@@ -733,6 +953,8 @@ def main(argv=None):
         start(prefix)
     elif args.command == "status":
         status(prefix)
+    elif args.command == "ready":
+        ready(prefix)
     elif args.command == "stop":
         stop(prefix)
     elif args.command == "logs":
