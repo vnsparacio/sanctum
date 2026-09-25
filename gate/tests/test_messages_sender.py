@@ -28,11 +28,13 @@ class SenderHistoryTests(unittest.TestCase):
                 CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT NOT NULL);
                 CREATE TABLE message (
                     ROWID INTEGER PRIMARY KEY, handle_id INTEGER, text TEXT,
+                    attributedBody BLOB,
                     date INTEGER, is_from_me INTEGER, is_system_message INTEGER,
                     is_service_message INTEGER, is_empty INTEGER,
                     associated_message_type INTEGER, date_retracted INTEGER,
                     cache_has_attachments INTEGER
                 );
+                CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
                 """)
             connection.executemany(
                 "INSERT INTO handle (ROWID,id) VALUES (?,?)",
@@ -95,6 +97,46 @@ class SenderHistoryTests(unittest.TestCase):
         self.assertIn("[message text truncated]", records[0]["text"])
         self.assertTrue(records[1]["content_unavailable"])
         self.assertIsNone(records[1]["text"])
+
+    def test_recovers_attributed_body_only_for_exact_sender_and_message(self):
+        with sqlite3.connect(self.database) as connection:
+            cursor = connection.execute(
+                """INSERT INTO message
+                   (handle_id,text,attributedBody,date,is_from_me)
+                   VALUES (1,NULL,?, ?,0)""",
+                (b"synthetic attributed body", 912_000_000 * 10**9),
+            )
+            message_id = cursor.lastrowid
+            connection.execute(
+                "INSERT INTO chat_message_join (chat_id,message_id) VALUES (?,?)",
+                (31, message_id),
+            )
+        decoded = {
+            "id": message_id,
+            "sender": "+14155550111",
+            "is_from_me": False,
+            "text": "decoded synthetic text",
+        }
+        with patch.object(BROKER, "run_broker", return_value=[decoded]) as run:
+            records = BROKER.sender_history("+14155550111", 1, self.database)
+        self.assertEqual(records[0]["text"], "decoded synthetic text")
+        self.assertFalse(records[0]["content_unavailable"])
+        args = run.call_args.args[0]
+        self.assertEqual(args[0:2], ["history-window", "31"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
+
+        for invalid in (
+            {**decoded, "id": message_id + 1},
+            {**decoded, "sender": "+14155550112"},
+            {**decoded, "is_from_me": True},
+        ):
+            with (
+                self.subTest(invalid=invalid),
+                patch.object(BROKER, "run_broker", return_value=[invalid]),
+            ):
+                records = BROKER.sender_history("+14155550111", 1, self.database)
+            self.assertIsNone(records[0]["text"])
+            self.assertTrue(records[0]["content_unavailable"])
 
     def test_apple_epoch_units(self):
         for factor in (1, 1000, 1_000_000, 1_000_000_000):
