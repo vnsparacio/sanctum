@@ -190,16 +190,30 @@ class HostValidationRunner:
 
     def _environment(self, issue_id: str) -> dict[str, str]:
         runtime_home = self.validation_state_root / "runtime" / issue_id
-        cache = runtime_home / "cache"
-        runtime_home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+        issue_cache = runtime_home / "cache"
+        shared_cache = self.validation_state_root / "cache"
+        npm_cache = shared_cache / "npm"
+        uv_cache = shared_cache / "uv"
+        uv_python = shared_cache / "uv-python"
+        for path in (
+            runtime_home,
+            issue_cache,
+            shared_cache,
+            npm_cache,
+            uv_cache,
+            uv_python,
+        ):
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            path.chmod(0o700)
         return {
             "HOME": str(runtime_home),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            "UV_CACHE_DIR": str(cache / "uv"),
-            "XDG_CACHE_HOME": str(cache / "xdg"),
+            "NPM_CONFIG_CACHE": str(npm_cache),
+            "UV_CACHE_DIR": str(uv_cache),
+            "UV_PYTHON_INSTALL_DIR": str(uv_python),
+            "XDG_CACHE_HOME": str(issue_cache / "xdg"),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_NOSYSTEM": "1",
         }
