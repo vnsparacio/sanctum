@@ -47,6 +47,21 @@ test('invalid schema enum gets one bounded local format repair',async()=>{
  assert.equal((await answer(body,new AbortController().signal)).text,grounded);
  assert.equal(calls,2);
 });
+test('unsupported historical influence gets one bounded local evidence repair',async()=>{
+ const research=structuredClone(body);
+ research.request.messages[0].content='Compare documented historical influence between Stoicism and Epicureanism.';
+ research.request.evidence.items[0].fragments[0].text='The article compares Stoicism and Epicureanism. It identifies philosophical parallels but documents no historical transmission.';
+ const citation={sourceId:'s1',url:research.request.evidence.items[0].url};
+ const first=JSON.stringify({kind:'GROUNDED_FINAL',text:'Stoicism was influenced by Epicureanism.',grounding:'GROUNDED',citations:[citation],inferences:[],missingReasons:[],escalation:'NONE'});
+ const corrected=JSON.stringify({kind:'GROUNDED_FINAL',text:'The article compares philosophical parallels but documents no historical transmission.',grounding:'GROUNDED',citations:[citation],inferences:[],missingReasons:[],escalation:'NONE'});
+ const calls=[];
+ const answer=createLocalSynthesis({getConfig:()=>config,localModel:model,maxAnswerTokens:tokens,fetchImpl:async(_url,options)=>{calls.push(JSON.parse(options.body));return response(calls.length===1?first:corrected);}});
+ assert.equal((await answer(research,new AbortController().signal)).text,corrected);
+ assert.equal(calls.length,2);
+ assert.match(calls[1].messages[0].content,/historical exposure or influence without explicit fetched evidence/);
+ assert.deepEqual(JSON.parse(calls[0].messages[1].content).evidence,JSON.parse(calls[1].messages[1].content).evidence);
+ assert.doesNotMatch(JSON.stringify(calls[1]),/Stoicism was influenced by Epicureanism/);
+});
 
 test('plain self-contained questions get one fresh local call without evidence',async()=>{
  const plain=structuredClone(body);delete plain.request.evidence;plain.request.messages[0].content='Explain a synthetic concept.';

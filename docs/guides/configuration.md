@@ -95,7 +95,26 @@ The local Qwen catalog now uses a 24,576-token context window while retaining it
 
 The supported amendment schema also accepts `notes_dir`: an existing absolute directory outside source with no symlink components. The Markdown broker uses this owner binding; the default remains prefix-owned notes. GPU `local_port` may select a distinct nonprivileged loopback tunnel port; gateway, model and WebUI ports are rejected. Other GPU policy remains pinned.
 
-`integrations` may include `web` and `mcp`. For web, first run `.venv/bin/python scripts/bootstrap.py web --prefix /absolute/private/prefix`. This installs the reviewed Parallel and Firecrawl 2026.8.1 packages with lockfile integrity and scripts disabled; Firecrawl is retained in the optional runtime payload for rollback compatibility but is not activated. Enroll `PARALLEL_API_KEY` through the isolated OpenClaw secret store using masked input or standard input, never in a proposal or source. The generated provider configuration contains only a store reference. Search uses Parallel and is bounded to six results; the stopped-gateway `web_retrieval.max_results` amendment may lower or restore that bound within one through six. Fetch uses OpenClaw's core guarded HTTP/readability path and remains bounded to 6000 characters. It does not silently switch to Firecrawl when a site rejects extraction. These third-party packages are optional runtime dependencies, separate from the unchanged core runtime pins.
+`integrations` may include `web` and `mcp`. For web, first run `.venv/bin/python scripts/bootstrap.py web --prefix /absolute/private/prefix`. This installs the reviewed Parallel and Firecrawl 2026.8.1 packages with lockfile integrity and scripts disabled; Firecrawl is retained in the optional runtime payload for rollback compatibility but is not activated. Enroll `PARALLEL_API_KEY` through the isolated OpenClaw secret store using masked input or standard input, never in a proposal or source. The generated provider configuration contains only a store reference. Search uses Parallel and is bounded to six results per call; the stopped-gateway `web_retrieval.max_results` amendment may lower or restore that bound within one through six. Fetch uses OpenClaw's core guarded HTTP/readability path and remains bounded to 6000 characters. It does not silently switch to Firecrawl when a site rejects extraction. These third-party packages are optional runtime dependencies, separate from the unchanged core runtime pins.
+
+Public comparison/research prompts are reduced to their subject terms and source
+quality (for example, `scholarly`) rather than answer-format instructions.
+Source-First sends Parallel its provider-native public objective plus three
+bounded keyword variants for direct comparison, scholarly papers, and historical
+influence. Comparison research makes one additional bounded search for accessible
+article abstracts. Candidate titles or excerpts must identify the compared
+subjects and a relationship. Fetched comparison evidence must discuss both
+subjects and their relationship in the page body; a search title cannot supply
+missing evidence. Raw PDFs and blocked-page placeholders are rejected when the
+guarded fetch cannot extract readable content. A publisher is
+limited to two ranked candidates when other publishers exist, so an
+access-blocked index or a generic page about only one side is less likely to
+consume the evidence set. This does not bypass access controls, add a fetch
+provider, or treat search snippets as evidence. The final EvidencePack remains
+limited to six candidates, three accepted fetched pages, and 12,000 fetched
+characters. For historical comparisons, local synthesis may make one bounded
+repair attempt when its answer asserts exposure or influence absent from the
+fetched evidence; the final validator rejects that assertion if it persists.
 
 For current public requests, Source-First keeps a public `today` cue in its minimized search query. A single ZIP explicitly supplied for a non-private weather request is retained as the requested location; unrelated numeric identifiers and ZIPs in private context remain omitted. Current-day ZIP weather searches use a short location/forecast query so surrounding instructions cannot dilute retrieval. For that weather case, candidates must identify the ZIP, authoritative forecast pages are tried first, and fetched content must contain a concrete numeric weather condition before evidence is marked adequate. Search/fetch success or generic mentions of forecasting do not suffice: the Mac gate requires a grounded, delivered citation for `WEB_REQUIRED` requests and refuses an unsupported forecast.
 

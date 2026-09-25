@@ -34,6 +34,35 @@ PRIVATE_MARKERS = re.compile(
 )
 CONTROL = re.compile(r"/(?:gate|approve|attach|detach|result|cancel)\b", re.I)
 WORDS = re.compile(r"[A-Za-z][A-Za-z0-9_.+/#:-]{1,79}|\b\d{5}\b")
+QUERY_SCAFFOLDING = frozenset(
+    {
+        "both",
+        "cite",
+        "cites",
+        "citing",
+        "compare",
+        "comparing",
+        "directly",
+        "discuss",
+        "distinguish",
+        "documented",
+        "find",
+        "give",
+        "information",
+        "later",
+        "look",
+        "lookup",
+        "main",
+        "only",
+        "provide",
+        "search",
+        "source",
+        "sources",
+        "summarize",
+        "summary",
+        "up",
+    }
+)
 WEATHER = re.compile(r"\b(?:weather|forecast|temperature|rain|conditions)\b", re.I)
 WEATHER_ZIP = re.compile(r"\b(?:zip(?:\s*code)?|in|for)\s+(\d{5})\b", re.I)
 UPGRADE = re.compile(
@@ -105,7 +134,7 @@ def minimize_query(prompt):
         lower = word.lower().strip(".:/#-")
         if lower.isdigit() and lower != public_weather_zip:
             continue
-        if lower in {
+        if lower in QUERY_SCAFFOLDING or lower in {
             "please",
             "could",
             "would",

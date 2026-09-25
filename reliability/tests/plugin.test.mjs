@@ -9,6 +9,24 @@ test('runtime publishes one manifest and gate-local agents cannot bypass source 
  const blocked=await hooks.get('before_tool_call')({toolName:'web_search',params:{query:'synthetic'},toolCallId:'source-bypass'},{runId:'source-run',sessionKey:'agent:main:mac-gate-local-synthetic'});
  assert.equal(blocked.block,true);assert.match(blocked.blockReason,/SOURCE_COORDINATOR_REQUIRED/);
 });
+test('Parallel search accepts only the reviewed provider-native argument shape',async()=>{
+ const hook=hooks.get('before_tool_call');
+ const ctx={runId:'parallel-shape-run',sessionKey:'agent:workmode-broker:synthetic'};
+ const canonical={objective:'Compare two public scholarly subjects',search_queries:['subject one subject two comparison','subject one subject two history'],count:6};
+ const accepted=await hook({toolName:'web_search',params:canonical,toolCallId:'parallel-canonical'},ctx);
+ assert.equal(accepted?.block,undefined);
+ for(const [id,params] of [
+  ['obsolete',{query:'subject one subject two',count:6}],
+  ['mixed',{...canonical,query:'subject one subject two'}],
+  ['missing-objective',{search_queries:canonical.search_queries,count:6}],
+  ['empty-queries',{...canonical,search_queries:[]}],
+  ['invalid-count',{...canonical,count:41}],
+ ]){
+  const decision=await hook({toolName:'web_search',params,toolCallId:`parallel-${id}`},ctx);
+  assert.equal(decision?.block,true,id);
+  assert.match(decision.blockReason,/INVALID_ARGUMENT/,id);
+ }
+});
 test('installed hook repairs before execution and records explicit clamp on returned result',async()=>{
  const ctx={runId:'synthetic-run',toolCallId:'synthetic-call'};
  const decision=await hooks.get('before_tool_call')({toolName:'messages_search',params:{query:'from:Alex Example',limit:'100'},toolCallId:ctx.toolCallId},ctx);
