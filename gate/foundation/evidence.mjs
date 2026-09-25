@@ -45,15 +45,34 @@ export function createEvidencePack({requestDigest,scope,revision,sourceNeed,reas
 export function presentEvidence(pack,tier){
  if(!pack||pack.schema!==EVIDENCE_VERSION||typeof pack.packDigest!=='string')throw Error('evidence_pack_invalid');
  const profile=EVIDENCE_PROFILES[tier]??EVIDENCE_PROFILES.LOCAL_4B;let used=0,items=[];
- for(const item of pack.items){if(items.length>=profile.maxSources)break;const fragments=[];for(const f of item.fragments.filter(x=>['FETCHED_CONTENT','STRUCTURED_DIRECT_FACT','DETERMINISTIC_COMPUTED_RESULT'].includes(x.kind))){if(used>=profile.maxChars)break;const value=f.text.slice(0,Math.max(0,profile.maxChars-used));if(value){fragments.push({kind:f.kind,text:value});used+=value.length;}}if(fragments.length)items.push({sourceId:item.sourceId,url:item.finalUrl??item.url,sourceClass:item.sourceClass,retrievedAt:item.retrievedAt,fetchStatus:item.fetchStatus,truncated:item.truncated,untrusted:true,fragments});}
+ for(const item of pack.items){if(items.length>=profile.maxSources)break;const fragments=[];for(const f of item.fragments.filter(x=>['FETCHED_CONTENT','STRUCTURED_DIRECT_FACT','DETERMINISTIC_COMPUTED_RESULT'].includes(x.kind))){if(used>=profile.maxChars)break;const value=f.text.slice(0,Math.max(0,profile.maxChars-used));if(value){fragments.push({kind:f.kind,text:value});used+=value.length;}}if(fragments.length)items.push({sourceId:item.sourceId,url:item.finalUrl??item.url,sourceClass:item.sourceClass,publishedAt:item.publishedAt,retrievedAt:item.retrievedAt,fetchStatus:item.fetchStatus,truncated:item.truncated,untrusted:true,fragments});}
  return deepFreeze({schema:EVIDENCE_VERSION,profile:profile.id,packDigest:pack.packDigest,sourceNeed:pack.sourceNeed,adequacy:pack.adequacy,items});
 }
 
-export function validateGroundedAnswer(answer,pack,presented=null){
+function claimGuard(answer,presented,prompt){
+ if(typeof prompt!=='string'||!presented)return null;
+ const cited=presented.items.filter(item=>answer.citations.some(c=>c.sourceId===item.sourceId));
+ const evidence=cited.flatMap(item=>item.fragments.filter(f=>f.kind==='FETCHED_CONTENT').map(f=>f.text)).join('\n');
+ if(/\b(?:weather|forecast)\b/i.test(prompt)&&/Forecast for ZIP \d{5} on \d{4}-\d{2}-\d{2}/.test(evidence)){
+   const supported=new Set(evidence.match(/\b\d+(?:\.\d+)?\b/g)??[]);
+   for(const number of answer.text.match(/\b\d+(?:\.\d+)?\b/g)??[])if(!supported.has(number))return 'CLAIM_NUMBER_UNSUPPORTED';
+   for(const state of ['mostly cloudy','mostly sunny','partly cloudy','partly sunny','mostly clear','sunny','cloudy','overcast'])if(new RegExp(`\\b${state}\\b`,'i').test(answer.text)&&!new RegExp(`\\b${state}\\b`,'i').test(evidence))return 'CLAIM_CONDITION_UNSUPPORTED';
+ }
+ if(/\b(?:latest|newest|most recent)\b/i.test(prompt)&&/\b(?:headline|news|story|announcement)\b/i.test(prompt)&&/\b(?:publication date|published)\b/i.test(prompt)){
+   const day=value=>{const date=Date.parse(value??'');return Number.isFinite(date)?new Date(date).toISOString().slice(0,10):null;};
+   const dates=[...answer.text.matchAll(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/gi)].map(m=>day(m[0]));
+   const published=new Set(cited.map(item=>day(item.publishedAt)));
+   if(!dates.some(date=>date&&published.has(date)))return 'PUBLICATION_DATE_UNVERIFIED';
+ }
+ return null;
+}
+
+export function validateGroundedAnswer(answer,pack,presented=null,{prompt=null}={}){
  if(!exact(answer,['kind','text','grounding','citations','inferences','missingReasons','escalation'])||answer.kind!=='GROUNDED_FINAL'||!text(answer.text,32768)||!grounding.has(answer.grounding)||!Array.isArray(answer.citations)||answer.citations.length>6||!Array.isArray(answer.inferences)||!answer.inferences.every(x=>text(x,512))||!Array.isArray(answer.missingReasons)||!answer.missingReasons.every(code)||!['NONE','HOSTED_235B','OPENAI_FRONTIER'].includes(answer.escalation))return {ok:false,code:'GROUNDED_ANSWER_SHAPE'};
  const byId=new Map(pack?.items?.map(x=>[x.sourceId,x]));
  const delivered=new Map(presented?.items?.map(x=>[x.sourceId,x]));
  for(const c of answer.citations){if(!exact(c,['sourceId','url'])||!id(c.sourceId)||!url(c.url))return {ok:false,code:'CITATION_SHAPE'};const item=byId.get(c.sourceId),view=presented?delivered.get(c.sourceId):item;if(!item||!['FETCHED','TRUNCATED'].includes(item.fetchStatus)||(item.finalUrl??item.url)!==c.url||!view?.fragments?.some(x=>x.kind==='FETCHED_CONTENT'))return {ok:false,code:'CITATION_UNDELIVERED'};}
  if(pack?.sourceNeed==='WEB_REQUIRED'&&(pack.adequacy!=='ADEQUATE'||answer.grounding!=='GROUNDED'||answer.citations.length===0))return {ok:false,code:'GROUNDING_REQUIRED'};
+ const unsupported=claimGuard(answer,presented,prompt);if(unsupported)return {ok:false,code:unsupported};
  return {ok:true,value:deepFreeze(structuredClone(answer))};
 }

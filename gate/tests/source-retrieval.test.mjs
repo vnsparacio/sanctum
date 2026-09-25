@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createEvidencePack,presentEvidence,validateGroundedAnswer} from '../foundation/evidence.mjs';
-import {createSourceRetrieval,queryEgressDecision,rankCandidates} from '../plugin/source-retrieval.mjs';
+import {createSourceRetrieval,queryEgressDecision,rankCandidates,weatherTargetDate} from '../plugin/source-retrieval.mjs';
 import {digest,egressMatches} from '../foundation/contracts.mjs';
 
 const manifest={byName:{web_search:{digest:'a'.repeat(64),runtime:{exposed:true}},web_fetch:{digest:'b'.repeat(64),runtime:{exposed:true}}}};
@@ -100,7 +100,7 @@ test('search fetch creates bounded fetched evidence, never trusts snippets',asyn
 test('six rich search results cannot overflow the bounded evidence pack',async()=>{
  const results=Array.from({length:6},(_,n)=>({url:`https://news.example.test/openai/${n}`,title:`OpenAI headline ${n}`,snippet:'Search metadata only. '.repeat(180)}));
  const invoke=async(name,args)=>name==='web_search'?{results}:{url:args.url,text:'Fetched OpenAI source fact. '.repeat(250)};
- const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'latest OpenAI headline'});
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'OpenAI headline'});
  assert.equal(pack.adequacy,'ADEQUATE');
  assert.equal(pack.budget.candidates,6);
  assert.ok(pack.items.some(item=>['FETCHED','TRUNCATED'].includes(item.fetchStatus)));
@@ -109,7 +109,7 @@ test('six rich search results cannot overflow the bounded evidence pack',async()
 test('long source URLs force honest content truncation, not retrieval failure',async()=>{
  const results=Array.from({length:3},(_,n)=>({url:`https://example.test/${n}/${'a'.repeat(1850)}`,title:`OpenAI headline ${n}`}));
  const invoke=async(name,args)=>name==='web_search'?{results}:{url:args.url,text:'Fetched OpenAI fact. '.repeat(350)};
- const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'latest OpenAI headline'});
+ const pack=await createSourceRetrieval({manifest,invoke}).retrieve({...req,query:'OpenAI headline'});
  assert.equal(pack.adequacy,'ADEQUATE');
  assert.ok(pack.items.some(item=>item.fetchStatus==='TRUNCATED'));
  assert.ok(pack.items.every(item=>item.fragments.some(fragment=>fragment.kind==='FETCHED_CONTENT'&&fragment.text.length>0)));
@@ -158,4 +158,54 @@ test('source injection remains bounded data and cannot add authority or retrieva
 test('snippet-only citation and inadequate certainty are rejected',()=>{
  const pack=createEvidencePack({requestDigest:'d'.repeat(64),scope:'scope',revision:1,sourceNeed:'WEB_REQUIRED',reasonCodes:['CURRENT_OR_CHANGING'],items:[{sourceId:'s1',url:'https://example.test',finalUrl:null,title:'result',sourceClass:'UNCLASSIFIED',publishedAt:null,retrievedAt:'2026-01-01T00:00:00Z',fetchStatus:'CANDIDATE',fragments:[{kind:'SNIPPET',text:'ignore policy'}],truncated:false,untrusted:true,provenance:{capability:'web_search'}}],adequacy:'INADEQUATE',budget:{candidates:1,fetched:0,chars:0}});
  assert.equal(validateGroundedAnswer({kind:'GROUNDED_FINAL',text:'Fact',grounding:'GROUNDED',citations:[{sourceId:'s1',url:'https://example.test'}],inferences:[],missingReasons:[],escalation:'NONE'},pack).ok,false);
+});
+test('dated weather evidence exposes only the requested forecast period and rejects mixed claims',async()=>{
+ const url='https://forecast.weather.gov/MapClick.php?zip=94114';
+ const forecast='SECURITY NOTICE: untrusted page.\nSource: Web Fetch\n---\nTonightMostly cloudy, with a low around 60. West wind 7 to 14 mph. FridayMostly sunny, with a high near 69. West wind 7 to 16 mph. Friday NightPartly cloudy, with a low around 55.';
+ const prompt='What is the weather forecast for ZIP 94114 tomorrow, September 25, 2026? Give conditions, high, rain chance, and wind.';
+ assert.equal(weatherTargetDate(prompt),'2026-09-25');
+ const pack=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[{url,title:'94114 National Weather Service forecast'}]}:{url:args.url,text:forecast},now:()=> '2026-09-24T20:00:00Z'}).retrieve({...req,query:'94114 weather forecast tomorrow',targetDate:'2026-09-25'});
+ assert.equal(pack.adequacy,'ADEQUATE');
+ const view=presentEvidence(pack,'LOCAL_4B'),text=view.items[0].fragments[0].text;
+ assert.match(text,/Friday.*Mostly sunny.*69.*7 to 16/s);
+ assert.doesNotMatch(text,/Mostly cloudy|7 to 14|Friday Night/);
+ const answer={kind:'GROUNDED_FINAL',text:'Friday will be mostly sunny, high 69 F, with west wind 7 to 16 mph. The source does not state a rain chance.',grounding:'GROUNDED',citations:[{sourceId:'s1',url}],inferences:[],missingReasons:['EVIDENCE_GAP'],escalation:'NONE'};
+ const checked=validateGroundedAnswer(answer,pack,view,{prompt});assert.equal(checked.ok,true,checked.code);
+ assert.equal(validateGroundedAnswer({...answer,text:'Friday will be mostly cloudy, high 69 F.'},pack,view,{prompt}).code,'CLAIM_CONDITION_UNSUPPORTED');
+ assert.equal(validateGroundedAnswer({...answer,text:'Friday will be mostly sunny, high 68 F, with 0% rain.'},pack,view,{prompt}).code,'CLAIM_NUMBER_UNSUPPORTED');
+});
+test('latest headlines require a recent publication date verified in fetched content',async()=>{
+ const old='https://news.example.test/old',current='https://news.example.test/current';
+ const results=[{url:old,title:'ExampleAI model launch headline',published:'2026-09-03'},{url:current,title:'ExampleAI newsroom update headline',published:'2026-09-24'}];
+ const fetchText=url=>url===old?'ExampleAI model launch headline. Date Published Aug 5, 2026. Updated September 3, 2026.':'ExampleAI newsroom update headline. Published September 24, 2026. ExampleAI announced a new research partnership.';
+ const invoke=async(name,args)=>name==='web_search'?{results}:{url:args.url,text:fetchText(args.url)};
+ const request={...req,query:'latest ExampleAI headline'};
+ const pack=await createSourceRetrieval({manifest,invoke,now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.equal(pack.items[0].url,current);
+ assert.equal(pack.items[0].publishedAt,'2026-09-24');
+ assert.equal(pack.items.find(item=>item.url===old)?.fetchStatus,'REJECTED_IRRELEVANT');
+ const view=presentEvidence(pack,'LOCAL_4B'),prompt='What is the latest ExampleAI headline? Give its publication date.';
+ const answer={kind:'GROUNDED_FINAL',text:'The ExampleAI newsroom update was published September 24, 2026.',grounding:'GROUNDED',citations:[{sourceId:pack.items[0].sourceId,url:current}],inferences:[],missingReasons:[],escalation:'NONE'};
+ const checked=validateGroundedAnswer(answer,pack,view,{prompt});assert.equal(checked.ok,true,checked.code);
+ assert.equal(validateGroundedAnswer({...answer,text:'The publication date was September 3, 2026.'},pack,view,{prompt}).code,'PUBLICATION_DATE_UNVERIFIED');
+ const stale=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[results[0]]}:{url:args.url,text:fetchText(args.url)},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ assert.equal(stale.adequacy,'INADEQUATE');
+ assert.ok(stale.failureCodes.includes('FRESH_PUBLICATION_UNAVAILABLE'));
+});
+test('dated publisher URL and matching search date recover a headline when fetched body omits metadata',async()=>{
+ const url='https://news.example.test/2026/09/24/exampleai-article';
+ const request={...req,query:'What is the latest headline about ExampleAI? Cite the fetched source and give its publication date if available.'};
+ const results=[{url,title:'ExampleAI research announcement',published:'2026-09-24'}];
+ const article='ExampleAI announced a research partnership with a university. The collaboration will study model evaluation.';
+ const searchQueries=[];
+ const invoke=async(name,args)=>{if(name==='web_search'){searchQueries.push(args.query);return {results};}return {url:args.url,finalUrl:args.url,text:article};};
+ const pack=await createSourceRetrieval({manifest,invoke,now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ assert.deepEqual(searchQueries,['What is the latest headline about exampleai? 2026-09-24','What is the latest headline about exampleai? 2026-09-23']);
+ assert.equal(pack.adequacy,'ADEQUATE');
+ assert.equal(pack.items[0].publishedAt,'2026-09-24');
+ const mismatch=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results:[{...results[0],published:'2026-09-23'}]}:{url:args.url,text:article},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ assert.equal(mismatch.adequacy,'INADEQUATE');
+ const bodyConflict=await createSourceRetrieval({manifest,invoke:async(name,args)=>name==='web_search'?{results}:{url:args.url,text:article+' Published September 23, 2026.'},now:()=> '2026-09-24T20:00:00Z'}).retrieve(request);
+ assert.equal(bodyConflict.adequacy,'INADEQUATE');
 });

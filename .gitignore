@@ -16,3 +16,6 @@ __pycache__/
 *.pem
 *.log
 .DS_Store
+
+# Local evaluation workpad; owner-specific evidence and configuration stay out of source.
+.galileo/

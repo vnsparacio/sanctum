@@ -99,6 +99,26 @@ The supported amendment schema also accepts `notes_dir`: an existing absolute di
 
 For current public requests, Source-First keeps a public `today` cue in its minimized search query. A single ZIP explicitly supplied for a non-private weather request is retained as the requested location; unrelated numeric identifiers and ZIPs in private context remain omitted. Current-day ZIP weather searches use a short location/forecast query so surrounding instructions cannot dilute retrieval. For that weather case, candidates must identify the ZIP, authoritative forecast pages are tried first, and fetched content must contain a concrete numeric weather condition before evidence is marked adequate. Search/fetch success or generic mentions of forecasting do not suffice: the Mac gate requires a grounded, delivered citation for `WEB_REQUIRED` requests and refuses an unsupported forecast.
 
+For an explicit calendar-date ZIP forecast, the gate accepts fetched evidence
+only from the matching daytime period of a National Weather Service forecast
+page; if that period cannot be isolated, it refuses to assert a forecast. The
+local answer validator also rejects numbers and sky conditions absent from
+the selected period. "Latest headline" requests use at most two public,
+date-focused searches (current UTC day and previous day), merge at most six
+ranked candidates, and still fetch at most three pages. They prioritize recent
+subject-matching candidates with corroborable publication dates and require a
+recent publication date labeled in fetched page
+content or corroborated by matching search metadata and the fetched
+publisher's dated final URL. A conflicting date or an event date in article
+prose is not a verified publication date. These
+checks improve two observed failure modes but do not certify every sentence
+of an arbitrary web answer.
+
+A failed answer may show labeled, subject-relevant source excerpts and verified
+publication dates, but the rejected model prose is never presented as an
+answer. The Mac does not rewrite model-authored dates or use a correct source
+date to launder an otherwise unsupported summary.
+
 For a fetched source that supports only part of a request, the answer prompts require a cited answer for supported facts and an explicit statement that an omitted field is not stated. `GROUNDED` describes support for claims actually made, not completeness of requested fields; the response still records `EVIDENCE_GAP`. Neither local nor hosted reasoning may infer a precipitation probability or no-rain claim merely from sunny conditions. The citation and `WEB_REQUIRED` validation rules are unchanged.
 
 The gate's local-agent handoff narrows the per-turn OpenClaw tool surface for explicit Gmail, Messages, and Calendar requests to the requested source family. A second pre-tool guard blocks a wrong-family call, and no personal-source answer is delivered without a successful requested-family tool call. The Source-First evidence answer has no optional local tools. These restrictions do not grant new capabilities or replace owner permissions.

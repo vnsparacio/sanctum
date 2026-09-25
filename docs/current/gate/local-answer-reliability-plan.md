@@ -75,6 +75,43 @@ bounded fetched excerpt deterministically without trusting the model's
 selection. The reproducible probe remains a
 diagnostic, **not** a passing release gate or saved-WebUI qualification.
 
+The first saved-WebUI qualification on September 24 failed despite valid
+output. A "latest headline" answer confused an article's event date with its
+publication date and used an older article. A September 25 forecast mixed
+Thursday night's cloud and wind conditions into Friday and asserted an
+unsupported precipitation percentage. Both were accepted by the original
+shape-and-citation validator. The candidate was rolled back and the PR remains
+draft; neither failure is evidence that the old installed version is sound.
+
+The follow-up candidate adds bounded Mac-owned checks before the local model
+answers: a "latest headline" source must have a recent publication date
+explicitly labeled in fetched body text or independently corroborated by the
+search date and fetched publisher's dated final URL; a dated ZIP forecast must expose the
+requested daytime period from a fetched National Weather Service page, not an
+adjacent period or a stale commercial page. The final validator rejects
+unsupported numbers and sky-condition phrases in that selected forecast and
+rejects a headline publication date that does not match the verified date.
+These are conservative checks, not general semantic entailment. A missing or
+unparseable period/date becomes an explicit failure rather than a confident
+answer. In the second saved-WebUI trial the revised forecast answered the
+September 25 daytime period correctly and marked the absent precipitation
+chance unavailable. The headline still failed closed because the fetched
+article's readability text omitted its publication label, motivating the
+dated-URL corroboration rule. A later headline attempt still failed because
+the minimized search query selected generic indexes and a blocked article.
+The candidate now uses two bounded, date-focused public searches and ranks
+their combined results before the unchanged three-page fetch budget; a live
+retrieval-only probe found recent, corroborated article evidence. The next
+saved-WebUI answer cited a relevant recent article but omitted the requested
+publication date; the Mac correctly rejected it. A repeated saved-WebUI
+headline answer still mixed
+event dates into a long summary, so the host rejected it rather than treating
+any event date as publication evidence. The labeled source fallback now
+suppresses retrieval-warning boilerplate, selects a subject-relevant excerpt,
+and shows the verified publication date. This is a useful partial result, not
+a passing headline answer. Broader requalification remains required before
+this follow-up can merge.
+
 After review and owner merge, deploy only through the stopped-stack
 Source-First amendment and `make doctor`. Then run fresh saved-WebUI-chat
 acceptance with ordinary and strong public-source questions plus read-only
