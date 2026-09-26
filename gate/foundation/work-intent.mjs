@@ -9,7 +9,7 @@ const own=(o,k)=>Object.hasOwn(o,k);
 const typeOf=v=>v===null?'null':Array.isArray(v)?'array':typeof v;
 const fail=(code,detail={})=>({ok:false,code,detail});
 const editShapes=Object.freeze([
- Object.freeze({operation:null,fields:['path','old_text','new_text']}),
+ Object.freeze({operation:'replace',fields:['operation','path','old_text','new_text']}),
  Object.freeze({operation:'create',fields:['operation','path','new_text']}),
  Object.freeze({operation:'delete',fields:['operation','path']}),
  Object.freeze({operation:'move',fields:['operation','path','destination']}),
@@ -25,10 +25,15 @@ function semanticArguments(spec,{testOnly=false}={}){
  const schema=structuredClone(spec.arguments);
  delete schema.properties.task_id;
  schema.required=(schema.required??[]).filter(k=>k!=='task_id');
+ if(spec.name==='worktree_edit'&&hasEditVariants(schema))schema.properties.operation.enum=['replace',...schema.properties.operation.enum];
  if(testOnly&&spec.name==='worktree_command')schema.properties.operation={type:'string',enum:['test']};
  return schema;
 }
 const hasEditVariants=schema=>schema?.properties?.operation?.enum?.includes('create')&&schema.properties.destination&&schema.properties.old_text&&schema.properties.new_text;
+export function workIntentDescription(spec){
+ if(spec.name!=='worktree_edit'||!hasEditVariants(spec.arguments))return spec.description;
+ return 'Perform one bounded file action. Every Work Intent edit selects operation explicitly: replace {operation:replace,path,old_text,new_text}; create {operation:create,path,new_text}; delete {operation:delete,path}; move {operation:move,path,destination}. Use only fields belonging to that shape. Create requires an absent path and an existing parent directory. Replace, delete and move require reading the existing source first. Replace matches old_text exactly and uniquely; it is not a whole-file overwrite. The Mac enforces protected paths, symlinks, scope and exact diff authorization.';
+}
 function editArgumentsSchema(schema,operations){
  return {oneOf:visibleEditShapes(operations).map(shape=>({type:'object',properties:Object.fromEntries(shape.fields.map(field=>[field,field==='operation'?{const:shape.operation}:structuredClone(schema.properties[field])])),required:[...shape.fields],additionalProperties:false}))};
 }
@@ -78,6 +83,9 @@ export function bindWorkIntent(intent,context){
  if(!intent?.ok||intent.value.kind!=='TOOL_PROPOSAL')throw Error('work_intent_bind');
  const {value,spec}=intent;
  const taskBound=Object.hasOwn(spec.arguments?.properties??{},'task_id')?{task_id:context.scope}:{};
- return {schema:CONTRACT_VERSION,proposalId:context.proposalId,requestId:context.requestId,revision:context.turn,reasoner:context.reasoner,capability:spec.name,capabilityDigest:context.specDigests[spec.name],arguments:{...taskBound,...value.arguments}};
+ // Translate the explicit model discriminator to the unchanged exact-edit tool.
+ const argumentsValue=structuredClone(value.arguments);
+ if(spec.name==='worktree_edit'&&hasEditVariants(spec.arguments)&&argumentsValue.operation==='replace')delete argumentsValue.operation;
+ return {schema:CONTRACT_VERSION,proposalId:context.proposalId,requestId:context.requestId,revision:context.turn,reasoner:context.reasoner,capability:spec.name,capabilityDigest:context.specDigests[spec.name],arguments:{...taskBound,...argumentsValue}};
 }
 export const workIntentDiagnostics=result=>({code:result.code,capability:result.detail?.capability??'UNKNOWN',terminal:WORK_INTENT_TERMINALS.includes(result.detail?.terminal)?result.detail.terminal:null,keyword:result.detail?.keyword??null,field:['path','operation','source_need','max_chars','max_entries'].includes(result.detail?.field)?result.detail.field:null,receivedType:result.detail?.receivedType??null,missingRequired:result.detail?.missingRequired===true,unknownFieldCount:Number.isSafeInteger(result.detail?.unknownFieldCount)?result.detail.unknownFieldCount:0});
