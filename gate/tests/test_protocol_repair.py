@@ -270,7 +270,7 @@ class StreamingContracts(unittest.TestCase):
             self.assertEqual(
                 rendered["state"]["correction"]["code"], "REASONER_RESULT_SCHEMA"
             )
-            self.assertEqual(sent["max_tokens"], 1024)
+            self.assertEqual(sent["max_tokens"], 4096)
             self.assertEqual(sent["temperature"], 0)
             self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
 

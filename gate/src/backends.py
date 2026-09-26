@@ -597,7 +597,9 @@ class PrivateLeadBackend(Private80BBackend):
                     "content": canonical(model_request_view(request["request"])),
                 },
             ],
-            "max_tokens": 1024,
+            # The accepted interface reserves 4,096 output tokens. Structured
+            # file creation can exceed the former 1,024-token request ceiling.
+            "max_tokens": 4096,
             "temperature": 0,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -618,6 +620,10 @@ class PrivateLeadBackend(Private80BBackend):
         p = self.proposal_payload(request)
         self.health_check()
         context = self.diagnostic_guard()
+        if context:
+            # The separately authorized historical microprobe keeps its own
+            # 1,024-token reservation; ordinary Work Mode uses the full profile.
+            p["max_tokens"] = 1024
         started = time.monotonic()
         first = None
         usage = {}
