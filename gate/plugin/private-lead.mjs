@@ -7,6 +7,10 @@ import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs
 import {createReasonerAdapter} from '../foundation/contracts.mjs';
 
 export const PRIVATE_LEAD_DESTINATION=Object.freeze({kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_LEAD'});
+// Only fixed local worker refusal codes may cross into owner-visible receipts.
+// Never copy provider responses, exception text, pod identities, or URLs.
+const providerRefusals=new Set(['capacity_timeout','gpu_capacity_unavailable','gpu_price_or_identity','gpu_budget_unavailable','canonical_volume_mismatch','runpod_auth_missing','runpod_request_failed','runpod_request_uncertain','runpod_cli_drift','runpod_list_shape','runpod_response_limit','mac_guard_not_ready','ssh_key_missing','ssh_timeout','ssh_failed','tunnel_failed','model_readiness_timeout','allocation_unresolved','untracked_or_duplicate_pod','gpu_runtime_limit','lease_cancelled','operation_cancelled','private_lead_configuration','operation_unavailable']);
+export const safeProviderRefusal=value=>providerRefusals.has(value)?value:null;
 
 export function profileSystem(profile){
  if(profile?.status!=='accepted-characterized'||profile?.logical_profile!=='PRIVATE_LEAD'||typeof profile?.prompt?.system!=='string')throw Error('private_lead_profile_invalid');
@@ -26,7 +30,7 @@ export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>
      if(result?.reason==='private_lead_result_schema'){const error=Error('reasoner_result_shape');if(result.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;}
      const match=String(result?.reason??'').match(/^structured_decoding_http_(400|422)$/);
      if(match){const error=Error('structured_decoding_unavailable');error.httpStatus=Number(match[1]);error.backendFailure='HTTP_REJECTED';throw error;}
-     const error=Error('private_lead_unavailable');if(result?.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;
+     const error=Error('private_lead_unavailable');error.providerCode=safeProviderRefusal(result?.reason);if(result?.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;
    }
    if(result.telemetry)onTelemetry(structuredClone(result.telemetry));
    return result.result;

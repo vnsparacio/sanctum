@@ -263,6 +263,9 @@ def rendered_settings(prefix):
         ):
             if key in installed.get(section, {}):
                 value[section][key] = installed[section][key]
+    lead = installed.get("private_lead", {})
+    if (lead.get("gpu"), lead.get("max_hourly_usd")) == ("NVIDIA B200", 7):
+        value["private_lead"]["gpu"] = lead["gpu"]
     value["private_lead"]["enabled"] = True
     value["private_lead"]["auto_start"] = False
     value["work_mode"]["enabled"] = True

@@ -86,6 +86,17 @@ test('PRIVATE_LEAD adapter preserves the worker schema-failure classification',a
  const adapter=createPrivateLeadReasoner({profile,body:()=>({}),execute:async()=>({status:'UNAVAILABLE',reason:'private_lead_result_schema'})});
  await assert.rejects(adapter.invoke(request,new AbortController().signal),/reasoner_result_shape/);
 });
+test('Work Mode reports only allowlisted local provider refusal codes',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ for(const [workerReason,expected] of [['capacity_timeout','capacity_timeout'],['private-url-or-secret',undefined]]){
+  const adapter=createPrivateLeadReasoner({profile,body:()=>({}),execute:async()=>({status:'UNAVAILABLE',reason:workerReason})});
+  const events=[];
+  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true}),onEvent:(kind,fields)=>events.push({kind,...fields})})).run({task:'synthetic',scope,requestId});
+  assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'PRIVATE_LEAD_UNAVAILABLE');assert.equal(result.providerCode,expected);
+  assert.equal(events.find(row=>row.kind==='STOP').providerCode,expected);
+  assert.equal(JSON.stringify(events).includes('private-url-or-secret'),false);
+ }
+});
 test('surface is host-selected and never includes unavailable capabilities',()=>{assert.deepEqual(selectCapabilities(manifest,{names:['calc','unknown'],limit:4}).map(x=>x.name),['calc']);assert.equal(selectCapabilities(manifest,{limit:1}).length,1);});
 test('explicit research replaces patch, while ordinary app wording retains it',()=>{
  const tools=deriveCapabilityManifest({schemas:workModeTools,declaredTools:workModeTools.map(x=>x.name),registeredTools:workModeTools.map(x=>x.name),adaptedTools:[],runtimeConfig:{tools:{alsoAllow:workModeTools.map(x=>x.name)}}});

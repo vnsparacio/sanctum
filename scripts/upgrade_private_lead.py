@@ -108,6 +108,9 @@ def rendered_settings(prefix):
             if installed.get("private_lead", {}).get("enabled")
             else accepted[key]
         )
+    lead = installed.get("private_lead", {})
+    if (lead.get("gpu"), lead.get("max_hourly_usd")) == ("NVIDIA B200", 7):
+        d["private_lead"]["gpu"] = lead["gpu"]
     return json.dumps(d, indent=2) + "\n"
 
 

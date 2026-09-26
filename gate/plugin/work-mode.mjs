@@ -1,7 +1,7 @@
 /* Mac-owned bounded Work Mode coordinator. Model responses are proposals only. */
 import {randomBytes} from 'node:crypto';
 import {CONTRACT_VERSION,canonical,createToolResultEnvelope,digest,egressMatches,validateAuthorityDecision,validateToolProposal} from '../foundation/contracts.mjs';
-import {PRIVATE_LEAD_DESTINATION} from './private-lead.mjs';
+import {PRIVATE_LEAD_DESTINATION,safeProviderRefusal} from './private-lead.mjs';
 import {bindWorkIntent,validateWorkIntent,workIntentDiagnostics} from '../foundation/work-intent.mjs';
 
 import {decisionSurface,selectCapabilities} from '../foundation/decision-surface.mjs';
@@ -84,7 +84,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
    const started=now(),visible=selectCapabilities(manifest,{names:capabilities,limit:5});
    const state={phase:'INSPECT',task,workspace:workspace?{kind:'ISOLATED_WORKTREE',id:scope}:null,iteration:0,modelCalls:0,invalidProposals:0,observations:[],tests:{passed:null,required:false},executionStateKnown:true,evaluatorState:'NOT_RUN',evaluationTrigger:null,review:null,reviewUsed:false,workspaceGeneration:0,readRequired:[],editRecovery:null};
    const emit=(kind,fields={})=>{try{onEvent(kind,{phase:state.phase,iteration:state.iteration,modelCalls:state.modelCalls,...fields});}catch{throw Error('ledger_unavailable');}};
-   const stop=(status,reason)=>{const value={status,reason,phase:'TERMINAL',state:structuredClone(state),metrics:{iterations:state.iteration,modelCalls:state.modelCalls,elapsedSeconds:now()-started}};try{emit('STOP',{status,reason,...value.metrics});}catch{return {...value,status:'ENVIRONMENT_FAILURE',reason:'LEDGER_UNAVAILABLE'};}return value;};
+   const stop=(status,reason,providerCode=null)=>{const value={status,reason,phase:'TERMINAL',state:structuredClone(state),metrics:{iterations:state.iteration,modelCalls:state.modelCalls,elapsedSeconds:now()-started},...(providerCode?{providerCode}:{})};try{emit('STOP',{status,reason,...(providerCode?{providerCode}:{}),...value.metrics});}catch{return {...value,status:'ENVIRONMENT_FAILURE',reason:'LEDGER_UNAVAILABLE'};}return value;};
    const hostStop=()=>{if(signal?.aborted)return ['BLOCKED','OWNER_CANCELLED'];const exceeded=budgetStatus();return exceeded?['BUDGET_EXHAUSTED',exceeded]:now()-started>maxTaskSeconds?['BUDGET_EXHAUSTED','TASK_TIME_BUDGET']:null;};
    const guardedStop=()=>{const stopped=hostStop();return stopped?stop(stopped[0],stopped[1]):null;};
    const callDeadline=()=>{
@@ -176,7 +176,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
          if(state.invalidProposals>1)return stop('SAFETY_POLICY_BLOCK','REPEATED_INVALID_PROPOSAL');
          state.correction={code:'REASONER_RESULT_SCHEMA',resultRequirements:decisionArtifact.resultRequirements,diagnostic:error?.diagnostic?sanitizeProtocolDiagnostic(error.diagnostic):null,attempt:1,correctionsRemaining:1,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest,allowedCapabilities:[...context.visible],allowedTerminalKinds:[...context.terminalKinds]};state.observations.push({kind:'REJECTION',code:'REASONER_RESULT_SCHEMA'});state.iteration++;continue;
        }
-       return stop(signal?.aborted?'BLOCKED':modelDeadline.timedOut()?'BUDGET_EXHAUSTED':'ENVIRONMENT_FAILURE',signal?.aborted?'OWNER_CANCELLED':modelDeadline.timedOut()?'TASK_TIME_BUDGET':'PRIVATE_LEAD_UNAVAILABLE');
+       return stop(signal?.aborted?'BLOCKED':modelDeadline.timedOut()?'BUDGET_EXHAUSTED':'ENVIRONMENT_FAILURE',signal?.aborted?'OWNER_CANCELLED':modelDeadline.timedOut()?'TASK_TIME_BUDGET':'PRIVATE_LEAD_UNAVAILABLE',!signal?.aborted&&!modelDeadline.timedOut()?safeProviderRefusal(error?.providerCode):null);
      }finally{modelDeadline.dispose();}
      const intent=validateWorkIntent(result,{specs:phaseVisible,terminalKinds});
      try{emit('SEMANTIC_SURFACE',surface('RESULT',typeof result?.kind==='string'&&['TOOL_PROPOSAL','FINAL','ESCALATION'].includes(result.kind)?result.kind:'UNKNOWN',intent.ok?'VALID':intent.code));}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}
