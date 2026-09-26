@@ -31,8 +31,8 @@ export function workCapabilityRefusal(name,response){
  return {ok:false,error:{code,...(diagnostic?{diagnostic}:{})},executionState:preflight?'NOT_STARTED':['worktree_edit','worktree_patch'].includes(name)?'COMPLETION_UNKNOWN':'NOT_STARTED',verifier:preflight?'REJECTED':'UNKNOWN'};
 }
 export function selectWorkCapabilityNames(goal,configured,manifest){
- const research=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal);
- // Work Mode exposes at most five tools. Research may replace patch, but must
+ const research=/\bresearch\b|\b(?:look up|search|browse)(?: the| official)? (?:web|docs|documentation)\b|\b(?:current|latest) (?:docs|documentation|version|release|api)\b/i.test(goal);
+ // Work Mode exposes at most five tools. Explicit research may replace patch, but must
  // never remove the edit path from a profile that permits workspace changes.
  const preferred=research?['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research']:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
  return preferred.filter(name=>configured.includes(name)&&manifest.byName[name]);
