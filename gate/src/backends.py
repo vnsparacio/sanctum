@@ -234,12 +234,23 @@ def generation_order(value):
     xgrammar preserves schema property order. Alphabetical order forces a tool's
     arguments before its kind, while allowing escalation to begin with kind.
     Preserve an equal schema with the discriminator and target fields first.
+    File actions must choose operation before generating new_text; otherwise
+    create commits to a file body before selecting its action, while delete
+    can select operation immediately after path.
     """
     if type(value) is list:
         return [generation_order(x) for x in value]
     if type(value) is not dict:
         return value
-    preferred = ("kind", "capability", "arguments", "path")
+    preferred = (
+        "kind",
+        "capability",
+        "arguments",
+        "operation",
+        "path",
+        "old_text",
+        "new_text",
+    )
     keys = [k for k in preferred if k in value] + sorted(
         k for k in value if k not in preferred
     )
