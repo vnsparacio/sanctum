@@ -14,10 +14,10 @@ const intent=(capability,args)=>({kind:'TOOL_PROPOSAL',capability,arguments:args
 const edit=intent('worktree_edit',{path:'a.js',old_text:'old',new_text:'new'}),read=intent('worktree_read',{path:'a.js'});
 const allow=(proposal,spec,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:proposal.capability,proposalDigest:digest(proposal),scope,effect:spec.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
 const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
-function run(rows,{invoke,observeRead,egressOverride}={}){
+function run(rows,{invoke,observeRead,egressOverride,maxIterations=8}={}){
  const requests=[],events=[],calls=[];let i=0;
  const work=createWorkMode({manifest,reasoner:{async invoke(request){requests.push(request);return rows[i++]??{kind:'ESCALATION',reason:'DONE'};}},authorize:allow,egress:egressOverride??egress,observeRead,verifyProtectedEvidence:syntheticProtection,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:async({scope,workspace,turn})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',digest:'a'.repeat(64),bytes:1},status:{ok:true,executionState:'COMPLETED',digest:'b'.repeat(64),bytes:1}}),invoke:async({proposal})=>{calls.push(proposal);return invoke?invoke(proposal):{ok:true,executionState:'COMPLETED',data:{text:'old'}};},evaluate:async()=>({passed:true}),onEvent:(kind,value)=>events.push({kind,...value})});
- return work.run({task:'synthetic',scope,capabilities:names.filter(x=>x!=='source_first_research')}).then(result=>({result,requests,events,calls}));
+ return work.run({task:'synthetic',scope,capabilities:names.filter(x=>x!=='source_first_research'),maxIterations}).then(result=>({result,requests,events,calls}));
 }
 test('normal registered and generation surfaces expose bounded edit and patch operations without whole-file fallback',()=>{
  assert.ok(names.includes('worktree_edit'));assert.ok(names.includes('worktree_patch'));for(const name of ['worktree_create','worktree_delete','worktree_replace_file'])assert.ok(!names.includes(name));
@@ -73,6 +73,20 @@ test('missing source and parent feedback is actionable without exposing paths',a
  assert.ok(!JSON.stringify(event).includes('src/app.js'));
  assert.ok(out.requests[1].messages[1].content.includes('workspace root'));
  assert.ok(!out.requests[1].messages[1].content.includes('src/app.js'));
+});
+test('missing-source recovery survives observation turnover and blocks exact blind retries',async()=>{
+ const missing=intent('worktree_edit',{operation:'delete',path:'new.js'});
+ const created=intent('worktree_edit',{operation:'create',path:'new.js',new_text:'export const ready = true;'});
+ const rows=[missing,missing,...Array.from({length:6},()=>intent('worktree_list',{})),created];
+ const out=await run(rows,{maxIterations:12,invoke:p=>p.capability==='worktree_edit'&&p.arguments.operation==='delete'?workCapabilityRefusal('worktree_edit',{reason:'EDIT_SOURCE_MISSING'}):{ok:true,executionState:'COMPLETED',verifier:'VERIFIED'}});
+ assert.equal(out.calls.filter(x=>x.capability==='worktree_edit').length,2);
+ assert.ok(out.events.some(x=>x.kind==='EDIT_RETRY_BLOCKED'&&x.code==='EDIT_SOURCE_MISSING'));
+ assert.ok(out.events.some(x=>x.kind==='PROPOSAL'&&x.outcome==='REJECTED'&&x.code==='EDIT_SOURCE_MISSING_RETRY'));
+ const beforeCreate=out.requests.at(-2);
+ assert.equal(JSON.parse(beforeCreate.messages[1].content).state.missingSource.operation,'delete');
+ assert.equal(JSON.parse(beforeCreate.messages[1].content).state.missingSource.path,'new.js');
+ assert.ok(beforeCreate.messages[0].content.includes('Create the absent file'));
+ assert.equal(out.result.state.missingSource,null);
 });
 test('bounded unified diff survives semantic transport and task binding exactly',()=>{
  const patch='--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+added\n';
