@@ -248,7 +248,7 @@ class StreamingContracts(unittest.TestCase):
                         self.assertEqual(
                             [set(shape["properties"]) for shape in arguments["oneOf"]],
                             [
-                                {"path", "old_text", "new_text"},
+                                {"operation", "path", "old_text", "new_text"},
                                 {"operation", "path", "new_text"},
                                 {"operation", "path"},
                                 {"operation", "path", "destination"},
@@ -425,7 +425,7 @@ class StreamingContracts(unittest.TestCase):
                         self.assertEqual(fields[:2], ["operation", "path"])
                     else:
                         self.assertEqual(fields, ["path", "old_text", "new_text"])
-        self.assertEqual(operations, {"create", "delete", "move"})
+        self.assertEqual(operations, {"replace", "create", "delete", "move"})
 
 
 class PackagingClosure(unittest.TestCase):

@@ -14,7 +14,7 @@ import {digest} from './foundation/contracts.mjs';
 export const SURFACES=Object.freeze(['ordinaryIneligible','ordinaryEligible','researchIneligible','researchEligible','testOnlyIneligible','reviewer']);
 const examples={
  worktree_list:{path:'.',max_entries:10},worktree_read:{path:'index.js',max_chars:100},
- worktree_edit:{path:'index.js',old_text:'old\n',new_text:'new\n'},
+ worktree_edit:{operation:'replace',path:'index.js',old_text:'old\n',new_text:'new\n'},
  worktree_patch:{patch:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},
  worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'},
 };

@@ -23,7 +23,7 @@ export async function runProtocolMicroprobes({reasoner,manifest,onEvent=()=>{},b
    if(controller.signal.aborted||now()>=deadline)break;
    await beforeProbe(probe.id);let seeded=false,captured=false,semanticChoice=false,probeCalls=0;
    const wrapped={async invoke(request,callSignal){
-    if(probe.id==='postPatch'&&!seeded){seeded=true;return {kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{path:'index.js',old_text:'old',new_text:'synthetic host seed; no filesystem effect'}};}
+    if(probe.id==='postPatch'&&!seeded){seeded=true;return {kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{operation:'replace',path:'index.js',old_text:'old',new_text:'synthetic host seed; no filesystem effect'}};}
     if(controller.signal.aborted||now()>=deadline)throw Error('microprobe_deadline');
     if(calls>=(experiment?5:6)||probeCalls>=2)throw Error('microprobe_call_limit');calls++;probeCalls++;
     return reasoner.invoke(request,callSignal);

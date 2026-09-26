@@ -11,7 +11,7 @@ import {syntheticProtection} from './fixtures/task-evidence.mjs';
 const names=workModeTools.map(x=>x.name),manifest=deriveCapabilityManifest({schemas:workModeTools,registeredTools:names,declaredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
 const specs=manifest.capabilities,scope='a'.repeat(32),options={specs,terminalKinds:['ESCALATION']};
 const intent=(capability,args)=>({kind:'TOOL_PROPOSAL',capability,arguments:args});
-const edit=intent('worktree_edit',{path:'a.js',old_text:'old',new_text:'new'}),read=intent('worktree_read',{path:'a.js'});
+const edit=intent('worktree_edit',{operation:'replace',path:'a.js',old_text:'old',new_text:'new'}),read=intent('worktree_read',{path:'a.js'});
 const allow=(proposal,spec,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:proposal.capability,proposalDigest:digest(proposal),scope,effect:spec.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
 const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
 function run(rows,{invoke,observeRead,egressOverride,maxIterations=8}={}){
@@ -31,12 +31,12 @@ test('generated and host edit contracts require the same four exact argument sha
  const authoritative=workIntentSchema([editSpec],{terminalKinds:['ESCALATION']});
  const branch=authoritative.oneOf.find(x=>x.properties?.capability?.const==='worktree_edit');
  const shapes=branch.properties.arguments.oneOf;
- assert.deepEqual(shapes.map(x=>x.required),[['path','old_text','new_text'],['operation','path','new_text'],['operation','path'],['operation','path','destination']]);
+ assert.deepEqual(shapes.map(x=>x.required),[['operation','path','old_text','new_text'],['operation','path','new_text'],['operation','path'],['operation','path','destination']]);
  assert.ok(shapes.every(x=>x.additionalProperties===false));
  const generation=workIntentRequest([editSpec],{terminalKinds:['ESCALATION']});
  assert.equal(generation.schema.oneOf[0].properties.arguments.oneOf.length,4);
  for(const args of [
-  {path:'README.md',old_text:'old',new_text:'new'},
+  {operation:'replace',path:'README.md',old_text:'old',new_text:'new'},
   {operation:'create',path:'index.js',new_text:'content'},
   {operation:'delete',path:'README.md'},
   {operation:'move',path:'README.md',destination:'docs/README.md'},
@@ -69,7 +69,7 @@ test('malformed edit is corrected before authority and preflight refusal is know
  assert.deepEqual(workCapabilityRefusal('worktree_edit',{reason:'EDIT_SCHEMA_INVALID'}),{ok:false,error:{code:'EDIT_SCHEMA_INVALID'},executionState:'NOT_STARTED',verifier:'REJECTED'});
  assert.equal(workCapabilityRefusal('worktree_edit',{reason:'operation_unavailable'}).executionState,'COMPLETION_UNKNOWN');
 });
-test('missing source and parent feedback is actionable without exposing paths',async()=>{
+test('missing source and parent feedback identifies the model-relative action without host paths',async()=>{
  for(const [code,phrase] of [['EDIT_SOURCE_MISSING','operation=create'],['EDIT_PARENT_MISSING','workspace root']]){
   const response=workCapabilityRefusal('worktree_edit',{reason:code});
   assert.equal(response.executionState,'NOT_STARTED');
@@ -82,7 +82,7 @@ test('missing source and parent feedback is actionable without exposing paths',a
  assert.deepEqual({operation:event.operation,pathDepth:event.pathDepth,errorCode:event.errorCode},{operation:'create',pathDepth:2,errorCode:'EDIT_PARENT_MISSING'});
  assert.ok(!JSON.stringify(event).includes('src/app.js'));
  assert.ok(out.requests[1].messages[1].content.includes('workspace root'));
- assert.ok(!out.requests[1].messages[1].content.includes('src/app.js'));
+ assert.ok(out.requests[1].messages[1].content.includes('src/app.js')); // echoed model-relative action, never a host path
 });
 test('missing-source recovery narrows the next surface and accepts a valid create',async()=>{
  const missing=intent('worktree_edit',{operation:'delete',path:'new.js'});
@@ -114,13 +114,13 @@ test('bounded unified diff survives semantic transport and task binding exactly'
  assert.equal(validateWorkIntent(intent('worktree_patch',{patch:'x'.repeat(48001)}),options).ok,false);
 });
 test('semantic transport, binding, reliability and signed packet preserve exact strings',()=>{
- const args={path:'a.js',old_text:' \t{ "雪": "\\n" }\r\n\n',new_text:'\n\t  {"quote":"\\\""}\r\n '};
+ const args={operation:'replace',path:'a.js',old_text:' \t{ "雪": "\\n" }\r\n\n',new_text:'\n\t  {"quote":"\\\""}\r\n '};
  const wire=JSON.parse(JSON.stringify(intent('worktree_edit',args)));
  const adapter=validateReasonerResult(wire,{supportsWorkIntents:true});assert.equal(adapter.ok,true);
  const checked=validateWorkIntent(adapter.value,options);assert.equal(checked.ok,true);
  const proposal=bindWorkIntent(checked,{scope,proposalId:'p',requestId:'r',turn:0,reasoner:'PRIVATE_LEAD',specDigests:{worktree_edit:manifest.byName.worktree_edit.digest}});
  const validation=prepare('worktree_edit',proposal.arguments,compile(workModeTools));assert.equal(validation.ok,true);assert.deepEqual(validation.rules,[]);
- const packet=normalizeWorkspacePacket('worktree_edit',validation.params);assert.deepEqual(packet,{task_id:scope,...args});
+ const packet=normalizeWorkspacePacket('worktree_edit',validation.params);const {operation,...exactArgs}=args;assert.equal(operation,'replace');assert.deepEqual(packet,{task_id:scope,...exactArgs});
  for(const old_text of ['',null,42])assert.equal(validateWorkIntent(intent('worktree_edit',{...args,old_text}),options).ok,false);
  assert.equal(validateWorkIntent(intent('worktree_edit',{...args,new_text:''}),options).ok,true);
  assert.equal(validateWorkIntent(intent('worktree_edit',{...args,edits:[]}),options).ok,false);
@@ -173,4 +173,41 @@ test('file operation completion tracks only paths that can be observed afterward
   const out=await run([intent('worktree_edit',args)],{egressOverride:()=>({})});
   assert.equal(out.result.state.tests.required,true);assert.deepEqual(out.result.state.readRequired,required);
  }
+});
+
+test('replacement discriminator is model-only and legacy model shape is refused',async()=>{
+ const legacy={path:'a.js',old_text:'old',new_text:'new'};
+ assert.equal(validateWorkIntent(intent('worktree_edit',legacy),options).ok,false);
+ const out=await run([edit]);
+ assert.deepEqual(out.calls[0].arguments,{task_id:scope,...legacy});
+ const context=JSON.parse(out.requests[0].messages[1].content);
+ assert.match(context.capabilities.find(x=>x.name==='worktree_edit').description,/operation:replace/);
+ assert.ok(!context.capabilities.find(x=>x.name==='worktree_edit').description.includes('no operation'));
+ assert.deepEqual(JSON.parse(out.requests[1].messages[1].content).state.observations[0].result.action,{operation:'replace',path:'a.js'});
+});
+
+test('existing-destination recovery requires disclosed same-path read and permits exact replace',async()=>{
+ const create=intent('worktree_edit',{operation:'create',path:'a.js',new_text:'new'});
+ const out=await run([create,intent('worktree_list',{}),intent('worktree_read',{path:'b.js'}),read,edit],{observeRead:async()=>true,invoke:p=>p.arguments.operation==='create'?{ok:false,error:{code:'EDIT_DESTINATION_EXISTS'},executionState:'NOT_STARTED'}:{ok:true,executionState:'COMPLETED',data:{text:'old'}}});
+ for(const index of [1,2,3])assert.ok(!out.requests[index].state.workIntent.schema.oneOf.some(x=>x.properties.capability?.const==='worktree_edit'));
+ assert.ok(out.requests[4].state.workIntent.schema.oneOf.some(x=>x.properties.capability?.const==='worktree_edit'));
+ assert.equal(out.calls.filter(x=>x.arguments.operation==='create').length,1);
+ assert.deepEqual(out.calls.at(-1).arguments,{task_id:scope,path:'a.js',old_text:'old',new_text:'new'});
+ const feedback=JSON.parse(out.requests[1].messages[1].content).state;
+ assert.deepEqual(feedback.observations[0].result.action,{operation:'create',path:'a.js'});
+ assert.equal(feedback.editRecovery.requiredAction,'worktree_read');
+ assert.ok(!JSON.stringify(feedback.observations[0].result).includes('new_text'));
+ const blind=await run([create,create,create],{invoke:()=>({ok:false,error:{code:'EDIT_DESTINATION_EXISTS'},executionState:'NOT_STARTED'})});
+ assert.equal(blind.calls.length,1);assert.equal(blind.result.reason,'REPEATED_INVALID_PROPOSAL');
+});
+
+test('action context is bound by egress and withheld results cannot disclose it or create collision recovery',async()=>{
+ const create=intent('worktree_edit',{operation:'create',path:'relative.txt',new_text:'UNRETURNED_CONTENT'});
+ let packet;
+ const out=await run([create],{invoke:()=>({ok:false,error:{code:'EDIT_DESTINATION_EXISTS'},executionState:'NOT_STARTED'}),egressOverride:({claim,envelope})=>{packet=envelope;assert.equal(claim.packetDigest,digest(envelope));return {};}});
+ assert.deepEqual(packet.action,{operation:'create',path:'relative.txt'});
+ assert.ok(!JSON.stringify(packet).includes('UNRETURNED_CONTENT'));
+ const next=JSON.parse(out.requests[1].messages[1].content).state;
+ assert.equal(next.editRecovery,null);
+ assert.ok(!JSON.stringify(next.observations).includes('relative.txt'));
 });
