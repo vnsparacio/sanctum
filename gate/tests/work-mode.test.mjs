@@ -9,7 +9,7 @@ import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} fr
 import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerationSchema} from '../foundation/vllm-structured-output.mjs';
 import {argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
-import {normalizeWorkspacePacket,workCapabilityErrorCode} from '../plugin/work-command.mjs';
+import {normalizeWorkspacePacket,selectWorkCapabilityNames,workCapabilityErrorCode} from '../plugin/work-command.mjs';
 import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
 import {createWorkLedger} from '../plugin/work-ledger.mjs';
 import {workModeTools} from '../plugin/workspace-tools.mjs';
@@ -87,6 +87,21 @@ test('PRIVATE_LEAD adapter preserves the worker schema-failure classification',a
  await assert.rejects(adapter.invoke(request,new AbortController().signal),/reasoner_result_shape/);
 });
 test('surface is host-selected and never includes unavailable capabilities',()=>{assert.deepEqual(selectCapabilities(manifest,{names:['calc','unknown'],limit:4}).map(x=>x.name),['calc']);assert.equal(selectCapabilities(manifest,{limit:1}).length,1);});
+test('research wording keeps the permitted workspace edit capability visible',()=>{
+ const tools=deriveCapabilityManifest({schemas:workModeTools,declaredTools:workModeTools.map(x=>x.name),registeredTools:workModeTools.map(x=>x.name),adaptedTools:[],runtimeConfig:{tools:{alsoAllow:workModeTools.map(x=>x.name)}}});
+ const configured=workModeTools.map(x=>x.name);
+ for(const goal of ['Build a local web application.','Use current documentation to build an app.','Build an app.']){
+  const names=selectWorkCapabilityNames(goal,configured,tools);
+  const visible=selectCapabilities(tools,{names,limit:5}).map(x=>x.name);
+  assert.ok(visible.includes('worktree_edit'),goal);
+  assert.ok(visible.includes('worktree_command'),goal);
+  assert.ok(visible.includes('worktree_read'),goal);
+  assert.ok(visible.length<=5);
+  assert.equal(visible.includes('source_first_research'),/\b(?:web|current)\b/i.test(goal));
+ }
+ const readOnly=configured.filter(x=>x!=='worktree_edit');
+ assert.ok(!selectWorkCapabilityNames('Build a web app.',readOnly,tools).includes('worktree_edit'));
+});
 test('Work Mode reveals only enumerated workspace repair codes',()=>{assert.equal(workCapabilityErrorCode('workspace_patch_shape'),'WORKSPACE_PATCH_SHAPE');assert.equal(workCapabilityErrorCode('arbitrary backend text'),'WORK_CAPABILITY_FAILED');});
 test('Work Mode fills owner-controlled defaults before signing workspace packets',()=>{
  assert.deepEqual(normalizeWorkspacePacket('worktree_list',{task_id:'a'.repeat(32)}),{task_id:'a'.repeat(32),path:'',max_entries:100});

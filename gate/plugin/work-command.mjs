@@ -19,6 +19,13 @@ const id=()=>randomBytes(16).toString('hex');
 const safeProfile=value=>/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(value);
 const safeFile=path=>{const stat=lstatSync(path);if(stat.isSymbolicLink()||(stat.mode&0o077))throw Error('unsafe_work_profile');return JSON.parse(readFileSync(path,'utf8'));};
 export const workCapabilityErrorCode=value=>value==='protected_input_modified'?'PROTECTED_INPUT_MODIFIED':typeof value==='string'&&/^(?:workspace_[a-z0-9_]{1,64}|EDIT_[A-Z_]{1,64})$/.test(value)?value.toUpperCase():'WORK_CAPABILITY_FAILED';
+export function selectWorkCapabilityNames(goal,configured,manifest){
+ const research=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal);
+ // Work Mode exposes at most five tools. Research may replace patch, but must
+ // never remove the edit path from a profile that permits workspace changes.
+ const preferred=research?['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research']:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
+ return preferred.filter(name=>configured.includes(name)&&manifest.byName[name]);
+}
 export function normalizeWorkspacePacket(name,args){
  if(name==='worktree_list')return {task_id:args.task_id,path:args.path??'',max_entries:args.max_entries??100};
  if(name==='worktree_read')return {task_id:args.task_id,path:args.path,max_chars:args.max_chars??12000};
@@ -176,8 +183,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    const work=createWorkMode({reasoner,manifest,observeRead,invoke:async({proposal,signal})=>{try{return await gatewayInvoke(task,proposal.capability,proposal.arguments,proposal,signal);}catch(error){if(['worktree_edit','worktree_patch'].includes(proposal.capability))return {ok:false,error:{code:'EDIT_RESPONSE_UNAVAILABLE'},executionState:'COMPLETION_UNKNOWN'};throw error;}},authorize:authority,egress:resultEgress,evaluate:evaluator,reviewer,workspaceState,verifyProtectedEvidence,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,onEvent:(kind,value)=>task.ledger.event(kind,value),budgetStatus:()=>task.telemetry.promptTokens+task.telemetry.completionTokens>(profile.max_tokens??100000)?'TOKEN_BUDGET':task.telemetry.inferenceSeconds>(profile.max_gpu_seconds??900)?'GPU_ACTIVE_BUDGET':task.telemetry.estimatedCostUsd>(profile.max_cost_usd??settings.private_lead.max_hourly_usd/2)?'COST_BUDGET':null});
    active++;task.phase='RUNNING';
    const configured=profile.capabilities??['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command','source_first_research'];
-   const preferred=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal)?['worktree_list','worktree_read','source_first_research','worktree_command']:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
-   const names=preferred.filter(x=>configured.includes(x)&&manifest.byName[x]);
+   const names=selectWorkCapabilityNames(goal,configured,manifest);
    task.promise=(async()=>{try{task.result=await work.run({task:goal,scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal});task.status=task.result.status;task.phase='TERMINAL';task.ledger.finish({status:task.status,reason:task.result.reason,metrics:task.result.metrics,telemetry:task.telemetry});}catch{task.status='ENVIRONMENT_FAILURE';task.phase='TERMINAL';task.result={status:task.status,reason:'WORK_MODE_FAILURE'};try{task.ledger.finish({...task.result,telemetry:task.telemetry});}catch{}}finally{active--;}})();
    return {text:`Work Mode task ${task.id} started in an isolated workspace. Use /work result ${task.id} or /work status. PRIVATE_LEAD has no authority; the host controls execution and completion.`};
  }
