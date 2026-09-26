@@ -28,9 +28,25 @@ test('R1 guidance matches host acceptance on all applicable runtime surfaces',as
   const run=await leadRun([plan(valid)],{capabilities,bytes});ruleCheck(context(run.captures[0]).state.resultRequirements);
   assert.deepEqual(request(run.captures[0]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas[prefix+(bytes?'Eligible':'Ineligible')].request);
  }
- const post=await leadRun([plan(tool('worktree_edit',{path:'index.js',old_text:'old',new_text:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);
+ const post=await leadRun([plan(tool('worktree_edit',{path:'index.js',old_text:'old',new_text:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.ordinaryIneligible.request);
  for(const reason of ['A','A'.repeat(80),'A09_:-'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,true);
  for(const reason of ['','a','A'.repeat(81),'A ','A\n','A\r','A\u2028','A\u2029','雪'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,false);
+});
+test('post-edit handoff permits multiple files before one required test while hiding FINAL',async()=>{
+ const run=await leadRun([
+  plan(tool('worktree_edit',{operation:'create',path:'app.js',new_text:'synthetic app'})),
+  plan(tool('worktree_edit',{operation:'create',path:'test.js',new_text:'synthetic test'})),
+  plan(tool('worktree_command',{operation:'test'})),
+ ]);
+ assert.equal(run.attempts,3);assert.equal(run.effects,3);assert.equal(run.result.reason,'FINAL_WITHOUT_PASSING_EVIDENCE');
+ for(const sent of run.captures.slice(1)){
+  const body=context(sent);assert.equal(body.state.decisionState,'TEST_REQUIRED');
+  assert.equal(body.state.completion.postPatchTestOutstanding,true);
+  assert.ok(body.capabilities.some(x=>x.name==='worktree_edit'));
+  assert.ok(!request(sent).state.workIntent.schema.oneOf.some(x=>x.properties?.kind?.const==='FINAL'));
+  assert.deepEqual(request(sent).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.ordinaryIneligible.request);
+ }
+ assert.equal(run.rows.filter(x=>x.kind==='EVALUATOR').length,1);
 });
 test('R1 valid nonterminal result clears correction before a subsequent independent correction',async()=>{
  const run=await leadRun([plan(bad),plan(tool('worktree_read',{path:'index.js'})),plan(bad),plan(valid)]);

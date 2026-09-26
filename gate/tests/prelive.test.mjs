@@ -23,9 +23,9 @@ test('six exact surfaces enumerate every valid branch through AJV without compil
  assert.equal(artifact.exactCompiler,'NOT_RUN');assert.equal(artifact.tokenMeasurement,'NOT_RUN');assert.equal(artifact.liveEndpoint,'NOT_RUN');
 });
 test('production request preparation preserves actual character boundary correction and reviewer',()=>{
- const a=readinessArtifact();assert.equal(a.messages.ordinaryInitial.request.state.phase,'PLAN');assert.equal(a.messages.ordinaryInitial.request.state.decisionState,'WORK_REQUIRED');assert.equal(a.messages.postPatchTestOnly.request.state.decisionState,'TEST_REQUIRED');assert.equal(a.messages.nearCharacterLimit.request.messages[1].content.length,64000);
+ const a=readinessArtifact();assert.equal(a.messages.ordinaryInitial.request.state.phase,'PLAN');assert.equal(a.messages.ordinaryInitial.request.state.decisionState,'WORK_REQUIRED');assert.equal(a.messages.postPatchContinue.request.state.decisionState,'TEST_REQUIRED');assert.equal(a.messages.nearCharacterLimit.request.messages[1].content.length,64000);
  assert.ok(a.messages.activeCorrection.request.messages[1].content.includes('REASONER_RESULT_SCHEMA'));
- assert.deepEqual(a.messages.postPatchTestOnly.request.state.workIntent,a.surfaces.testOnlyIneligible.request);
+ assert.deepEqual(a.messages.postPatchContinue.request.state.workIntent,a.surfaces.ordinaryIneligible.request);
  assert.deepEqual(a.messages.reviewer.request.state.workIntent,a.surfaces.reviewer.request);
  assert.deepEqual(a,readinessArtifact());
 });

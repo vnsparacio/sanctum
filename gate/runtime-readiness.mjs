@@ -71,12 +71,12 @@ export function readinessArtifact(){
 
  const profile=JSON.parse(readFileSync(new URL('./runtime/private-lead-interface-profile.json',import.meta.url)));
  const messages={};
- function request(label,{observations=[],correction=null,testOnly=false}={}){
-  const selected=testOnly?['worktree_command']:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
-  const artifact=decisionSurface({manifest,names:selected,limit:testOnly?1:5,testOnly,terminalKinds:['ESCALATION']});
+ function request(label,{observations=[],correction=null,postPatch=false}={}){
+  const selected=['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
+  const artifact=decisionSurface({manifest,names:selected,limit:5,terminalKinds:['ESCALATION']});
   if(correction)correction={...correction,resultRequirements:artifact.resultRequirements,diagnostic:null,schemaVersion:artifact.request.version,schemaDigest:artifact.request.schemaDigest,allowedCapabilities:artifact.capabilities,allowedTerminalKinds:['ESCALATION']};
-  const state={task:'Synthetic offline inspection task.',phase:'PLAN',iteration:testOnly||correction?1:observations.length,tests:{passed:null,required:testOnly},observations,correction,workspaceGeneration:testOnly?1:0};
-  const value=buildWorkRequest({requestId:'synthetic',scope:'a'.repeat(32),state,decisionState:testOnly?'TEST_REQUIRED':'WORK_REQUIRED',decisionArtifact:artifact,phaseVisible:artifact.specs,eligibility:{eligible:false,reason:testOnly?'POST_PATCH_TEST_REQUIRED':'NO_COMPLETABLE_DIFF'},completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,captured:{digest:'b'.repeat(64)},manifest,terminalKinds:['ESCALATION']});
+  const state={task:'Synthetic offline inspection task.',phase:'PLAN',iteration:postPatch||correction?1:observations.length,tests:{passed:null,required:postPatch},observations,correction,workspaceGeneration:postPatch?1:0};
+  const value=buildWorkRequest({requestId:'synthetic',scope:'a'.repeat(32),state,decisionState:postPatch?'TEST_REQUIRED':'WORK_REQUIRED',decisionArtifact:artifact,phaseVisible:artifact.specs,eligibility:{eligible:false,reason:postPatch?'POST_PATCH_TEST_REQUIRED':'NO_COMPLETABLE_DIFF'},completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,captured:{digest:'b'.repeat(64)},manifest,terminalKinds:['ESCALATION']});
   messages[label]={system:profileSystem(profile),request:value};return value;
  }
  request('ordinaryInitial');
@@ -86,7 +86,7 @@ export function readinessArtifact(){
  let low=0,high=64000;
  while(low<high){const n=Math.ceil((low+high)/2);try{request('nearCharacterLimit',{observations:[{provenance:'MAC_CAPABILITY',data:'x'.repeat(n)}]});low=n;}catch(e){if(e.message!=='model_context_limit')throw e;high=n-1;}}
  request('nearCharacterLimit',{observations:[{provenance:'MAC_CAPABILITY',data:'x'.repeat(low)}]});
- request('postPatchTestOnly',{testOnly:true});
+ request('postPatchContinue',{postPatch:true});
  messages.reviewer={system:profileSystem(profile),request:buildReviewerRequest({task:{id:'a'.repeat(32)},requestId:'synthetic-review',reviewGoal:'Synthetic offline review.',state:{iteration:0,tests:{passed:true,required:false},observations:[]},claim:'Synthetic completion.',reviewEvidence:{checks:[],diffStable:true,diffDigest:'b'.repeat(64),workspaceDiff:'Synthetic diff.'},manifest})};
  return {schema:'sanctum-runtime-readiness/v1',surfaces,messages,profile:{model:profile.model,revision:profile.revision,modelWindow:profile.context.model_window_tokens,reservedOutput:profile.context.reserved_output_tokens},hostValidation:'SOURCE_DIALECT_AND_HOST_ONLY',exactCompiler:'NOT_RUN',liveEndpoint:'NOT_RUN',tokenMeasurement:'NOT_RUN'};
 }
