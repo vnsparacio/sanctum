@@ -58,6 +58,8 @@ For a missing-source edit refusal, Work Mode retains a bounded host-authored rec
 
 After a successful edit, Work Mode keeps the permitted inspection and edit capabilities available so a multi-file candidate can be finished. The host still marks test evidence stale and hides `FINAL` until a test runs. A successful explicit test invokes the host evaluator and, when configured, the reviewer. The model can still escalate; its private receipt records only a digest, fixed category and broad concept flags for the reason, never the reason text.
 
+For a profile whose `test` operation is exactly `node --test`, the runner requires a Node test summary with at least one discovered test. Node exits successfully when it finds zero tests, so zero or unverified test counts now fail the Work Mode command and cannot trigger completion. This proves only that a test ran; task-specific acceptance still requires a protected acceptance contract or independent owner inspection.
+
 The edit intent exposes four exact argument shapes: replace uses `path`, `old_text`, and `new_text` with no operation; create uses `operation=create`, `path`, and `new_text`; delete uses `operation=delete` and `path`; move uses `operation=move`, `path`, and `destination`. A malformed shape is rejected before authority or mutation and consumes the existing bounded correction turn. A provider or execution failure with uncertain mutation still stops the task.
 
 Doctor refuses config/source drift. Preserve the receipt and investigate the exact change. Setup refuses a partial/nonempty prefix rather than erasing it. Keep the old deployment until new acceptance closes. No uninstall removes credentials, databases, snapshots, model caches or provider volumes.

@@ -142,7 +142,7 @@ class UnitRunner(unittest.TestCase):
         background = self.run_case(FakeChild(stdout=b"parent exited\n"))
         self.assertEqual(
             (background["code"], background["executionState"]),
-            ("OK", "COMPLETED"),
+            ("TEST_COUNT_UNVERIFIED", "COMPLETED"),
         )
         self.assertTrue(background["container_absent"])
 
@@ -163,6 +163,17 @@ class UnitRunner(unittest.TestCase):
             ("CLEANUP_UNKNOWN", "COMPLETION_UNKNOWN"),
         )
         self.assertFalse(ambiguous["container_absent"])
+
+    def test_node_test_requires_a_nonzero_reported_test_count(self):
+        for summary in (b"# tests 0\n", "ℹ tests 0\n".encode()):
+            with self.subTest(summary=summary):
+                result = self.run_case(FakeChild(stdout=summary))
+                self.assertEqual(result["code"], "NO_TESTS_DISCOVERED")
+                self.assertFalse(result["ok"])
+                self.assertTrue(result["container_absent"])
+        passed = self.run_case(FakeChild(stdout=b"# tests 2\n"))
+        self.assertEqual(passed["code"], "OK")
+        self.assertTrue(passed["ok"])
 
     def test_resource_arguments_are_host_selected(self):
         calls = []
@@ -264,6 +275,13 @@ class OciRunner(unittest.TestCase):
         self.assertTrue(result["container_absent"])
         self.assertEqual(result["limits"]["network"], "none")
         self.assertEqual(result["runner"], verify_runner(self.settings, "test"))
+
+    def test_empty_node_suite_is_not_a_passing_test(self):
+        (self.workspace / "index.test.js").unlink()
+        result = run(self.settings, "test", str(self.workspace), "test")
+        self.assertEqual(result["code"], "NO_TESTS_DISCOVERED")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["container_absent"])
 
     def test_output_timeout_and_file_limits_fail_closed_and_cleanup(self):
         self.write_profile(10)
