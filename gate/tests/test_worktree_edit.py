@@ -162,6 +162,16 @@ class ExactEdit(unittest.TestCase):
         self.assertEqual((self.root / "empty.js").read_bytes(), b"")
         self.assert_diff_receipt(empty)
 
+    def test_missing_source_and_parent_have_distinct_safe_refusals(self):
+        self.read("a.js")
+        self.assertTrue(self.fileop("delete", "a.js")["ok"])
+        self.assertEqual(self.edit(path="a.js")["code"], "EDIT_SOURCE_MISSING")
+        self.assertEqual(
+            self.fileop("create", "src/app.js", new_text="export {};\n")["code"],
+            "EDIT_PARENT_MISSING",
+        )
+        self.assertTrue(self.fileop("create", "app.js", new_text="export {};\n")["ok"])
+
     def test_atomic_patch_changes_existing_and_new_files(self):
         value = """--- a/a.js
 +++ b/a.js

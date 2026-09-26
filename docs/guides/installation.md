@@ -178,6 +178,13 @@ mutation supports:
 - one exact, preflighted multi-file unified text patch with rollback on partial
   failure.
 
+New files can be created at the worktree root or inside existing directories;
+the editor does not create parent directories. A missing parent returns
+`EDIT_PARENT_MISSING`, while a replace, delete, or move of an absent source
+returns `EDIT_SOURCE_MISSING`. These bounded refusals tell the worker to use an
+existing directory or the explicit create operation without disclosing host
+paths. Unsafe paths and symlinks still return `EDIT_PATH_INVALID`.
+
 It does not permit path escapes, arbitrary host files, symlink traversal,
 binary/vendor/generated content, fuzzy patching, generic shell arguments,
 networked runner commands, live host mounts, Docker-socket access or worker

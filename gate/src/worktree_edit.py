@@ -119,12 +119,20 @@ def opened(root, path):
         current = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         fds.append(current)
         for part in path.split("/")[:-1]:
-            current = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
-            )
+            try:
+                current = os.open(
+                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
+                )
+            except FileNotFoundError:
+                raise Refused("EDIT_PARENT_MISSING") from None
             fds.append(current)
         name = path.split("/")[-1]
-        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=current)
+        try:
+            fd = os.open(
+                name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=current
+            )
+        except FileNotFoundError:
+            raise Refused("EDIT_SOURCE_MISSING") from None
         fds.append(fd)
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -743,9 +751,12 @@ def opened_parent(root, path):
         current = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         fds.append(current)
         for part in path.split("/")[:-1]:
-            current = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
-            )
+            try:
+                current = os.open(
+                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
+                )
+            except FileNotFoundError:
+                raise Refused("EDIT_PARENT_MISSING") from None
             fds.append(current)
         yield current, path.split("/")[-1]
     except OSError:
