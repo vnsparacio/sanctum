@@ -19,14 +19,20 @@ const id=()=>randomBytes(16).toString('hex');
 const safeProfile=value=>/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(value);
 const safeFile=path=>{const stat=lstatSync(path);if(stat.isSymbolicLink()||(stat.mode&0o077))throw Error('unsafe_work_profile');return JSON.parse(readFileSync(path,'utf8'));};
 export const workCapabilityErrorCode=value=>value==='protected_input_modified'?'PROTECTED_INPUT_MODIFIED':typeof value==='string'&&/^(?:workspace_[a-z0-9_]{1,64}|EDIT_[A-Z_]{1,64})$/.test(value)?value.toUpperCase():'WORK_CAPABILITY_FAILED';
-const editPreflightRefusals=new Set(['EDIT_SCHEMA_INVALID','EDIT_ENCODING_UNSUPPORTED','EDIT_REPLACEMENT_TOO_LARGE','EDIT_PATH_INVALID','EDIT_NO_CHANGE']);
+const editPreflightRefusals=new Set(['EDIT_SCHEMA_INVALID','EDIT_ENCODING_UNSUPPORTED','EDIT_REPLACEMENT_TOO_LARGE','EDIT_PATH_INVALID','EDIT_PARENT_MISSING','EDIT_SOURCE_MISSING','EDIT_NO_CHANGE']);
+const editRecoveryHints=Object.freeze({
+ EDIT_PARENT_MISSING:'The parent directory does not exist. Create a file at the workspace root or in an existing directory; this tool cannot create directories.',
+ EDIT_SOURCE_MISSING:'The source file does not exist. Use operation=create for a new file, or list the workspace before editing an existing file.',
+ EDIT_PATH_INVALID:'Use a safe workspace-relative path. List the workspace before retrying; do not use absolute paths, path traversal, or symlinks.',
+});
 export function workCapabilityRefusal(name,response){
  const code=workCapabilityErrorCode(response?.reason),preflight=name==='worktree_edit'&&editPreflightRefusals.has(code);
- return {ok:false,error:{code},executionState:preflight?'NOT_STARTED':['worktree_edit','worktree_patch'].includes(name)?'COMPLETION_UNKNOWN':'NOT_STARTED',verifier:preflight?'REJECTED':'UNKNOWN'};
+ const diagnostic=name==='worktree_edit'?editRecoveryHints[code]:null;
+ return {ok:false,error:{code,...(diagnostic?{diagnostic}:{})},executionState:preflight?'NOT_STARTED':['worktree_edit','worktree_patch'].includes(name)?'COMPLETION_UNKNOWN':'NOT_STARTED',verifier:preflight?'REJECTED':'UNKNOWN'};
 }
 export function selectWorkCapabilityNames(goal,configured,manifest){
- const research=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal);
- // Work Mode exposes at most five tools. Research may replace patch, but must
+ const research=/\bresearch\b|\b(?:look up|search|browse)(?: the| official)? (?:web|docs|documentation)\b|\b(?:current|latest) (?:docs|documentation|version|release|api)\b/i.test(goal);
+ // Work Mode exposes at most five tools. Explicit research may replace patch, but must
  // never remove the edit path from a profile that permits workspace changes.
  const preferred=research?['worktree_list','worktree_read','worktree_edit','worktree_command','source_first_research']:['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
  return preferred.filter(name=>configured.includes(name)&&manifest.byName[name]);

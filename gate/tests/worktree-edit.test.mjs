@@ -59,6 +59,21 @@ test('malformed edit is corrected before authority and preflight refusal is know
  assert.deepEqual(workCapabilityRefusal('worktree_edit',{reason:'EDIT_SCHEMA_INVALID'}),{ok:false,error:{code:'EDIT_SCHEMA_INVALID'},executionState:'NOT_STARTED',verifier:'REJECTED'});
  assert.equal(workCapabilityRefusal('worktree_edit',{reason:'operation_unavailable'}).executionState,'COMPLETION_UNKNOWN');
 });
+test('missing source and parent feedback is actionable without exposing paths',async()=>{
+ for(const [code,phrase] of [['EDIT_SOURCE_MISSING','operation=create'],['EDIT_PARENT_MISSING','workspace root']]){
+  const response=workCapabilityRefusal('worktree_edit',{reason:code});
+  assert.equal(response.executionState,'NOT_STARTED');
+  assert.equal(response.error.code,code);
+  assert.ok(response.error.diagnostic.includes(phrase));
+  assert.ok(!response.error.diagnostic.includes('src/app.js'));
+ }
+ const out=await run([intent('worktree_edit',{operation:'create',path:'src/app.js',new_text:'x'})],{invoke:()=>workCapabilityRefusal('worktree_edit',{reason:'EDIT_PARENT_MISSING'})});
+ const event=out.events.find(x=>x.kind==='EDIT');
+ assert.deepEqual({operation:event.operation,pathDepth:event.pathDepth,errorCode:event.errorCode},{operation:'create',pathDepth:2,errorCode:'EDIT_PARENT_MISSING'});
+ assert.ok(!JSON.stringify(event).includes('src/app.js'));
+ assert.ok(out.requests[1].messages[1].content.includes('workspace root'));
+ assert.ok(!out.requests[1].messages[1].content.includes('src/app.js'));
+});
 test('bounded unified diff survives semantic transport and task binding exactly',()=>{
  const patch='--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+added\n';
  const checked=validateWorkIntent(intent('worktree_patch',{patch}),options);assert.equal(checked.ok,true);
