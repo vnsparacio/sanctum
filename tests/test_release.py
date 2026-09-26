@@ -117,6 +117,29 @@ class Setup(unittest.TestCase):
         self.assertNotIn("firecrawl", updated["plugins"]["allow"])
         self.assertNotIn("firecrawl", updated["plugins"]["entries"])
 
+    def test_work_mode_amendment_exposes_patch_to_profiles_and_broker(self):
+        op.setup(self.prefix)
+        config = json.loads(work_mode.openclaw_config(self.prefix))
+        profiles = json.loads(
+            work_mode.work_profile(
+                self.prefix,
+                "/usr/local/bin/docker",
+                "unix:///var/run/docker.sock",
+                "runner:test",
+                "sha256:test",
+            )
+        )["profiles"]
+        for profile in profiles.values():
+            self.assertIn("worktree_patch", profile["capabilities"])
+        self.assertIn(
+            "worktree_patch",
+            config["agents"]["entries"]["workmode-broker"]["tools"]["allow"],
+        )
+        self.assertIn("worktree_patch", config["tools"]["alsoAllow"])
+        self.assertIn(
+            "worktree_patch", config["agents"]["entries"]["main"]["tools"]["deny"]
+        )
+
     def test_doctor_detects_stale_imported_webui_functions(self):
         op.setup(self.prefix)
         self.assertEqual(op.webui_function_sync(self.prefix), "not-enrolled")
