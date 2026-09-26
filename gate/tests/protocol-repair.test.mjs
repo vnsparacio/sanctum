@@ -25,7 +25,7 @@ const manifest=deriveCapabilityManifest({schemas:workModeTools.map(x=>({name:x.n
 const evidence=async({scope,workspace,turn})=>({schema:WORKSPACE_EVIDENCE_VERSION,scope,workspace,turn,diff:{ok:true,executionState:'COMPLETED',bytes:0,digest:'a'.repeat(64)},status:{ok:true,executionState:'COMPLETED',bytes:0,digest:'b'.repeat(64)}});
 const config={verifyProtectedEvidence:syntheticProtection,manifest,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:evidence,invoke:async()=>({ok:true}),egress:()=>({}),evaluate:async()=>({passed:false})};
 test('preflight schema is the exact runtime schema, including branch order',async()=>{
- for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>!['worktree_edit','worktree_patch'].includes(x))]]){
+ for(const [surface,capabilities] of [['ordinaryIneligible',names.filter(x=>x!=='source_first_research')],['researchIneligible',names.filter(x=>x!=='worktree_patch')]]){
   let captured;
   await createWorkMode({...config,reasoner:{async invoke(request){captured=request;return {kind:'ESCALATION',reason:'SYNTHETIC'};}}}).run({task:'synthetic',scope:'s',capabilities});
   assert.deepEqual(captured.state.workIntent,preflightCurrentWorkIntentSchemas().schemas[surface].request);

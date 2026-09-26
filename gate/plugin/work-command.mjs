@@ -19,6 +19,11 @@ const id=()=>randomBytes(16).toString('hex');
 const safeProfile=value=>/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(value);
 const safeFile=path=>{const stat=lstatSync(path);if(stat.isSymbolicLink()||(stat.mode&0o077))throw Error('unsafe_work_profile');return JSON.parse(readFileSync(path,'utf8'));};
 export const workCapabilityErrorCode=value=>value==='protected_input_modified'?'PROTECTED_INPUT_MODIFIED':typeof value==='string'&&/^(?:workspace_[a-z0-9_]{1,64}|EDIT_[A-Z_]{1,64})$/.test(value)?value.toUpperCase():'WORK_CAPABILITY_FAILED';
+const editPreflightRefusals=new Set(['EDIT_SCHEMA_INVALID','EDIT_ENCODING_UNSUPPORTED','EDIT_REPLACEMENT_TOO_LARGE','EDIT_PATH_INVALID','EDIT_NO_CHANGE']);
+export function workCapabilityRefusal(name,response){
+ const code=workCapabilityErrorCode(response?.reason),preflight=name==='worktree_edit'&&editPreflightRefusals.has(code);
+ return {ok:false,error:{code},executionState:preflight?'NOT_STARTED':['worktree_edit','worktree_patch'].includes(name)?'COMPLETION_UNKNOWN':'NOT_STARTED',verifier:preflight?'REJECTED':'UNKNOWN'};
+}
 export function selectWorkCapabilityNames(goal,configured,manifest){
  const research=/\b(?:current|latest|documentation|docs|research|web)\b/i.test(goal);
  // Work Mode exposes at most five tools. Research may replace patch, but must
@@ -113,7 +118,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      }
      const packet=normalizeWorkspacePacket(name,args);
      const response=await call(task,operation,packet,signal);
-     if(response?.status!=='OK')return {ok:false,error:{code:workCapabilityErrorCode(response?.reason)},executionState:['worktree_edit','worktree_patch'].includes(name)?'COMPLETION_UNKNOWN':'NOT_STARTED'};
+     if(response?.status!=='OK')return workCapabilityRefusal(name,response);
      if(response.result?.ok===false)return {ok:false,error:{code:response.result.code??'COMMAND_FAILED',...(typeof response.result?.diagnostic==='string'?{diagnostic:response.result.diagnostic.slice(0,12000)}:{})},executionState:response.result?.executionState??'COMPLETED',verifier:'REJECTED',truncated:response.result?.code==='OUTPUT_LIMIT'};
      if(name==='worktree_read'&&response.result?._observation){task.pendingRead={path:args.path,token:response.result._observation,text:response.result.text};delete response.result._observation;}
      return {ok:true,data:response.result,executionState:response.result?.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};

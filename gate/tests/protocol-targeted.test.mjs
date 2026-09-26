@@ -24,7 +24,7 @@ test('R1 initial and correction HTTP requests communicate the retained reason ru
 });
 test('R1 guidance matches host acceptance on all applicable runtime surfaces',async()=>{
  const schema=workIntentSchema([],{terminalKinds:['ESCALATION']});assert.equal(schema.oneOf[0].properties.reason.pattern,pattern);
- for(const [prefix,capabilities] of [['ordinary',ordinary],['research',['worktree_list','worktree_read','source_first_research','worktree_command']]])for(const bytes of [0,1]){
+ for(const [prefix,capabilities] of [['ordinary',ordinary],['research',['worktree_list','worktree_read','worktree_edit','source_first_research','worktree_command']]])for(const bytes of [0,1]){
   const run=await leadRun([plan(valid)],{capabilities,bytes});ruleCheck(context(run.captures[0]).state.resultRequirements);
   assert.deepEqual(request(run.captures[0]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas[prefix+(bytes?'Eligible':'Ineligible')].request);
  }

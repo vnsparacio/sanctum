@@ -8,6 +8,12 @@ const hostFields=new Set(['schema','proposalId','requestId','revision','reasoner
 const own=(o,k)=>Object.hasOwn(o,k);
 const typeOf=v=>v===null?'null':Array.isArray(v)?'array':typeof v;
 const fail=(code,detail={})=>({ok:false,code,detail});
+const editShapes=Object.freeze([
+ Object.freeze({operation:null,fields:['path','old_text','new_text']}),
+ Object.freeze({operation:'create',fields:['operation','path','new_text']}),
+ Object.freeze({operation:'delete',fields:['operation','path']}),
+ Object.freeze({operation:'move',fields:['operation','path','destination']}),
+]);
 
 function semanticArguments(spec,{testOnly=false}={}){
  const schema=structuredClone(spec.arguments);
@@ -15,6 +21,16 @@ function semanticArguments(spec,{testOnly=false}={}){
  schema.required=(schema.required??[]).filter(k=>k!=='task_id');
  if(testOnly&&spec.name==='worktree_command')schema.properties.operation={type:'string',enum:['test']};
  return schema;
+}
+const hasEditVariants=schema=>schema?.properties?.operation?.enum?.includes('create')&&schema.properties.destination&&schema.properties.old_text&&schema.properties.new_text;
+function editArgumentsSchema(schema){
+ return {oneOf:editShapes.map(shape=>({type:'object',properties:Object.fromEntries(shape.fields.map(field=>[field,field==='operation'?{const:shape.operation}:structuredClone(schema.properties[field])])),required:[...shape.fields],additionalProperties:false}))};
+}
+function exactEditShape(args){
+ return editShapes.some(shape=>{
+  if((own(args,'operation')?args.operation:null)!==shape.operation)return false;
+  return Object.keys(args).length===shape.fields.length&&shape.fields.every(field=>own(args,field));
+ });
 }
 function terminalVisibility(options){
  if(!Object.hasOwn(options,'terminalKinds')||!Array.isArray(options.terminalKinds))throw Error('work_intent_terminal_visibility');
@@ -24,7 +40,7 @@ function terminalVisibility(options){
 }
 export function workIntentSchema(specs,options={}){
  const {testOnly=false}=options,terminals=terminalVisibility(options);
- const branches=specs.map(spec=>({type:'object',properties:{kind:{const:'TOOL_PROPOSAL'},capability:{const:spec.name},arguments:semanticArguments(spec,{testOnly})},required:['kind','capability','arguments'],additionalProperties:false}));
+ const branches=specs.map(spec=>{const argumentsSchema=semanticArguments(spec,{testOnly});return {type:'object',properties:{kind:{const:'TOOL_PROPOSAL'},capability:{const:spec.name},arguments:spec.name==='worktree_edit'&&hasEditVariants(argumentsSchema)?editArgumentsSchema(argumentsSchema):argumentsSchema},required:['kind','capability','arguments'],additionalProperties:false};});
  if(terminals.has('FINAL'))branches.push({type:'object',properties:{kind:{const:'FINAL'},text:{type:'string',minLength:1,maxLength:32768}},required:['kind','text'],additionalProperties:false});
  if(terminals.has('ESCALATION'))branches.push({type:'object',properties:{kind:{const:'ESCALATION'},reason:{type:'string',pattern:'^[A-Z][A-Z0-9_:-]{0,79}$'}},required:['kind','reason'],additionalProperties:false});
  if(!branches.length)throw Error('work_intent_empty_surface');
@@ -49,6 +65,7 @@ export function validateWorkIntent(value,options={}){
  const check=(v,s)=>{if(s.type==='string')return typeof v==='string'&&(s.minLength===undefined||v.length>=s.minLength)&&(s.maxLength===undefined||v.length<=s.maxLength)&&(!s.pattern||new RegExp(s.pattern,'u').test(v))&&(!s.enum||s.enum.includes(v));if(s.type==='integer')return Number.isSafeInteger(v)&&(s.minimum===undefined||v>=s.minimum)&&(s.maximum===undefined||v<=s.maximum);return false;};
  for(const key of required)if(!own(a,key))return fail('ARGUMENT_SCHEMA',{keyword:'required',field:key,missingRequired:true});
  for(const [key,v] of Object.entries(a))if(!check(v,props[key]))return fail('ARGUMENT_SCHEMA',{keyword:props[key].enum?'enum':'type',field:key,receivedType:typeOf(v)});
+ if(spec.name==='worktree_edit'&&hasEditVariants(schema)&&!exactEditShape(a))return fail('ARGUMENT_SCHEMA',{keyword:'oneOf',field:'operation'});
  return {ok:true,value:structuredClone(value),spec};
 }
 export function bindWorkIntent(intent,context){

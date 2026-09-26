@@ -243,9 +243,22 @@ class StreamingContracts(unittest.TestCase):
                     self.assertEqual(
                         list(branch["properties"]), ["kind", "capability", "arguments"]
                     )
-                    properties = branch["properties"]["arguments"]["properties"]
-                    if "path" in properties:
-                        self.assertEqual(next(iter(properties)), "path")
+                    arguments = branch["properties"]["arguments"]
+                    if "oneOf" in arguments:
+                        self.assertEqual(
+                            [set(shape["properties"]) for shape in arguments["oneOf"]],
+                            [
+                                {"path", "old_text", "new_text"},
+                                {"operation", "path", "new_text"},
+                                {"operation", "path"},
+                                {"operation", "path", "destination"},
+                            ],
+                        )
+                        self.assertTrue(
+                            all(shape["additionalProperties"] is False for shape in arguments["oneOf"])
+                        )
+                    elif "path" in arguments["properties"]:
+                        self.assertEqual(next(iter(arguments["properties"])), "path")
             rendered = json.loads(sent["messages"][1]["content"])["messages"][0][
                 "content"
             ]
