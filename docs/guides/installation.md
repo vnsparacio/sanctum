@@ -189,6 +189,10 @@ The five-capability Work Mode surface includes the multi-file patch for ordinary
 coding goals. An explicit request for current documentation or web research
 uses the Source-First research capability in that slot instead; incidental
 phrases such as "current selection" or "web application" do not request research.
+The installed profile and broker must both include `worktree_patch` in their
+configured allowlists for this selection to take effect. Apply the reviewed
+stopped-gateway Work Mode amendment to existing installations after a source
+update; changing only the task selector leaves patch unavailable.
 
 It does not permit path escapes, arbitrary host files, symlink traversal,
 binary/vendor/generated content, fuzzy patching, generic shell arguments,

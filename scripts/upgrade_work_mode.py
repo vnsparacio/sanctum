@@ -99,6 +99,7 @@ WORK_TOOLS = [
     "worktree_list",
     "worktree_read",
     "worktree_edit",
+    "worktree_patch",
     "worktree_command",
     "source_first_research",
 ]
