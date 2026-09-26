@@ -2,10 +2,10 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {workModeTools} from '../plugin/workspace-tools.mjs';
 import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
-import {bindWorkIntent,validateWorkIntent,workIntentRequest} from '../foundation/work-intent.mjs';
+import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} from '../foundation/work-intent.mjs';
 import {CONTRACT_VERSION,digest,validateReasonerResult} from '../foundation/contracts.mjs';
 import {createWorkMode,MUTABLE_WORKTREE_COMPLETION_POLICY,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
-import {normalizeWorkspacePacket} from '../plugin/work-command.mjs';
+import {normalizeWorkspacePacket,workCapabilityRefusal} from '../plugin/work-command.mjs';
 import {compile,prepare} from '../../reliability/runtime.mjs';
 import {syntheticProtection} from './fixtures/task-evidence.mjs';
 const names=workModeTools.map(x=>x.name),manifest=deriveCapabilityManifest({schemas:workModeTools,registeredTools:names,declaredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
@@ -25,6 +25,39 @@ test('normal registered and generation surfaces expose bounded edit and patch op
  assert.equal(validateWorkIntent(intent('worktree_patch',{patch:'diff'}),options).ok,true);
  assert.equal(manifest.byName.worktree_edit.policy.effect,'MUTATION');assert.deepEqual(manifest.byName.worktree_edit.policy.repairRules,[]);
  assert.equal(manifest.byName.worktree_patch.policy.effect,'MUTATION');assert.deepEqual(manifest.byName.worktree_patch.policy.repairRules,[]);
+});
+test('generated and host edit contracts require the same four exact argument shapes',()=>{
+ const editSpec=manifest.byName.worktree_edit;
+ const authoritative=workIntentSchema([editSpec],{terminalKinds:['ESCALATION']});
+ const branch=authoritative.oneOf.find(x=>x.properties?.capability?.const==='worktree_edit');
+ const shapes=branch.properties.arguments.oneOf;
+ assert.deepEqual(shapes.map(x=>x.required),[['path','old_text','new_text'],['operation','path','new_text'],['operation','path'],['operation','path','destination']]);
+ assert.ok(shapes.every(x=>x.additionalProperties===false));
+ const generation=workIntentRequest([editSpec],{terminalKinds:['ESCALATION']});
+ assert.equal(generation.schema.oneOf[0].properties.arguments.oneOf.length,4);
+ for(const args of [
+  {path:'README.md',old_text:'old',new_text:'new'},
+  {operation:'create',path:'index.js',new_text:'content'},
+  {operation:'delete',path:'README.md'},
+  {operation:'move',path:'README.md',destination:'docs/README.md'},
+ ])assert.equal(validateWorkIntent(intent('worktree_edit',args),options).ok,true);
+ for(const args of [
+  {operation:'create',path:'index.js',new_text:'content',old_text:'old'},
+  {operation:'create',path:'index.js'},
+  {operation:'delete',path:'README.md',new_text:''},
+  {operation:'move',path:'README.md',destination:'docs/README.md',new_text:'x'},
+  {path:'README.md',new_text:'new'},
+ ])assert.equal(validateWorkIntent(intent('worktree_edit',args),options).code,'ARGUMENT_SCHEMA');
+});
+test('malformed edit is corrected before authority and preflight refusal is known not started',async()=>{
+ const invalid=intent('worktree_edit',{operation:'create',path:'index.js',new_text:'content',old_text:'old'});
+ const valid=intent('worktree_edit',{operation:'create',path:'index.js',new_text:'content'});
+ const out=await run([invalid,valid],{invoke:()=>({ok:true,executionState:'COMPLETED',verifier:'VERIFIED'})});
+ assert.equal(out.calls.length,1);
+ assert.equal(out.calls[0].arguments.operation,'create');
+ assert.ok(out.events.some(x=>x.kind==='PROPOSAL'&&x.outcome==='REJECTED'&&x.code==='ARGUMENT_SCHEMA'));
+ assert.deepEqual(workCapabilityRefusal('worktree_edit',{reason:'EDIT_SCHEMA_INVALID'}),{ok:false,error:{code:'EDIT_SCHEMA_INVALID'},executionState:'NOT_STARTED',verifier:'REJECTED'});
+ assert.equal(workCapabilityRefusal('worktree_edit',{reason:'operation_unavailable'}).executionState,'COMPLETION_UNKNOWN');
 });
 test('bounded unified diff survives semantic transport and task binding exactly',()=>{
  const patch='--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+added\n';

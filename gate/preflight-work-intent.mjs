@@ -15,7 +15,7 @@ function manifest(){
  });
 }
 function surface(current,label,selected,options={}){
- const limit=label==='allEligible'?6:label.startsWith('ordinary')?5:4;
+ const limit=label==='allEligible'?6:label.startsWith('ordinary')||label.startsWith('research')?5:4;
  const built=decisionSurface({manifest:current,names:selected,limit,reviewer:label==='reviewer',...options}),request=built.request,projection=projectVllmGenerationSchema(built.authoritativeSchema),checked=validateVllmGenerationSchema(request.schema);
  if(!checked.ok)throw Error('structured_schema_preflight');
  return {label,capabilities:built.capabilities,version:request.version,dialect:request.dialect,schemaDigest:request.schemaDigest,semanticSchemaDigest:request.semanticSchemaDigest,branches:request.schema.oneOf.length,projectionOmissions:projection.omitted,request};
@@ -26,8 +26,8 @@ export function preflightCurrentWorkIntentSchemas(){
    allEligible:surface(current,'allEligible',names,{terminalKinds:['FINAL','ESCALATION']}),
    ordinaryIneligible:surface(current,'ordinaryIneligible',['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'],{terminalKinds:['ESCALATION']}),
    ordinaryEligible:surface(current,'ordinaryEligible',['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
-   researchIneligible:surface(current,'researchIneligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
-   researchEligible:surface(current,'researchEligible',['worktree_list','worktree_read','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
+   researchIneligible:surface(current,'researchIneligible',['worktree_list','worktree_read','worktree_edit','source_first_research','worktree_command'],{terminalKinds:['ESCALATION']}),
+   researchEligible:surface(current,'researchEligible',['worktree_list','worktree_read','worktree_edit','source_first_research','worktree_command'],{terminalKinds:['FINAL','ESCALATION']}),
    testOnlyIneligible:surface(current,'testOnlyIneligible',['worktree_command'],{testOnly:true,terminalKinds:['ESCALATION']}),
    reviewer:surface(current,'reviewer',[],{terminalKinds:['FINAL']}),
  };
