@@ -59,7 +59,7 @@ test('a model-requested passing test triggers host evaluation and one reviewer w
  const result=await createWorkMode(workConfig({reasoner:reasoner([row]),manifest:tools,invoke:async()=>({ok:true,code:'OK',executionState:'COMPLETED',verifier:'VERIFIED'}),authorize,egress,evaluate:async()=>{evaluations++;return {passed:true,diffDigest:'d'.repeat(64),diffStable:true,checks:[{operation:'test',ok:true,code:'OK',outputDigest:'e'.repeat(64),elapsedMs:3}]};},reviewer:async({state})=>{reviews++;assert.equal(state.tests.checks[0].operation,'test');assert.equal(state.tests.diffStable,true);return {verdict:'ACCEPT'};}})).run({task:'fix',scope,requestId,capabilities:[tool.name]});
  assert.equal(result.status,'COMPLETE');assert.equal(result.metrics.modelCalls,1);assert.equal(evaluations,1);assert.equal(reviews,1);
 });
-test('a successful patch makes a host test the only permitted next action',async()=>{
+test('successful edits can continue before the host-required test and cannot complete early',async()=>{
  const patchTool={name:'worktree_edit',description:'Patch.',parameters:{type:'object',properties:{task_id:{type:'string'},path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'}},required:['task_id','path','old_text','new_text'],additionalProperties:false}};
  const testTool={name:'worktree_command',description:'Test.',parameters:{type:'object',properties:{task_id:{type:'string'},operation:{type:'string',enum:['test']}},required:['task_id','operation'],additionalProperties:false}};
  const tools=deriveCapabilityManifest({schemas:[patchTool,testTool],declaredTools:[patchTool.name,testTool.name],registeredTools:[patchTool.name,testTool.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[patchTool.name,testTool.name]}}});
@@ -67,7 +67,7 @@ test('a successful patch makes a host test the only permitted next action',async
  const taskId='a'.repeat(32),calls=[];const authorize=(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:'a'.repeat(64),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
  const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
  const result=await createWorkMode(workConfig({reasoner:reasoner([row(patchTool,{path:'index.js',old_text:'old',new_text:'first'}),row(patchTool,{path:'index.js',old_text:'old',new_text:'second'}),row(testTool,{operation:'test'})]),manifest:tools,workspaceState:async({turn})=>workspaceEvidence({scope:taskId,turn}),invoke:async({proposal})=>{calls.push(proposal.arguments);return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},authorize,egress,evaluate:async()=>({passed:true}),reviewer:null})).run({task:'fix',scope:taskId,requestId,capabilities:[patchTool.name,testTool.name],maxIterations:4});
- assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.new_text),['first','test']);assert.ok(result.state.observations.some(x=>x.code==='CAPABILITY_NOT_VISIBLE'));
+ assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.new_text),['first','second','test']);assert.equal(result.metrics.modelCalls,3);assert.ok(!result.state.observations.some(x=>x.code==='CAPABILITY_NOT_VISIBLE'));
 });
 test('host bindings are derived once and forbidden injection consumes the correction turn',async()=>{
  const badRequest={kind:'TOOL_PROPOSAL',capability:'calc',arguments:{expression:'1'},revision:9};
@@ -324,5 +324,13 @@ test('escalation diagnostics are payload-free observations, never a routing clas
  const row=events.find(x=>x.kind==='PROPOSAL'&&x.outcome==='ESCALATION');
  assert.equal(result.reason,'MODEL_ESCALATION');assert.equal(effects,0);
  assert.equal(row.reasonConcepts.permission,true);assert.equal(row.reasonConcepts.toolUnavailable,true);
+ assert.equal(row.reasonCategory,'AUTHORITY');
  assert.match(row.reasonDigest,/^[a-f0-9]{64}$/);assert.ok(!JSON.stringify(events).includes('PERMISSION_UNAVAILABLE'));
+});
+test('escalation categories remain fixed and do not retain model reason text',async()=>{
+ for(const [reason,category] of [['TEST_REQUIRED','TEST_OR_BUILD'],['MISSING_CONTEXT','EVIDENCE'],['WORKSPACE_BLOCKED','WORKSPACE'],['TASK_INCOMPLETE','TASK_SCOPE'],['PRIVATE_SECRET_VALUE','OTHER']]){
+  const events=[];await run({rows:[{kind:'ESCALATION',reason}],onEvent:(kind,value)=>events.push({kind,...value})});
+  const row=events.find(x=>x.kind==='PROPOSAL'&&x.outcome==='ESCALATION');
+  assert.equal(row.reasonCategory,category);assert.ok(!JSON.stringify(events).includes(reason));
+ }
 });

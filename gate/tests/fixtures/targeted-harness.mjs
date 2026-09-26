@@ -58,7 +58,7 @@ export async function leadRun(plans,{capabilities=ordinary,bytes=0}={}){
  const h=signedHarness(plans);let effects=0;
  try{
   const ledger=createWorkLedger({root:join(h.dir,'ledger'),taskId:scope,key:h.key,metadata:{goal:'essential goal'}});
-  const result=await createWorkMode({reasoner:h.reasoner,manifest,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:snapshot(bytes),
+  const result=await createWorkMode({reasoner:h.reasoner,manifest,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,workspaceState:snapshot(bytes),verifyProtectedEvidence:syntheticProtection,
    authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),
    egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),
    invoke:async()=>{effects++;return {ok:true,data:{text:'synthetic observation'},executionState:'COMPLETED',verifier:'VERIFIED'};},evaluate:async()=>({passed:false}),onEvent:(kind,value)=>ledger.event(kind,value)}).run({task:'essential goal',scope,capabilities});
