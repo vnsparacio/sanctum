@@ -264,6 +264,17 @@ class Private80BLifecycle:
                 try:
                     pod = self.provider.create(name)
                 except Exception as e:
+                    if type(e) is Refused and str(e) == "ssh_key_missing":
+                        # Runpod raises this only before issuing pod create.
+                        self.save(
+                            s,
+                            phase="OFFLINE",
+                            error="ssh_key_missing",
+                            pod_name=None,
+                            allocation_uncertain=False,
+                            started_at=None,
+                        )
+                        raise
                     if type(e) is Refused and str(e) == "gpu_capacity_unavailable":
                         self.save(
                             s,

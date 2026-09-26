@@ -482,6 +482,83 @@ class Amendments(unittest.TestCase):
                 mod.configure(self.prefix, {"private_lead_gpu": {"volume_id": "v"}})
         self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
 
+    def test_private_lead_ssh_binding_amendment_checks_matching_key_pair(self):
+        mod = __import__("scripts.configure", fromlist=["configure"])
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        settings = json.loads(settings_path.read_text())
+        settings["private_lead"]["enabled"] = True
+        settings["private_lead"]["auto_start"] = False
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze["SETTINGS.json"] = op.sha(settings_path)
+        freeze_path.write_text(json.dumps(freeze, indent=2) + "\n")
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["gate/SETTINGS.json"] = op.sha(settings_path)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "OFFLINE"}),
+        )
+        key = self.prefix / "config/test_ed25519"
+        subprocess.run(
+            ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+            check=True,
+        )
+        proposal = {"private_lead_gpu": {"ssh_private_key": str(key)}}
+        original = subprocess.run
+
+        def guarded(args, **kwargs):
+            if "launchctl" in str(args[0]):
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return original(args, **kwargs)
+
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch("subprocess.run", side_effect=guarded),
+        ):
+            mod.configure(self.prefix, proposal)
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["ssh_private_key"],
+            str(key),
+        )
+        op.verify_install(self.prefix)
+        key.with_suffix(".pub").write_text("ssh-ed25519 invalid\n")
+        with self.assertRaisesRegex(ValueError, "mismatch"):
+            mod.configure(self.prefix, proposal)
+
+    def test_preallocation_recovery_accepts_only_exact_failure_shape(self):
+        recovery = __import__(
+            "scripts.recover_private_lead_preallocation", fromlist=["eligible"]
+        )
+        state = {
+            "phase": "DEGRADED",
+            "error": "allocation_unresolved",
+            "allocation_uncertain": True,
+            "pod_id": None,
+            "allocation_id": None,
+            "manual_stop": True,
+            "pod_name": "sanctum-private-lead-stage-test",
+        }
+        summary = {
+            "status": "ENVIRONMENT_FAILURE",
+            "reason": "PRIVATE_LEAD_UNAVAILABLE",
+            "metrics": {"modelCalls": 0},
+            "cleanup": {"workspaceCleaned": True},
+        }
+        self.assertTrue(recovery.eligible(state, summary, True))
+        self.assertFalse(recovery.eligible({**state, "pod_id": "owned"}, summary, True))
+        self.assertFalse(recovery.eligible(state, summary, False))
+        self.assertFalse(
+            recovery.eligible(state, {**summary, "status": "RUNNING"}, True)
+        )
+
     def test_bounded_amendment_and_rollback(self):
         spec = importlib.util.spec_from_file_location(
             "configure_tools", ROOT / "scripts/configure.py"

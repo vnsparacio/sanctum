@@ -29,7 +29,7 @@ from common import Refused, canonical, database, strict_json
 from dispatch import assess
 from lifecycle import PrivateLeadLifecycle
 from media import expand, load, prepare
-from runpod import capacity_rejected
+from runpod import Runpod, capacity_rejected
 from schema import validate
 
 
@@ -696,6 +696,25 @@ class Lifecycle(Temp):
         self.assertEqual(len(attempts), 2)
         self.assertEqual(self.p.created, 1)
         self.assertEqual(self.lc.status()["phase"], "READY")
+
+    def test_missing_key_before_create_does_not_leave_uncertain_allocation(self):
+        def create(_name):
+            raise Refused("ssh_key_missing")
+
+        self.p.create = create
+        with self.assertRaisesRegex(Refused, "ssh_key_missing"):
+            self.lc.infer("a", {})
+        state = self.lc.state()
+        self.assertEqual(state["phase"], "OFFLINE")
+        self.assertIsNone(state["pod_name"])
+        self.assertFalse(state["allocation_uncertain"])
+        self.assertEqual(self.p.created, 0)
+
+    def test_private_lead_preflight_checks_local_key_before_provider_call(self):
+        provider = Runpod(self.s, self.s["private_lead"])
+        provider.call = lambda *_args: self.fail("provider called with missing key")
+        with self.assertRaisesRegex(Refused, "ssh_key_missing"):
+            provider.preflight()
 
     def test_capacity_rejection_is_bounded_and_cancellable(self):
         self.s["private_lead"]["capacity_wait_seconds"] = 20

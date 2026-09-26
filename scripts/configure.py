@@ -704,11 +704,43 @@ def configure(prefix, proposal):
         if (
             set(proposal) != {"private_lead_gpu"}
             or type(item) is not dict
-            or set(item) != {"volume_id"}
-            or type(item["volume_id"]) is not str
-            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item["volume_id"])
+            or set(item) not in ({"volume_id"}, {"ssh_private_key"})
         ):
-            raise ValueError("Invalid private-lead GPU volume amendment")
+            raise ValueError("Invalid private-lead GPU amendment")
+        if "volume_id" in item:
+            if type(item["volume_id"]) is not str or not re.fullmatch(
+                r"[A-Za-z0-9_-]{1,128}", item["volume_id"]
+            ):
+                raise ValueError("Invalid private-lead GPU volume amendment")
+        else:
+            key = (
+                Path(item["ssh_private_key"])
+                if type(item["ssh_private_key"]) is str
+                else Path(".")
+            )
+            pub = Path(str(key) + ".pub")
+            if (
+                not key.is_absolute()
+                or key.is_symlink()
+                or pub.is_symlink()
+                or not key.is_file()
+                or not pub.is_file()
+                or key.stat().st_mode & 0o077
+            ):
+                raise ValueError("Owner-only private-lead SSH key pair required")
+            try:
+                derived = subprocess.run(
+                    ["/usr/bin/ssh-keygen", "-y", "-P", "", "-f", str(key)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ).stdout.split()[:2]
+                published = pub.read_text().split()[:2]
+            except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                raise ValueError("Private-lead SSH key pair invalid") from None
+            if len(derived) != 2 or derived != published or derived[0] != "ssh-ed25519":
+                raise ValueError("Private-lead SSH key pair mismatch")
         spec = importlib.util.spec_from_file_location(
             "private_lead_volume_safe", ROOT / "scripts/upgrade_work_mode.py"
         )
@@ -723,7 +755,7 @@ def configure(prefix, proposal):
             or lead.get("auto_start")
         ):
             raise ValueError("Private lead must be installed with autostart disabled")
-        lead["volume_id"] = item["volume_id"]
+        lead.update(item)
         changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
         freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
         freeze["SETTINGS.json"] = hashlib.sha256(
