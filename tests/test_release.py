@@ -475,24 +475,43 @@ class Amendments(unittest.TestCase):
         pair = {"gpu": "NVIDIA B200", "max_hourly_usd": 7}
         with (
             patch("platform.system", return_value="Darwin"),
-            patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
         ):
             mod.configure(self.prefix, {"private_lead_gpu": pair})
         op.verify_install(self.prefix)
-        self.assertEqual(json.loads(settings_path.read_text())["private_lead"]["gpu"], "NVIDIA B200")
-        self.assertEqual(json.loads(settings_path.read_text())["private_lead"]["max_hourly_usd"], 7)
-        self.assertFalse(json.loads(settings_path.read_text())["private_lead"]["auto_start"])
-        work_upgrade = __import__("scripts.upgrade_work_mode", fromlist=["rendered_settings"])
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["gpu"], "NVIDIA B200"
+        )
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["max_hourly_usd"], 7
+        )
+        self.assertFalse(
+            json.loads(settings_path.read_text())["private_lead"]["auto_start"]
+        )
+        work_upgrade = __import__(
+            "scripts.upgrade_work_mode", fromlist=["rendered_settings"]
+        )
         for upgrade in (rendered, work_upgrade):
-            preserved = json.loads(upgrade.rendered_settings(self.prefix))["private_lead"]
-            self.assertEqual((preserved["gpu"], preserved["max_hourly_usd"]), ("NVIDIA B200", 7))
+            preserved = json.loads(upgrade.rendered_settings(self.prefix))[
+                "private_lead"
+            ]
+            self.assertEqual(
+                (preserved["gpu"], preserved["max_hourly_usd"]), ("NVIDIA B200", 7)
+            )
         gpu_record = next(
-            path for path in (self.prefix / "state/amendments").iterdir()
+            path
+            for path in (self.prefix / "state/amendments").iterdir()
             if path != volume_record
         )
         mod.rollback(self.prefix, gpu_record)
         op.verify_install(self.prefix)
-        self.assertEqual(json.loads(settings_path.read_text())["private_lead"]["gpu"], "NVIDIA RTX PRO 6000 Blackwell Server Edition")
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["gpu"],
+            "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+        )
         mod.rollback(self.prefix, volume_record)
         op.verify_install(self.prefix)
         self.assertEqual(settings_path.read_bytes(), before)

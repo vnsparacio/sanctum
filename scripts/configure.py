@@ -704,7 +704,8 @@ def configure(prefix, proposal):
         if (
             set(proposal) != {"private_lead_gpu"}
             or type(item) is not dict
-            or set(item) not in ({"volume_id"}, {"ssh_private_key"}, {"gpu", "max_hourly_usd"})
+            or set(item)
+            not in ({"volume_id"}, {"ssh_private_key"}, {"gpu", "max_hourly_usd"})
         ):
             raise ValueError("Invalid private-lead GPU amendment")
         if "volume_id" in item:
@@ -745,7 +746,9 @@ def configure(prefix, proposal):
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", 3),
             ("NVIDIA B200", 7),
         ):
-            raise ValueError("Private-lead GPU and hourly ceiling must match a reviewed pair")
+            raise ValueError(
+                "Private-lead GPU and hourly ceiling must match a reviewed pair"
+            )
         spec = importlib.util.spec_from_file_location(
             "private_lead_volume_safe", ROOT / "scripts/upgrade_work_mode.py"
         )
@@ -764,7 +767,9 @@ def configure(prefix, proposal):
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", 3),
             ("NVIDIA B200", 7),
         ):
-            raise ValueError("Installed private-lead GPU binding is not a reviewed pair")
+            raise ValueError(
+                "Installed private-lead GPU binding is not a reviewed pair"
+            )
         lead.update(item)
         changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
         freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
