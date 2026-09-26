@@ -97,6 +97,13 @@ test('R3 interrupted reads retain fixed facts and never retry or execute',async(
   const diagnostic=diagnostics(run.rows)[0]?.diagnostic;assert.equal(diagnostics(run.rows).length,1);assert.equal(diagnostic.stage,'STREAM');assert.equal(diagnostic.keyword,'completion');assert.equal(diagnostic.streamStatus,'INCOMPLETE');assert.equal(diagnostic.finishStatus,after===2?'stop':'UNKNOWN');
  }
 });
+test('a provider length finish reports the output ceiling without a retry or effect',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'length'}]})+'\n\ndata: [DONE]\n\n';
+ const run=await leadRun([{wire},plan(valid)]);
+ assert.equal(run.attempts,1);assert.equal(run.effects,0);
+ assert.equal(run.result.status,'BUDGET_EXHAUSTED');assert.equal(run.result.reason,'MODEL_OUTPUT_LIMIT');
+ assert.equal(diagnostics(run.rows)[0]?.diagnostic.finishStatus,'length');
+});
 test('R3 cancellation, HTTP decoding rejection, typed parser and unrelated errors stay distinct',async()=>{
  for(const [p,reason,stage] of [[{...plan(valid),interruptAfter:0,error:'cancelled'},'operation_cancelled',undefined],[{...plan(valid),interruptAfter:0,error:'unrelated'},'transport_unavailable',undefined],[{httpStatus:400},'structured_decoding_http_400',undefined],[{httpStatus:422},'structured_decoding_http_422',undefined],[{wire:'data: {bad\n\n'},'answer_incomplete','STREAM']]){
   const run=await leadRun([p,plan(valid)]);assert.equal(run.attempts,1);assert.equal(run.effects,0);assert.equal(run.responses[0].reason,reason);assert.equal(diagnostics(run.rows)[0]?.diagnostic.stage,stage);

@@ -167,6 +167,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      try{result=await reasoner.invoke(request,modelDeadline.signal);state.modelCalls++;emit('MODEL_CALL',{resultKind:result.kind});}
      catch(error){
        if(error?.diagnostic){try{emit('PROTOCOL_DIAGNOSTIC',{diagnostic:sanitizeProtocolDiagnostic(error.diagnostic),schemaDigest:semantic.schemaDigest,semanticSchemaDigest:semantic.semanticSchemaDigest});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}}
+       if(error?.diagnostic?.stage==='STREAM'&&error.diagnostic.streamStatus==='INCOMPLETE'&&error.diagnostic.finishStatus==='length'&&!signal?.aborted&&!modelDeadline.timedOut())return stop('BUDGET_EXHAUSTED','MODEL_OUTPUT_LIMIT');
        if(error?.message==='structured_decoding_unavailable'&&!signal?.aborted&&!modelDeadline.timedOut()){
          try{emit('MODEL_CALL',{resultKind:'REJECTED',stage:'STRUCTURED_DECODING',backendFailure:error.backendFailure??'UNKNOWN',httpStatus:Number.isSafeInteger(error.httpStatus)?error.httpStatus:null,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}
          return stop('ENVIRONMENT_FAILURE','STRUCTURED_DECODING_UNAVAILABLE');
