@@ -392,6 +392,96 @@ if __name__ == "__main__":
 class Amendments(unittest.TestCase):
     setUp = Setup.setUp
 
+    def test_private_lead_volume_amendment_is_offline_reversible_and_preserved(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_lead_volume", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        settings = json.loads(settings_path.read_text())
+        settings["private_lead"]["enabled"] = True
+        settings["private_lead"]["auto_start"] = False
+        settings["gpu"]["volume_id"] = "legacy-volume"
+        settings["private_lead"]["volume_id"] = "legacy-volume"
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze["SETTINGS.json"] = op.sha(settings_path)
+        freeze_path.write_text(json.dumps(freeze, indent=2) + "\n")
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["gate/SETTINGS.json"] = op.sha(settings_path)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "OFFLINE"}),
+        )
+        before = settings_path.read_bytes()
+        proposal = {"private_lead_gpu": {"volume_id": "confirmed-volume"}}
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        amended = json.loads(settings_path.read_text())
+        self.assertEqual(amended["private_lead"]["volume_id"], "confirmed-volume")
+        self.assertEqual(amended["gpu"]["volume_id"], "legacy-volume")
+        self.assertFalse(amended["private_lead"]["auto_start"])
+        # Reapplying the staged release must retain the receipt-verified lead
+        # binding, rather than copying the retired 80B resource reference.
+        rendered = __import__(
+            "scripts.upgrade_private_lead", fromlist=["rendered_settings"]
+        )
+        self.assertEqual(
+            json.loads(rendered.rendered_settings(self.prefix))["private_lead"][
+                "volume_id"
+            ],
+            "confirmed-volume",
+        )
+        record = next((self.prefix / "state/amendments").iterdir())
+        mod.rollback(self.prefix, record)
+        op.verify_install(self.prefix)
+        self.assertEqual(settings_path.read_bytes(), before)
+
+    def test_private_lead_volume_amendment_rejects_invalid_or_active_state(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_lead_volume_invalid", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "receipt.json").read_bytes()
+        for item in (
+            {},
+            {"volume_id": ""},
+            {"volume_id": "bad volume"},
+            {"volume_id": "v", "auto_start": True},
+        ):
+            with self.subTest(item=item), self.assertRaises(ValueError):
+                mod.configure(self.prefix, {"private_lead_gpu": item})
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "READY", "pod_id": "owned"}),
+        )
+        with patch("platform.system", return_value="Darwin"):
+            with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+                mod.configure(self.prefix, {"private_lead_gpu": {"volume_id": "v"}})
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+
     def test_bounded_amendment_and_rollback(self):
         spec = importlib.util.spec_from_file_location(
             "configure_tools", ROOT / "scripts/configure.py"

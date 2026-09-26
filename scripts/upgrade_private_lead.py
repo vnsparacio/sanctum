@@ -101,7 +101,13 @@ def rendered_settings(prefix):
     d["private_lead"]["auto_start"] = False
     for key in keys:
         d["gpu"][key] = accepted[key]
-        d["private_lead"][key] = accepted[key]
+        # An installed private lead may have a separately amended persistent
+        # volume. Preserve that receipt-verified binding on later upgrades.
+        d["private_lead"][key] = (
+            installed["private_lead"][key]
+            if installed.get("private_lead", {}).get("enabled")
+            else accepted[key]
+        )
     return json.dumps(d, indent=2) + "\n"
 
 
