@@ -49,6 +49,16 @@ test('generated and host edit contracts require the same four exact argument sha
   {path:'README.md',new_text:'new'},
  ])assert.equal(validateWorkIntent(intent('worktree_edit',args),options).code,'ARGUMENT_SCHEMA');
 });
+test('missing-source recovery exposes only the create edit shape to generation and validation',()=>{
+ const editSpec=manifest.byName.worktree_edit;
+ const recovery={specs:[editSpec],terminalKinds:['ESCALATION'],editOperations:['create']};
+ const authoritative=workIntentSchema([editSpec],recovery);
+ const shapes=authoritative.oneOf[0].properties.arguments.oneOf;
+ assert.deepEqual(shapes.map(x=>x.required),[['operation','path','new_text']]);
+ assert.equal(workIntentRequest([editSpec],recovery).schema.oneOf[0].properties.arguments.oneOf.length,1);
+ assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'ready'}),recovery).ok,true);
+ for(const args of [{operation:'delete',path:'new.js'},{operation:'move',path:'new.js',destination:'other.js'},{path:'new.js',old_text:'old',new_text:'new'}])assert.equal(validateWorkIntent(intent('worktree_edit',args),recovery).code,'ARGUMENT_SCHEMA');
+});
 test('malformed edit is corrected before authority and preflight refusal is known not started',async()=>{
  const invalid=intent('worktree_edit',{operation:'create',path:'index.js',new_text:'content',old_text:'old'});
  const valid=intent('worktree_edit',{operation:'create',path:'index.js',new_text:'content'});
@@ -74,19 +84,25 @@ test('missing source and parent feedback is actionable without exposing paths',a
  assert.ok(out.requests[1].messages[1].content.includes('workspace root'));
  assert.ok(!out.requests[1].messages[1].content.includes('src/app.js'));
 });
-test('missing-source recovery survives observation turnover and blocks exact blind retries',async()=>{
+test('missing-source recovery narrows the next surface and accepts a valid create',async()=>{
  const missing=intent('worktree_edit',{operation:'delete',path:'new.js'});
  const created=intent('worktree_edit',{operation:'create',path:'new.js',new_text:'export const ready = true;'});
- const rows=[missing,missing,...Array.from({length:6},()=>intent('worktree_list',{})),created];
- const out=await run(rows,{maxIterations:12,invoke:p=>p.capability==='worktree_edit'&&p.arguments.operation==='delete'?workCapabilityRefusal('worktree_edit',{reason:'EDIT_SOURCE_MISSING'}):{ok:true,executionState:'COMPLETED',verifier:'VERIFIED'}});
+ const out=await run([missing,created],{invoke:p=>p.capability==='worktree_edit'&&p.arguments.operation==='delete'?workCapabilityRefusal('worktree_edit',{reason:'EDIT_SOURCE_MISSING'}):{ok:true,executionState:'COMPLETED',verifier:'VERIFIED'}});
  assert.equal(out.calls.filter(x=>x.capability==='worktree_edit').length,2);
- assert.ok(out.events.some(x=>x.kind==='EDIT_RETRY_BLOCKED'&&x.code==='EDIT_SOURCE_MISSING'));
- assert.ok(out.events.some(x=>x.kind==='PROPOSAL'&&x.outcome==='REJECTED'&&x.code==='EDIT_SOURCE_MISSING_RETRY'));
- const beforeCreate=out.requests.at(-2);
+ const beforeCreate=out.requests[1];
  assert.equal(JSON.parse(beforeCreate.messages[1].content).state.missingSource.operation,'delete');
  assert.equal(JSON.parse(beforeCreate.messages[1].content).state.missingSource.path,'new.js');
- assert.ok(beforeCreate.messages[0].content.includes('Create the absent file'));
+ assert.deepEqual(JSON.parse(beforeCreate.messages[1].content).state.availableEditOperations,['create']);
+ assert.equal(beforeCreate.state.workIntent.schema.oneOf.find(x=>x.properties?.capability?.const==='worktree_edit').properties.arguments.oneOf.length,1);
+ assert.ok(beforeCreate.messages[0].content.includes('use operation=create for a new file'));
  assert.equal(out.result.state.missingSource,null);
+});
+test('a model that ignores the narrowed edit surface cannot repeat a missing-source mutation',async()=>{
+ const missing=intent('worktree_edit',{operation:'delete',path:'new.js'});
+ const out=await run([missing,missing,missing],{invoke:()=>workCapabilityRefusal('worktree_edit',{reason:'EDIT_SOURCE_MISSING'})});
+ assert.equal(out.calls.length,1);
+ assert.equal(out.result.reason,'REPEATED_INVALID_PROPOSAL');
+ assert.equal(out.events.filter(x=>x.kind==='EDIT').length,1);
 });
 test('bounded unified diff survives semantic transport and task binding exactly',()=>{
  const patch='--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1 @@\n+added\n';
