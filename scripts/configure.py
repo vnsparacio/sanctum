@@ -207,6 +207,7 @@ def configure(prefix, proposal):
         "file_roots",
         "accounts",
         "gpu",
+        "private_lead_gpu",
         "notes_dir",
         "web_retrieval",
         "work_profile",
@@ -698,6 +699,37 @@ def configure(prefix, proposal):
             ):
                 raise ValueError("Invalid account identifier")
             changes[f"config/{name}-read/account"] = value + "\n"
+    if "private_lead_gpu" in proposal:
+        item = proposal["private_lead_gpu"]
+        if (
+            set(proposal) != {"private_lead_gpu"}
+            or type(item) is not dict
+            or set(item) != {"volume_id"}
+            or type(item["volume_id"]) is not str
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item["volume_id"])
+        ):
+            raise ValueError("Invalid private-lead GPU volume amendment")
+        spec = importlib.util.spec_from_file_location(
+            "private_lead_volume_safe", ROOT / "scripts/upgrade_work_mode.py"
+        )
+        upgrade = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(upgrade)
+        upgrade.safe(prefix)
+        settings = json.loads((prefix / "gate/SETTINGS.json").read_text())
+        lead = settings.get("private_lead", {})
+        if (
+            lead.get("logical_profile") != "PRIVATE_LEAD"
+            or not lead.get("enabled")
+            or lead.get("auto_start")
+        ):
+            raise ValueError("Private lead must be installed with autostart disabled")
+        lead["volume_id"] = item["volume_id"]
+        changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
+        freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
+        freeze["SETTINGS.json"] = hashlib.sha256(
+            changes["gate/SETTINGS.json"].encode()
+        ).hexdigest()
+        changes["gate/FREEZE.json"] = json.dumps(freeze, indent=2) + "\n"
     if "gpu" in proposal:
         gpu = proposal["gpu"]
         allowed = {

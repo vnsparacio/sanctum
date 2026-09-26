@@ -51,6 +51,8 @@ operational prefix and unknown fields, including embedded credential fields.
 
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 
+For an installed PRIVATE_LEAD release whose persistent Runpod network volume has changed, confirm the intended volume and its model cache in the owner account first. While Sanctum is stopped, both managed GPUs are released, and all private leases are closed, use an owner-private proposal containing only `{"private_lead_gpu":{"volume_id":"<confirmed-volume-id>"}}` with `scripts/configure.py --prefix /absolute/private/prefix --proposal /absolute/private/proposal.json`. This changes only the PRIVATE_LEAD volume reference; it retains disabled autostart and writes a rollback record. Run `make doctor PREFIX=/absolute/private/prefix` and the provider's read-only preflight before starting a new Work Mode task. The retired 80B reference is not changed, and later staged PRIVATE_LEAD upgrades preserve the amended lead binding.
+
 For a reviewed Source-First code update on an existing prefix, stop the managed
 stack and run `scripts/upgrade_source_first.py` with
 `--prefix /absolute/private/prefix --apply`. This narrow amendment backs up
