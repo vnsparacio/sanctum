@@ -23,6 +23,12 @@ MAX_TIMEOUT = 300
 SAFE_OPERATION = {"status", "diff", "test", "lint", "build"}
 
 
+def _node_test_count(output):
+    """Read the TAP summary; a successful process with zero tests is not a test pass."""
+    matches = re.findall(rb"(?m)^(?:#|\xe2\x84\xb9)\s+tests\s+(\d+)\s*$", output)
+    return int(matches[-1]) if matches else None
+
+
 def _descriptor():
     value = strict_json((BASE / "runtime/work-runner.json").read_text())
     if value.get("schema") != "sanctum-work-runner/v1":
@@ -367,6 +373,12 @@ def run(
         cancelled = False
     elapsed = now() - started
     raw = bytes(output[:output_limit])
+    if operation == "test" and argv == ["node", "--test"] and code == "OK":
+        count = _node_test_count(raw)
+        if count is None:
+            code = "TEST_COUNT_UNVERIFIED"
+        elif count == 0:
+            code = "NO_TESTS_DISCOVERED"
     execution_state = (
         "COMPLETION_UNKNOWN" if unknown else "CANCELLED" if cancelled else "COMPLETED"
     )
