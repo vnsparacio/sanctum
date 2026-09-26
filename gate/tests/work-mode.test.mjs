@@ -353,3 +353,38 @@ test('escalation categories remain fixed and do not retain model reason text',as
   assert.equal(row.reasonCategory,category);assert.ok(!JSON.stringify(events).includes(reason));
  }
 });
+
+test('disclosed test recovery survives six observations and later edits until the next test',async()=>{
+ const names=['worktree_list','worktree_edit','worktree_command'];
+ const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ const rows=[proposal('worktree_command',{operation:'test'}),...Array.from({length:7},()=>proposal('worktree_list',{})),proposal('worktree_edit',{operation:'create',path:'example.test.js',new_text:'synthetic'}),proposal('worktree_command',{operation:'test'}),{kind:'ESCALATION',reason:'SYNTHETIC_STOP'}];
+ const requests=[];let tests=0;
+ const result=await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(request){requests.push(JSON.parse(request.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:allowEgress,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:++tests===1?'NO_TESTS_DISCOVERED':'TEST_COUNT_UNVERIFIED',diagnostic:'SYNTHETIC_RAW_OUTPUT'},executionState:'COMPLETED',verifier:'REJECTED'}:{ok:true,data:{},executionState:'COMPLETED',verifier:'VERIFIED'},evaluate:async()=>{throw Error('must not evaluate failed test');}})).run({task:'Implement a small utility and tests',scope,requestId,capabilities:names,maxIterations:12});
+ assert.equal(result.reason,'MODEL_ESCALATION');
+ assert.equal(requests[8].state.observations.length,6);
+ assert.ok(!JSON.stringify(requests[8].state.observations).includes('NO_TESTS_DISCOVERED'));
+ for(const index of [1,8,9]){
+  assert.equal(requests[index].state.lastTest.code,'NO_TESTS_DISCOVERED');
+  assert.match(requests[index].state.lastTest.recovery,/Add discoverable tests/);
+  assert.ok(!JSON.stringify(requests[index].state.lastTest).includes('SYNTHETIC_RAW_OUTPUT'));
+ }
+ assert.equal(requests[9].state.tests.required,true);
+ assert.equal(requests[9].state.lastTest.workspaceGeneration,0);
+ assert.equal(requests[10].state.lastTest.code,'TEST_COUNT_UNVERIFIED');
+ assert.equal(requests[10].state.lastTest.workspaceGeneration,1);
+});
+
+test('test recovery summary cannot bypass denied egress, omitted results or fixed codes',async()=>{
+ const names=['worktree_command'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['denied','oversize','arbitrary','prototype']){
+  const requests=[];const rows=[proposal('worktree_command',{operation:'test'}),{kind:'ESCALATION',reason:'SYNTHETIC_STOP'}];
+  await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(request){requests.push(JSON.parse(request.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async()=>({ok:false,error:{code:variant==='arbitrary'?'SYNTHETIC_UNTRUSTED_CODE':variant==='prototype'?'constructor':'NO_TESTS_DISCOVERED',diagnostic:variant==='oversize'?'x'.repeat(13000):'SYNTHETIC_RAW_OUTPUT'},executionState:'COMPLETED',verifier:'REJECTED'}),evaluate:async()=>({passed:false})})).run({task:'synthetic',scope,requestId,capabilities:names});
+  if(['arbitrary','prototype'].includes(variant)){
+   assert.equal(requests[1].state.lastTest.code,'TEST_FAILED');
+   assert.match(requests[1].state.lastTest.recovery,/Inspect the disclosed test result/);
+   assert.ok(!JSON.stringify(requests[1].state.lastTest).includes('SYNTHETIC_'));
+  }else assert.equal(requests[1].state.lastTest,null);
+ }
+});

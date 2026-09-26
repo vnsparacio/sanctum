@@ -404,6 +404,29 @@ class StreamingContracts(unittest.TestCase):
             '{"kind":"TOOL_PROPOSAL","capability":"worktree_read","arguments":{"path":"source.txt","max_chars":100}}',
         )
 
+    def test_production_edit_wire_selects_action_before_file_content(self):
+        artifact = json.loads(
+            subprocess.check_output(["node", str(BASE / "runtime-readiness.mjs")])
+        )
+        operations = set()
+        for row in artifact["surfaces"].values():
+            original = row["request"]["schema"]
+            wire = json.loads(generation_wire_json(original))
+            self.assertEqual(wire, original)
+            for branch in wire["oneOf"]:
+                properties = branch["properties"]
+                if properties.get("capability", {}).get("const") != "worktree_edit":
+                    continue
+                for shape in properties["arguments"]["oneOf"]:
+                    fields = list(shape["properties"])
+                    action = shape["properties"].get("operation", {}).get("const")
+                    if action:
+                        operations.add(action)
+                        self.assertEqual(fields[:2], ["operation", "path"])
+                    else:
+                        self.assertEqual(fields, ["path", "old_text", "new_text"])
+        self.assertEqual(operations, {"create", "delete", "move"})
+
 
 class PackagingClosure(unittest.TestCase):
     def test_work_mode_amendment_installs_explicit_local_agent_owner(self):
