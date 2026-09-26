@@ -457,7 +457,9 @@ def preserve_registered_profiles(prefix, rendered):
             or type(profile.get("task_protection")) is not dict
         ):
             raise ValueError("Invalid registered Work Mode profile")
-        staging = prefix / "state/gate/private-lead/work-mode/registered" / name / "staging"
+        staging = (
+            prefix / "state/gate/private-lead/work-mode/registered" / name / "staging"
+        )
         repo = Path(profile.get("repository", ""))
         if (
             profile.get("staging_root") != str(staging)

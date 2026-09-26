@@ -143,11 +143,14 @@ class Setup(unittest.TestCase):
     def test_work_mode_upgrade_preserves_registered_profile_and_refreshes_runtime(self):
         op.setup(self.prefix)
         old = json.loads(
-            work_mode.work_profile(self.prefix, "docker-old", "host-old", "tag-old", "image-old")
+            work_mode.work_profile(
+                self.prefix, "docker-old", "host-old", "tag-old", "image-old"
+            )
         )
         repo = op.private(self.prefix / "owner-repo")
         staging = op.private(
-            self.prefix / "state/gate/private-lead/work-mode/registered/moodtest/staging"
+            self.prefix
+            / "state/gate/private-lead/work-mode/registered/moodtest/staging"
         )
         owner = {
             **old["profiles"]["grade01"],
@@ -165,7 +168,9 @@ class Setup(unittest.TestCase):
         rendered = work_mode.work_profile(
             self.prefix, "docker-new", "host-new", "tag-new", "image-new"
         )
-        result = json.loads(work_mode.preserve_registered_profiles(self.prefix, rendered))
+        result = json.loads(
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+        )
         updated = result["profiles"]["moodtest"]
         self.assertEqual(updated["repository"], str(repo))
         self.assertEqual(updated["staging_root"], str(staging))
