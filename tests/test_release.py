@@ -140,6 +140,51 @@ class Setup(unittest.TestCase):
             "worktree_patch", config["agents"]["entries"]["main"]["tools"]["deny"]
         )
 
+    def test_work_mode_upgrade_preserves_registered_profile_and_refreshes_runtime(self):
+        op.setup(self.prefix)
+        old = json.loads(
+            work_mode.work_profile(
+                self.prefix, "docker-old", "host-old", "tag-old", "image-old"
+            )
+        )
+        repo = op.private(self.prefix / "owner-repo")
+        staging = op.private(
+            self.prefix
+            / "state/gate/private-lead/work-mode/registered/moodtest/staging"
+        )
+        owner = {
+            **old["profiles"]["grade01"],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "task_protection": old["profiles"]["sanctum"]["task_protection"],
+            "max_iterations": 32,
+            "max_model_calls": 32,
+            "max_tokens": 200000,
+        }
+        old["profiles"]["moodtest"] = owner
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(json.dumps(old))
+        path.chmod(0o600)
+        rendered = work_mode.work_profile(
+            self.prefix, "docker-new", "host-new", "tag-new", "image-new"
+        )
+        result = json.loads(
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+        )
+        updated = result["profiles"]["moodtest"]
+        self.assertEqual(updated["repository"], str(repo))
+        self.assertEqual(updated["staging_root"], str(staging))
+        self.assertEqual(updated["task_protection"], owner["task_protection"])
+        self.assertEqual(updated["runner_image_id"], "image-new")
+        self.assertEqual(updated["docker_path"], "docker-new")
+        self.assertEqual(updated["max_iterations"], 32)
+        self.assertEqual(updated["max_model_calls"], 32)
+        self.assertEqual(updated["max_tokens"], 200000)
+        owner["disk_bytes"] = 1
+        path.write_text(json.dumps(old))
+        with self.assertRaisesRegex(ValueError, "cannot be refreshed safely"):
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+
     def test_doctor_detects_stale_imported_webui_functions(self):
         op.setup(self.prefix)
         self.assertEqual(op.webui_function_sync(self.prefix), "not-enrolled")
