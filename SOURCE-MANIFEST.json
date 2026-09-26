@@ -272,7 +272,7 @@
   "gate/tests/test_prelive_cleanup.py": "b250520894c89d9b068e76ec313a0fcce734926305d9b86a8b9f642bb9ad004e",
   "gate/tests/test_prelive_package.py": "8d0b25f30a341ea308a6e1fca9c5dd194c8ebc9951105dfefc9549ed02e0c6f6",
   "gate/tests/test_prelive_targeted.py": "89d3c0906a22cba869ee1abc848093066caeef9c02c9f09f10abb8997a14d553",
-  "gate/tests/test_protocol_repair.py": "ecbf3ef74deaf98feaf32816c16cf27b1e2aa892e3dad8e68f6217b64164212b",
+  "gate/tests/test_protocol_repair.py": "8e7978e01704ead6a006f151d278348c03c8016cdd295f49161e497bd8c0d06c",
   "gate/tests/test_protocol_targeted.py": "5d4597dad8fc2c46a501c038290757d8a67946144905b1f0f8bc2a49f2d42b8a",
   "gate/tests/test_qualification.py": "80646f1a9939adfb599a8dd428e7ca6d63c06189233357c940c7744d951553a0",
   "gate/tests/test_retirement.py": "d6f89bbb4f26c708e5c8bbca58cadc98b516c928d68c057f4f3b7e64a940d0ce",

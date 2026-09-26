@@ -255,7 +255,10 @@ class StreamingContracts(unittest.TestCase):
                             ],
                         )
                         self.assertTrue(
-                            all(shape["additionalProperties"] is False for shape in arguments["oneOf"])
+                            all(
+                                shape["additionalProperties"] is False
+                                for shape in arguments["oneOf"]
+                            )
                         )
                     elif "path" in arguments["properties"]:
                         self.assertEqual(next(iter(arguments["properties"])), "path")
