@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -429,11 +430,81 @@ def work_profile(prefix, docker, host, tag, image):
     )
 
 
+def preserve_registered_profiles(prefix, rendered):
+    """Refresh owner registrations from reviewed bases without losing their bindings."""
+    path = prefix / "config/work-mode.json"
+    if not path.exists():
+        return rendered
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError("Unsafe installed Work Mode profiles")
+    old, new = json.loads(path.read_text()), json.loads(rendered)
+    if old.get("schema") != new["schema"] or type(old.get("profiles")) is not dict:
+        raise ValueError("Invalid installed Work Mode profiles")
+    previous, current = old["profiles"], new["profiles"]
+    if any(name not in previous for name in current):
+        raise ValueError("Missing reviewed Work Mode profile")
+    binding = {"repository", "staging_root", "task_protection"}
+    budgets = {"max_iterations": 32, "max_model_calls": 32, "max_tokens": 200000}
+    ignored = binding | set(budgets)
+    for name, profile in previous.items():
+        if name in current:
+            continue
+        if (
+            type(name) is not str
+            or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name)
+            or type(profile) is not dict
+            or type(profile.get("repository")) is not str
+            or type(profile.get("task_protection")) is not dict
+        ):
+            raise ValueError("Invalid registered Work Mode profile")
+        staging = prefix / "state/gate/private-lead/work-mode/registered" / name / "staging"
+        repo = Path(profile.get("repository", ""))
+        if (
+            profile.get("staging_root") != str(staging)
+            or not staging.is_dir()
+            or staging.resolve() != staging
+            or staging.stat().st_mode & 0o077
+            or not repo.is_absolute()
+            or not repo.is_dir()
+            or repo.resolve() != repo
+            or not repo.is_relative_to(prefix.resolve())
+            or repo.stat().st_mode & 0o077
+        ):
+            raise ValueError("Unsafe registered Work Mode binding")
+        matches = [
+            base
+            for base, prior in previous.items()
+            if base in current
+            and {k: v for k, v in prior.items() if k not in ignored}
+            == {k: v for k, v in profile.items() if k not in ignored}
+        ]
+        if not matches:
+            raise ValueError("Registered Work Mode policy cannot be refreshed safely")
+        base = matches[0]
+        refreshed = {
+            **current[base],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "task_protection": profile["task_protection"],
+        }
+        for key, ceiling in budgets.items():
+            value = profile.get(key)
+            if type(value) is not int or not 1 <= value <= ceiling:
+                raise ValueError("Invalid registered Work Mode budget")
+            if value != previous[base][key]:
+                refreshed[key] = value
+        current[name] = refreshed
+    return json.dumps(new, indent=2) + "\n"
+
+
 def apply(prefix):
     op.verify()
     receipt = op.verify_install(prefix)
     safe(prefix)
     docker, host, tag, image = docker_details()
+    profiles = preserve_registered_profiles(
+        prefix, work_profile(prefix, docker, host, tag, image)
+    )
     record = prefix / "state/amendments" / ("work-mode-" + str(time.time_ns()))
     op.private(record)
     targets = [("gate/" + name, prefix / "gate" / name) for name in FILES] + [
@@ -464,9 +535,7 @@ def apply(prefix):
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic(target, (ROOT / "config/schemas" / name).read_text())
     atomic(prefix / "config/openclaw.json", openclaw_config(prefix))
-    atomic(
-        prefix / "config/work-mode.json", work_profile(prefix, docker, host, tag, image)
-    )
+    atomic(prefix / "config/work-mode.json", profiles)
     freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
     for name in FILES:
         freeze[name] = sha(prefix / "gate" / name)
