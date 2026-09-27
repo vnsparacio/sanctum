@@ -1,5 +1,7 @@
 # Sanctum v1.3.0 (in development)
 
+- Add bounded private Work Mode decision summaries, readable reviewer findings and an offline HTML timeline; preserve numeric token telemetry while keeping explanatory text outside action authority and operational telemetry.
+
 - Guard Work Mode against low local disk space, reserve a small cleanup buffer, retain original failures when receipt writes fail, and support optional owner-defined checkpoints with shared task budgets and unchanged acceptance gates.
 
 - Correct Source-First web retrieval to use the accepted OpenClaw core fetch path instead of an invalid Firecrawl provider pin, while retaining bounded Parallel discovery and per-candidate fetch failure handling.

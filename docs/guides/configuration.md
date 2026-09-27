@@ -164,6 +164,74 @@ alone does not establish app correctness; retain an owner acceptance contract
 and perform the final browser check. This staged MoodLog workflow is covered by
 synthetic contracts; a new live MoodLog run remains to be qualified.
 
+## Private Work Mode explanations and timeline
+
+The current source requests an optional `decision_note` alongside each
+implementation action, final response or escalation. It has four short fields:
+`subgoal`, `evidence`, `expected_outcome` and `next_validation`, each limited to
+240 UTF-16 code units. This is a model-written explanation, not a transcript of
+hidden reasoning or proof of the computation that produced the action. Thinking
+remains disabled. The existing output-token, time, call and cost budgets include
+any note; no extra inference call is made to generate or repair explanations.
+
+The PRIVATE_LEAD adapter removes this field before ordinary action validation.
+Missing or malformed notes are labeled `MISSING` or `INVALID` and cannot grant
+permissions, change tool arguments, make completion eligible or trigger retries.
+The reviewer is asked for a short `summary` alongside each finding's severity,
+locator and check code. Readable findings are kept for owner inspection; the
+existing reviewer verdict and host acceptance gates still determine behavior.
+Notes and readable findings are not fed back as tool instructions.
+
+Each new task writes a separate owner-private `decision-trace.jsonl` beside its
+existing `events.jsonl` and `summary.json`. The explanatory stream allows only
+these bounded fields and host-assigned task, checkpoint, turn and role metadata.
+Recognized credential patterns are redacted. This does not guarantee removal of
+all sensitive text: explanations can refer to private task context, so treat
+the entire file and generated reports as private. Files are mode 0600, task
+directories are mode 0700, and each explanatory stream stops at 128 records or
+256 KiB. No raw prompt, source body, tool output or hidden-thinking transcript is
+intentionally collected through this path. Unknown fields are omitted.
+
+This optional explanatory stream is best-effort. Its absence, size cap or disk
+failure does not authorize or stop work. `/work status` reports its state, and
+the final receipt records state/count/bytes when receipt persistence succeeds.
+Existing receipt and storage guards remain in force. Explanations remain local;
+they are not sent to Splunk/APM or the conversational content-telemetry spool.
+They follow the task's retained private evidence lifecycle; this version adds
+no automatic retention deletion or new export destination.
+
+Numeric prompt/completion token counts and decode tokens per second are now
+explicitly retained in the ordinary receipt sanitizer; credential fields and
+non-numeric lookalikes remain excluded. Model-call metadata includes turn and
+role, and coordinator receipts include checkpoint correlation. Older receipts
+cannot recover token measurements or explanations that were never stored.
+
+Generate a standalone HTML timeline after a task has stopped:
+
+```sh
+node scripts/work_mode_timeline.mjs --task-dir /absolute/private/prefix/state/gate/private-lead/work-mode/tasks/TASK_ID
+```
+
+The command writes `timeline.html` inside that same private task directory. It
+checks the receipt hash chain, correlates explanation records by task/checkpoint/
+turn, escapes all displayed values, and uses no scripts, network requests or
+external assets. The page distinguishes model explanations from host outcomes.
+Chain verification establishes internal consistency, not authenticity against
+an attacker rewriting the entire file. Explanations are outside that chain.
+Corrupt, partial, oversized, foreign-task or unsafe-permission input refuses
+report generation; an existing report is not replaced on input failure. A task
+with valid receipts but no explanation file can still be viewed, with missing
+notes explicitly labeled. Open the generated file locally, not on a public web
+server.
+
+Apply this source through the complete stopped-gateway Work Mode upgrade and
+run doctor before using it in the private runtime. The optional note changes
+the implementation generation schema, so run the existing production-schema
+preflight before paid inference. Offline tests cover schema, containment,
+redaction, write failures and task integration; note usefulness and live decoder
+behavior still require a bounded live qualification. Historical accepted runs
+do not qualify this revised interface.
+
 ## Optional migration bindings
 
 The supported amendment schema also accepts `notes_dir`: an existing absolute directory outside source with no symlink components. The Markdown broker uses this owner binding; the default remains prefix-owned notes. GPU `local_port` may select a distinct nonprivileged loopback tunnel port; gateway, model and WebUI ports are rejected. Other GPU policy remains pinned.

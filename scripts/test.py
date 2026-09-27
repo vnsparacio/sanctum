@@ -25,6 +25,7 @@ GATE_NODE_TESTS = (
     "tests/work-mode-app-server.test.mjs",
     "tests/work-mode.test.mjs",
     "tests/work-stages.test.mjs",
+    "tests/work-trace.test.mjs",
     "tests/worktree-edit.test.mjs",
     "tests/task-evidence.test.mjs",
     "tests/protocol-repair.test.mjs",
