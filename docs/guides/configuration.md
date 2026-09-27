@@ -99,9 +99,70 @@ Project 3G installs Work Mode only through the stopped-gateway, reversible `scri
 
 PRIVATE_LEAD Work Mode proposals now use the accepted interface profile's 4,096-token output reserve per request. The separate owner-authorized diagnostic microprobe retains its 1,024-token ceiling. A response ending at the output ceiling stops the task as `BUDGET_EXHAUSTED / MODEL_OUTPUT_LIMIT` before any incomplete proposal can execute; it does not trigger a larger automatic retry. Apply the reviewed source through the stopped-gateway amendment before relying on this behavior in an installed runtime.
 
-On later Work Mode upgrades, the amendment retains owner-registered private profiles, their repository and staging bindings, their task-protection contracts, and reviewed budget overrides. It refreshes runner bindings and other reviewed profile settings from the corresponding built-in profile. If a registration cannot be matched to a reviewed base or its private paths are unsafe, the amendment refuses before changing the installed runtime. Verify the registered profile is present after upgrade and run `make doctor PREFIX=/absolute/private/prefix` before restart.
+On later Work Mode upgrades, the amendment retains owner-registered private profiles, their repository and staging bindings, their task-protection contracts, validated optional stages, and reviewed budget overrides. It refreshes runner bindings and other reviewed profile settings from the corresponding built-in profile. If a registration cannot be matched to a reviewed base or its private paths are unsafe, the amendment refuses before changing the installed runtime. Verify the registered profile is present after upgrade and run `make doctor PREFIX=/absolute/private/prefix` before restart.
 
 The local Qwen catalog now uses a 24,576-token context window while retaining its 4,096-token per-turn output limit. OpenClaw estimates input conservatively for loopback proxy endpoints; with the previous 16,384-token catalog window, a tool-heavy Gmail search/read exchange could reduce the final generation allowance to one token even though MLX had room to answer. This change does not alter weights, tools, routing, or fallback policy. Existing private Work Mode installations receive the reviewed catalog change through the stopped-gateway amendment, then require a gateway restart.
+
+## Work Mode storage and optional checkpoints
+
+New workspace admission and PRIVATE_LEAD lease acquisition/readiness require at
+least 2 GiB free on the relevant local filesystem. Running workspace operations,
+lease heartbeats and bootstrap lease checks require 512 MiB. Workspace admission
+checks both the private state filesystem and staging filesystem. These host
+floors are fixed, independent of model prompts and profile budgets. Low space
+stops work with `LOCAL_DISK_LOW`; actual ENOSPC/EDQUOT/SQLite FULL errors report
+`LOCAL_DISK_FULL`. A failed space query reports `LOCAL_STORAGE_UNAVAILABLE`.
+
+Admission allocates a private 4 MiB `cleanup-storage.reserve` in the lifecycle
+state directory. Under pressure, lease release or sweep validates and removes
+only that marked reserve before ordinary database/state writes. Concurrent
+reserve operations serialize. Cleanup retains all lease and provider ownership
+checks; it does not delete owner files, abandon leases or remove persistent
+volumes. This improves recovery but cannot guarantee cleanup if another process
+consumes the freed space. Keep the janitor running until provider absence and
+lease cleanup are confirmed. After recovery, new admission replenishes the
+reserve. Receipt failures preserve the original failed result and metrics in
+`/work status` and `/work result`; an otherwise complete task becomes
+`EVIDENCE_PERSISTENCE_FAILED` if its final receipt cannot be written. In-memory
+warnings do not survive a gateway restart.
+
+After applying the reviewed stopped-gateway Work Mode upgrade, register a new
+private profile through `scripts/configure.py` using `work_profile` with `name`,
+`copy_from`, `repository`, and optionally `stages`. Repository/staging setup and
+task-protection requirements remain unchanged. Stages contain exactly `name`,
+`goal` and `required_files`; two or three stages are supported. Each goal is at
+most 1,000 UTF-16 code units and each stage lists one to eight safe relative file
+paths. The assembled owner goal plus checkpoint prompt must fit 4,000 code units
+or admission refuses before workspace creation. For example, the optional field
+in an owner-private registration proposal can be:
+
+```json
+{"stages": [
+  {"name": "logic", "goal": "Implement mood entry validation and data operations with tests. Use a module format compatible with the eventual browser UI.", "required_files": ["logic.js", "logic.test.js"]},
+  {"name": "ui", "goal": "Connect the mood selector and note field to the tested logic. Test DOM identifiers, selection state and submission.", "required_files": ["index.html", "styles.css", "ui.js", "ui.test.js"]},
+  {"name": "persistence", "goal": "Add persistence and history, test reload behavior, and document usage and test commands.", "required_files": ["storage.test.js", "README.md"]}
+]}
+```
+
+Use a base whose fixed `test` operation can run the intended suite. Every
+checkpoint uses all existing profile evaluators, protected acceptance checks
+and the configured reviewer. Required files accumulate across checkpoints and
+must remain readable through the host workspace boundary. A checkpoint advances
+only after host-verified completion; failure stops the task. Checkpoint receipts
+retain identifiers/status/metrics, not goals or file contents.
+
+Stages reuse the task ID and isolated workspace while starting fresh model
+context for each checkpoint. Earlier source must be read through the existing
+egress-controlled tools. Iterations, implementation model calls and wall time
+share one aggregate budget; token, inference-time and cost counters remain
+shared too. As before, reviewer calls are separate from the implementation-call
+limit: a configured reviewer can make at most one call per checkpoint (at most
+three for staged work), within the same time/token/cost limits. Stage definitions
+cannot change tools, commands, protection, reviewer policy or budgets. No failed
+stage is automatically retried. Passing generated tests and a file checklist
+alone does not establish app correctness; retain an owner acceptance contract
+and perform the final browser check. This staged MoodLog workflow is covered by
+synthetic contracts; a new live MoodLog run remains to be qualified.
 
 ## Optional migration bindings
 

@@ -161,6 +161,14 @@ class Setup(unittest.TestCase):
             "max_model_calls": 32,
             "max_tokens": 200000,
         }
+        owner["stages"] = [
+            {
+                "name": "logic",
+                "goal": "Implement logic and tests",
+                "required_files": ["logic.js"],
+            },
+            {"name": "ui", "goal": "Connect UI", "required_files": ["index.html"]},
+        ]
         old["profiles"]["moodtest"] = owner
         path = self.prefix / "config/work-mode.json"
         path.write_text(json.dumps(old))
@@ -180,6 +188,7 @@ class Setup(unittest.TestCase):
         self.assertEqual(updated["max_iterations"], 32)
         self.assertEqual(updated["max_model_calls"], 32)
         self.assertEqual(updated["max_tokens"], 200000)
+        self.assertEqual(updated["stages"], owner["stages"])
         owner["disk_bytes"] = 1
         path.write_text(json.dumps(old))
         with self.assertRaisesRegex(ValueError, "cannot be refreshed safely"):
@@ -926,6 +935,40 @@ class WorkProfileAmendments(unittest.TestCase):
         mod.rollback(self.prefix, next((self.prefix / "state/amendments").iterdir()))
         op.verify_install(self.prefix)
         self.assertEqual((self.prefix / "config/work-mode.json").read_bytes(), before)
+
+    def test_stage_registration_validates_before_amending(self):
+        mod, repo, policy, proposal = self.fixture()
+        stages = [
+            {
+                "name": "logic",
+                "goal": "Build tested logic",
+                "required_files": ["logic.js"],
+            },
+            {"name": "ui", "goal": "Wire UI", "required_files": ["index.html"]},
+        ]
+        before = (self.prefix / "config/work-mode.json").read_bytes()
+        for invalid in [
+            [],
+            [stages[0], stages[0]],
+            [{**stages[0], "max_model_calls": 99}, stages[1]],
+            [{**stages[0], "required_files": ["../secret"]}, stages[1]],
+        ]:
+            proposal["work_profile"]["stages"] = invalid
+            with self.assertRaises(ValueError):
+                mod.configure(self.prefix, proposal)
+            self.assertEqual(
+                (self.prefix / "config/work-mode.json").read_bytes(), before
+            )
+        proposal["work_profile"]["stages"] = stages
+        mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        profiles = json.loads((self.prefix / "config/work-mode.json").read_text())[
+            "profiles"
+        ]
+        self.assertEqual(profiles["unseen"]["stages"], stages)
+        self.assertEqual(
+            profiles["unseen"]["max_model_calls"], policy["max_model_calls"]
+        )
 
     def test_invalid_registration_leaves_receipt_and_profiles_untouched(self):
         mod, repo, policy, proposal = self.fixture()

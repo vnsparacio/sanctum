@@ -11,6 +11,7 @@ import {createSourceRetrieval} from './source-retrieval.mjs';
 import {createWorkMode,MUTABLE_WORKTREE_COMPLETION_POLICY,WORKSPACE_EVIDENCE_VERSION} from './work-mode.mjs';
 import {createCommandBroker} from './command-broker.mjs';
 import {bindWorkTask,unbindWorkTask} from './workspace-tools.mjs';
+import {stagePlan,runStages,runAndRecord,storageCode} from './work-stages.mjs';
 import {createWorkLedger} from './work-ledger.mjs';
 
 const HELP='Work Mode: /work start PROFILE -- GOAL; /work status; /work result TASK_ID; /work approve-result DECISION_ID; /work cancel; /work end. Work Mode is isolated, bounded, and PRIVATE_LEAD reasoning has no authority.';
@@ -59,7 +60,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
  function signed(task,operation,packet={},approval='private_lead_workmode'){
    return {operation,tier:'PRIVATE_LEAD',packet,state:{scope:task.id,high_stakes:false,privacy_floor:'PERSONAL',revision:task.revision},scope:task.id,approval,strong:false,nonce:randomBytes(32).toString('hex'),expires:now()/1000+Math.min(settings.approval_expiry_seconds,300),spec_sha256:spec};
  }
- const call=(task,operation,packet={},signal)=>remote(signed(task,operation,packet),signal??new AbortController().signal);
+ const call=async(task,operation,packet={},signal)=>{try{const result=await remote(signed(task,operation,packet),signal??new AbortController().signal);const code=storageCode(result?.reason);if(code)task.storageFailure=code;return result;}catch(error){const code=storageCode(error?.code);if(code)task.storageFailure=code;throw error;}};
  function owner(ctx){return createHmac('sha256',key).update(JSON.stringify([ctx.sessionKey,ctx.sessionId??'',ctx.senderId??'',ctx.accountId??''])).digest('hex');}
  function profileConfig(name){
    const document=safeFile(settings.work_mode.profile_file),profile=document.profiles?.[name];
@@ -97,6 +98,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
  async function start(session,profileName,goal){
    if(active>=Math.min(settings.work_mode.max_concurrent_tasks??1,1))return {text:'A Work Mode task is already active. No workspace or compute was started.'};
    const profile=profileConfig(profileName),task={id:id(),profile:profileName,goal,revision:0,phase:'STARTING',status:null,result:null,workspace:null,abort:new AbortController(),promise:null,pending:null};
+   const plan=stagePlan(goal,profile.stages);
    session.task=task;
    const manifest=currentCapabilityManifest();
    task.ledger=createWorkLedger({root:settings.work_mode.ledger_root,taskId:task.id,key,metadata:{goal,profile:profileName,reasonerRelease:settings.private_lead.release_id,manifestDigest:manifest.digest}});
@@ -130,7 +132,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      return {ok:true,data:response.result,executionState:response.result?.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};
    });
    task.telemetry={promptTokens:0,completionTokens:0,inferenceSeconds:0,estimatedCostUsd:0,modelCalls:0};
-   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.inferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;task.ledger.modelCall({...event,estimatedCostUsd:task.telemetry.estimatedCostUsd});}});
+   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.inferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;try{task.ledger.modelCall({...event,estimatedCostUsd:task.telemetry.estimatedCostUsd});}catch(error){task.storageFailure=storageCode(error?.code);throw error;}}});
    const verifyProtectedEvidence=async({signal}={})=>{
      const response=await call(task,'worktree_integrity',{task_id:task.id,profile:task.profile},signal);
      if(response?.status!=='OK')throw Error('protected_evidence_unavailable');
@@ -139,7 +141,9 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    const evaluator=async({signal})=>{
      const original=await verifyProtectedEvidence({signal});
      if(original.integrity!=='PASS')return {passed:false};
-     const rows=[];const before=await call(task,'worktree_command',{task_id:task.id,operation:'diff',profile:task.profile},signal);
+     const rows=[];
+     for(const path of task.stage?.required_files??[]){const file=await call(task,'worktree_read',{task_id:task.id,path,max_chars:1},signal);rows.push({operation:'required_file',ok:file?.status==='OK'});}
+     const before=await call(task,'worktree_command',{task_id:task.id,operation:'diff',profile:task.profile},signal);
      if(before?.status!=='OK')throw Error('evaluator_unavailable');
      for(const operation of profile.evaluators??['test']){
        const response=await call(task,'worktree_command',{task_id:task.id,operation,profile:task.profile},signal);
@@ -191,11 +195,18 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      const response=await call(task,'worktree_observe',{task_id:task.id,path:pending.path,observation:pending.token});
      return response?.status==='OK'&&response.result?.ok===true;
    };
-   const work=createWorkMode({reasoner,manifest,observeRead,invoke:async({proposal,signal})=>{try{return await gatewayInvoke(task,proposal.capability,proposal.arguments,proposal,signal);}catch(error){if(['worktree_edit','worktree_patch'].includes(proposal.capability))return {ok:false,error:{code:'EDIT_RESPONSE_UNAVAILABLE'},executionState:'COMPLETION_UNKNOWN'};throw error;}},authorize:authority,egress:resultEgress,evaluate:evaluator,reviewer,workspaceState,verifyProtectedEvidence,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,onEvent:(kind,value)=>task.ledger.event(kind,value),budgetStatus:()=>task.telemetry.promptTokens+task.telemetry.completionTokens>(profile.max_tokens??100000)?'TOKEN_BUDGET':task.telemetry.inferenceSeconds>(profile.max_gpu_seconds??900)?'GPU_ACTIVE_BUDGET':task.telemetry.estimatedCostUsd>(profile.max_cost_usd??settings.private_lead.max_hourly_usd/2)?'COST_BUDGET':null});
+   const work=createWorkMode({reasoner,manifest,observeRead,invoke:async({proposal,signal})=>{try{return await gatewayInvoke(task,proposal.capability,proposal.arguments,proposal,signal);}catch(error){if(['worktree_edit','worktree_patch'].includes(proposal.capability))return {ok:false,error:{code:'EDIT_RESPONSE_UNAVAILABLE'},executionState:'COMPLETION_UNKNOWN'};throw error;}},authorize:authority,egress:resultEgress,evaluate:evaluator,reviewer,workspaceState,verifyProtectedEvidence,completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,onEvent:(kind,value)=>{try{return task.ledger.event(kind,value);}catch(error){task.storageFailure=storageCode(error?.code)??task.storageFailure;throw error;}},budgetStatus:()=>task.storageFailure??(task.telemetry.promptTokens+task.telemetry.completionTokens>(profile.max_tokens??100000)?'TOKEN_BUDGET':task.telemetry.inferenceSeconds>(profile.max_gpu_seconds??900)?'GPU_ACTIVE_BUDGET':task.telemetry.estimatedCostUsd>(profile.max_cost_usd??settings.private_lead.max_hourly_usd/2)?'COST_BUDGET':null)});
    active++;task.phase='RUNNING';
    const configured=profile.capabilities??['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command','source_first_research'];
    const names=selectWorkCapabilityNames(goal,configured,manifest);
-   task.promise=(async()=>{try{task.result=await work.run({task:goal,scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal});task.status=task.result.status;task.phase='TERMINAL';task.ledger.finish({status:task.status,reason:task.result.reason,providerCode:task.result.providerCode??null,metrics:task.result.metrics,telemetry:task.telemetry});}catch{task.status='ENVIRONMENT_FAILURE';task.phase='TERMINAL';task.result={status:task.status,reason:'WORK_MODE_FAILURE'};try{task.ledger.finish({...task.result,telemetry:task.telemetry});}catch{}}finally{active--;}})();
+   task.promise=(async()=>{try{
+     task.result=await runAndRecord({
+       run:()=>runStages({plan,run:options=>work.run(options),options:{scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal},onStage:stage=>{task.stage=stage;},onCheckpoint:value=>task.ledger.event('CHECKPOINT',value)}),
+       storageFailure:()=>task.storageFailure,
+       finish:result=>task.ledger.finish({status:result.status,reason:result.reason,providerCode:result.providerCode??null,metrics:result.metrics,checkpointsCompleted:result.checkpointsCompleted,persistenceWarning:result.persistenceWarning??null,originalStatus:result.originalStatus??null,originalReason:result.originalReason??null,telemetry:task.telemetry}),
+     });
+     task.status=task.result.status;task.phase='TERMINAL';
+   }finally{active--;}})();
    return {text:`Work Mode task ${task.id} started in an isolated workspace. Use /work result ${task.id} or /work status. PRIVATE_LEAD has no authority; the host controls execution and completion.`};
  }
  const handler=async ctx=>{
@@ -204,10 +215,10 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    const identity=owner(ctx),args=typeof ctx.args==='string'?ctx.args.trim():'';let session=sessions.get(identity);
    if(!args||args==='help')return {text:HELP};
    const match=args.match(/^start\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s+--\s+([\s\S]+)$/);
-   if(match){const goal=match[2].trim();if(session?.task)return {text:'End the current Work Mode task before starting another.'};if(!goal||goal.startsWith('-')||SECRET.test(goal)||Buffer.byteLength(goal)>32768)return {text:'Empty, option-like, oversize, or recognized credential text was refused. Nothing was started.'};session={task:null};sessions.set(identity,session);try{return await start(session,match[1],goal);}catch{if(session.task)await cleanup(session.task,{cancel:true});sessions.delete(identity);return {text:'Work Mode start failed closed. Any allocated workspace or compute was sent through bounded cleanup.'};}}
+   if(match){const goal=match[2].trim();if(session?.task)return {text:'End the current Work Mode task before starting another.'};if(!goal||goal.startsWith('-')||SECRET.test(goal)||Buffer.byteLength(goal)>32768)return {text:'Empty, option-like, oversize, or recognized credential text was refused. Nothing was started.'};session={task:null};sessions.set(identity,session);try{return await start(session,match[1],goal);}catch(error){const failure=session.task?.storageFailure??storageCode(error?.code);if(session.task)await cleanup(session.task,{cancel:true});sessions.delete(identity);return {text:`Work Mode start failed closed${failure?` (${failure})`:''}. Any allocated workspace or compute was sent through bounded cleanup.`};}}
    if(!session?.task)return {text:'Start with /work start PROFILE -- GOAL.'};const task=session.task;
-   if(args==='status')return {text:`Work Mode ${task.phase}; task ${task.id}; status ${task.status??'RUNNING'}; iterations ${task.result?.metrics?.iterations??'in progress'}; stop ${task.result?.reason??'none'}.`};
-   if(args.startsWith('result ')){const requested=args.slice(7).trim();if(requested!==task.id)return {text:'That task is not available in this authenticated owner session.'};if(!task.result)return {text:`Work Mode task ${task.id} is ${task.phase}.`};return {text:`Work Mode task ${task.id}: ${task.result.status} (${task.result.reason}).${task.result.providerCode?` Provider code ${task.result.providerCode}.`:''} Host-evaluated iterations ${task.result.metrics?.iterations??0}; model calls ${task.result.metrics?.modelCalls??0}; elapsed ${Math.round(task.result.metrics?.elapsedSeconds??0)}s.`};}
+   if(args==='status')return {text:`Work Mode ${task.phase}; task ${task.id}; status ${task.status??'RUNNING'}; iterations ${task.result?.metrics?.iterations??'in progress'}; stop ${task.result?.reason??'none'}.${task.result?.persistenceWarning?` Receipt warning ${task.result.persistenceWarning}.`:''}`};
+   if(args.startsWith('result ')){const requested=args.slice(7).trim();if(requested!==task.id)return {text:'That task is not available in this authenticated owner session.'};if(!task.result)return {text:`Work Mode task ${task.id} is ${task.phase}.`};return {text:`Work Mode task ${task.id}: ${task.result.status} (${task.result.reason}).${task.result.providerCode?` Provider code ${task.result.providerCode}.`:''} ${task.result.persistenceWarning?`Receipt warning ${task.result.persistenceWarning}. `:''}Host-evaluated iterations ${task.result.metrics?.iterations??0}; model calls ${task.result.metrics?.modelCalls??0}; elapsed ${Math.round(task.result.metrics?.elapsedSeconds??0)}s.`};}
    if(args.startsWith('approve-result '))return {text:'No exact result-egress decision is pending for this task. This command cannot approve an action.'};
    if(args==='cancel'){task.abort.abort();await task.promise;return {text:`Work Mode task ${task.id} cancelled with stop state ${task.status}. The workspace and private receipt are retained until /work end.`};}
    if(args==='end'){const result=await cleanup(task,{cancel:!task.result});sessions.delete(identity);return {text:`Work Mode session ended. Workspace cleanup ${result.cleaned?'confirmed':'not confirmed'}; GPU ${result.gpuPhase}. Private content-minimized receipts were retained.`};}
