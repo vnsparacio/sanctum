@@ -1,5 +1,7 @@
 # Sanctum v1.3.0 (in development)
 
+- Align PRIVATE_LEAD startup with the reviewed B200 fallback and install its launcher through the supported Work Mode upgrade; retain single-GPU identity and memory checks.
+
 - Add bounded private Work Mode decision summaries, readable reviewer findings and an offline HTML timeline; preserve numeric token telemetry while keeping explanatory text outside action authority and operational telemetry.
 
 - Guard Work Mode against low local disk space, reserve a small cleanup buffer, retain original failures when receipt writes fail, and support optional owner-defined checkpoints with shared task budgets and unchanged acceptance gates.

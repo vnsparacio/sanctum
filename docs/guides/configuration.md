@@ -57,6 +57,19 @@ An obsolete PRIVATE_LEAD SSH binding can be changed through the same stopped-gat
 
 When the default RTX PRO 6000 Blackwell Server Edition has no stock in the existing volume's datacenter, a reviewed optional B200 binding is available. Confirm current secure-cloud stock, price, account balance, and the existing volume location first. With Sanctum stopped, no active Work Mode lease or private-lead request, the managed GPU offline, and the janitor loaded, apply an owner-private proposal containing only `{"private_lead_gpu":{"gpu":"NVIDIA B200","max_hourly_usd":7}}` through `scripts/configure.py`. This is a ceiling of $7/hour, not a current-price guarantee; the provider preflight still requires the live price at or below the ceiling and enough balance for the configured maximum runtime. It retains the same network volume, model revision, cache path, and disabled autostart, and writes a rollback record. Run doctor and read-only provider preflight before retrying. The inverse reviewed pair is `{"private_lead_gpu":{"gpu":"NVIDIA RTX PRO 6000 Blackwell Server Edition","max_hourly_usd":3}}`. Never change only one member of the pair or move the volume to another datacenter to chase capacity. Supported private-lead and Work Mode upgrades preserve the B200 pair once amended.
 
+
+The PRIVATE_LEAD launcher admits exactly one RTX PRO 6000 Blackwell Server
+Edition with at least 90,000 MiB or B200 with at least 170,000 MiB. Unsupported
+identities, malformed inventory, multiple GPUs, insufficient memory and failed
+`nvidia-smi` queries stop before server launch. Older launchers rejected the
+reviewed B200 fallback with exit 31 even though the configuration amendment
+accepted it. Apply the current stopped-gateway Work Mode upgrade, which now
+includes this launcher, before using that fallback. Model/runtime pins, offline
+cache use and serving flags remain unchanged. Automated shell and amendment
+rollback tests cover this repair; successful live B200 inference remains to be
+qualified. Shorten an approved test window when the higher hourly price requires
+it to preserve the owner's compute cap.
+
 If a missing configured public key left a PRIVATE_LEAD state at `DEGRADED/allocation_unresolved` before any provider create call, preserve the Work Mode receipt and use `scripts/recover_private_lead_preallocation.py --prefix /absolute/private/prefix --task-id <terminal-task-id>` from the reviewed source release. This narrow recovery requires the exact installed pre-call adapter, stopped gateway, loaded janitor, empty leases, matching terminal task, missing configured public key, and two empty managed-pod provider listings. It writes private before-state and evidence before clearing the false allocation intent. It refuses any ambiguous state. Apply the SSH binding amendment afterward, run doctor, then update the installed Gate runtime through the stopped-gateway Work Mode amendment before retrying. Do not edit `gpu.json` by hand or delete a persistent volume.
 
 For a reviewed Source-First code update on an existing prefix, stop the managed

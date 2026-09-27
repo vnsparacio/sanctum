@@ -140,6 +140,41 @@ class Setup(unittest.TestCase):
             "worktree_patch", config["agents"]["entries"]["main"]["tools"]["deny"]
         )
 
+    def test_work_mode_upgrade_installs_private_lead_launcher_and_rolls_back(self):
+        op.setup(self.prefix)
+        name = "gate/runtime/bootstrap-private-lead-vllm.sh"
+        launcher = self.prefix / name
+        old = "#!/bin/sh\nexit 31\n"
+        launcher.write_text(old)
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze[name.removeprefix("gate/")] = op.sha(launcher)
+        freeze_path.write_text(json.dumps(freeze))
+        receipt_path = self.prefix / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["files"][name] = op.sha(launcher)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        receipt_path.write_text(json.dumps(receipt))
+        with (
+            patch.object(work_mode, "safe"),
+            patch.object(
+                work_mode,
+                "docker_details",
+                return_value=("docker", "host", "tag", "sha256:synthetic"),
+            ),
+        ):
+            work_mode.apply(self.prefix)
+            self.assertEqual(launcher.read_bytes(), (ROOT / name).read_bytes())
+            op.verify_install(self.prefix)
+            installed_freeze = json.loads(freeze_path.read_text())
+            self.assertEqual(
+                installed_freeze[name.removeprefix("gate/")], op.sha(launcher)
+            )
+            record = next((self.prefix / "state/amendments").iterdir())
+            work_mode.rollback(self.prefix, record)
+        self.assertEqual(launcher.read_text(), old)
+        op.verify_install(self.prefix)
+
     def test_work_mode_upgrade_preserves_registered_profile_and_refreshes_runtime(self):
         op.setup(self.prefix)
         old = json.loads(
