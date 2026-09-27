@@ -1,0 +1,19 @@
+{
+  "schema": "sanctum-task-protection/v1",
+  "protected": ["persistence.test.cjs"],
+  "mutable": "*",
+  "mutable_tests": ["logic.test.js", "ui.test.js", "storage.test.js"],
+  "allow_new": true,
+  "acceptance": {
+    "runner": "node-test-v1",
+    "entries": [{
+      "path": "persistence.test.cjs",
+      "names": [
+        "moodlog: save and reload the newest five entries",
+        "moodlog: clearing persists across a fresh load",
+        "moodlog: malformed stored data is safe and invalid entries are discarded",
+        "moodlog: unavailable storage returns an explicit failure without throwing"
+      ]
+    }]
+  }
+}

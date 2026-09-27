@@ -12,4 +12,9 @@ Current contributor and operator material is organized by purpose:
 
 The stable release record is [Sanctum V1.2.0 release completion](history/v1.2/V1.2-RELEASE-COMPLETION.md). V1.3 begins with the [development bootstrap](current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md), and the [Qwen lifecycle qualification](current/agent-system/V1.3-QWEN-LIFECYCLE-QUALIFICATION.md) records the first owner-gated non-Sanctum Work Mode implementation. Accepted V1.2 component evidence remains in the [agent-system handoff](current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md), [Linear live qualification](current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md), [Git control plane](current/agent-system/V1.2-GIT-CONTROL-PLANE.md) and [Splunk Observability guide](observability/SPLUNK-O11Y-CLOUD.md).
 
+The [guided MoodLog POC milestone](history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md)
+records browser-functional partial acceptance and its limits; the
+[completion runbook](development/WORK-MODE-MOODLOG-ACCEPTANCE.md) defines the next
+protected persistence and browser checks.
+
 Historical reports intentionally preserve failed qualifications, intermediate repairs and superseded handoffs. They are evidence, not current operating instructions. For V1.1 status, the [V1.1 release completion](history/v1.1/V1.1-RELEASE-COMPLETION.md) and the final [Project 3 structured-editing acceptance](history/v1.1/project-3/PROJECT-3-STRUCTURED-EDITING.md) supersede earlier Project 3 status reports.

@@ -7,7 +7,7 @@ import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
 import {CONTRACT_VERSION,digest,validateToolProposal} from '../foundation/contracts.mjs';
 import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} from '../foundation/work-intent.mjs';
 import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerationSchema} from '../foundation/vllm-structured-output.mjs';
-import {argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
+import {rememberFileFacts,testRecoveryCode,argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
 import {normalizeWorkspacePacket,selectWorkCapabilityNames,workCapabilityErrorCode} from '../plugin/work-command.mjs';
 import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
@@ -387,4 +387,44 @@ test('test recovery summary cannot bypass denied egress, omitted results or fixe
    assert.ok(!JSON.stringify(requests[1].state.lastTest).includes('SYNTHETIC_'));
   }else assert.equal(requests[1].state.lastTest,null);
  }
+});
+
+test('disclosed file facts survive observation eviction but never authorize edits',async()=>{
+ const names=['worktree_list','worktree_read','worktree_edit'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['allowed','denied','omitted']){
+  const rows=[proposal('worktree_edit',{operation:'create',path:'view.js',new_text:'synthetic'}),...Array.from({length:7},()=>proposal('worktree_list',{})),{kind:'ESCALATION',reason:'STOP'}],requests=[];
+  const result=await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async()=>({ok:true,data:variant==='omitted'?{text:'x'.repeat(13000)}:{},executionState:'COMPLETED',verifier:'VERIFIED'}),evaluate:async()=>{throw Error('no evaluation');}})).run({task:'synthetic',scope,requestId,capabilities:names,maxIterations:12});
+  assert.equal(result.reason,'MODEL_ESCALATION');if(variant!=='denied')assert.equal(requests[8].state.observations.length,6);
+  assert.deepEqual(requests[8].state.fileFacts,variant==='allowed'?[{path:'view.js',exists:true,observedGeneration:1}]:[]);
+  assert.equal(requests[8].state.tests.required,true);assert.deepEqual(requests[8].state.readRequired,['view.js']);
+ }
+});
+
+test('file facts are bounded, relative, update moves/deletes and clear after patch',()=>{
+ let facts=[];const edit=(args,successful=true,errorCode=null)=>facts=rememberFileFacts(facts,{name:'worktree_edit',args,successful,errorCode,executionState:successful?'COMPLETED':'NOT_STARTED',generation:4});
+ for(let i=0;i<40;i++)edit({operation:'create',path:`file${i}.js`});assert.equal(facts.length,32);assert.equal(facts[0].path,'file8.js');
+ edit({operation:'move',path:'file39.js',destination:'moved.js'});assert.equal(facts.find(x=>x.path==='file39.js').exists,false);assert.equal(facts.at(-1).exists,true);
+ edit({operation:'delete',path:'moved.js'});assert.equal(facts.at(-1).exists,false);
+ edit({operation:'create',path:'existing.js'},false,'EDIT_DESTINATION_EXISTS');assert.equal(facts.at(-1).exists,true);
+ edit({operation:'replace',path:'missing.js'},false,'EDIT_SOURCE_MISSING');assert.equal(facts.at(-1).exists,false);
+ const before=structuredClone(facts);for(const path of ['/private/file','../file','a/../file','x\nsecret'])edit({path});assert.deepEqual(facts,before);
+ assert.deepEqual(rememberFileFacts(facts,{name:'worktree_patch',successful:true}),[]);
+});
+
+test('dependency recovery is fixed guidance derived only from disclosed failure output',async()=>{
+ const names=['worktree_command','worktree_edit'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['allowed','denied','omitted']){
+  const requests=[],rows=[proposal('worktree_command',{operation:'test'}),proposal('worktree_edit',{operation:'create',path:'repair.js',new_text:'synthetic'}),{kind:'ESCALATION',reason:'STOP'}];
+  await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:'COMMAND_FAILED',diagnostic:'ERR_MODULE_NOT_FOUND: PRIVATE_PACKAGE_NAME '+(variant==='omitted'?'x'.repeat(13000):'')},executionState:'COMPLETED',verifier:'REJECTED'}:{ok:true,data:{},executionState:'COMPLETED',verifier:'VERIFIED'},evaluate:async()=>{throw Error('failed tests cannot pass');}})).run({task:'synthetic',scope,requestId,capabilities:names});
+  if(variant==='allowed'){
+   assert.equal(requests[1].state.lastTest.code,'DEPENDENCY_UNAVAILABLE');assert.equal(requests[1].state.lastTest.currentForWorkspace,true);
+   assert.equal(requests[2].state.lastTest.currentForWorkspace,false);assert.match(requests[2].state.lastTest.recovery,/Do not remove, skip or weaken tests/);
+   assert.ok(!JSON.stringify(requests[2].state.lastTest).includes('PRIVATE_PACKAGE_NAME'));
+  }else assert.equal(requests[1].state.lastTest,null);
+ }
+ assert.equal(testRecoveryCode('COMMAND_FAILED','MODULE_NOT_FOUND'),'DEPENDENCY_UNAVAILABLE');
+ assert.equal(testRecoveryCode('COMMAND_FAILED','assertion failed'),'TEST_FAILED');
+ assert.equal(testRecoveryCode('OTHER','ERR_MODULE_NOT_FOUND'),'TEST_FAILED');
 });
