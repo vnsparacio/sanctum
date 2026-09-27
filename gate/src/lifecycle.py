@@ -9,7 +9,18 @@ import uuid
 from pathlib import Path
 
 from backends import Private80BBackend, PrivateLeadBackend
-from common import Refused, atomic, canonical, database, private_dir, strict_json
+from common import (
+    STORAGE_START_BYTES,
+    Refused,
+    atomic,
+    canonical,
+    database,
+    prepare_cleanup_reserve,
+    private_dir,
+    release_cleanup_reserve,
+    storage_headroom,
+    strict_json,
+)
 from runpod import Runpod
 
 
@@ -58,6 +69,8 @@ class Private80BLifecycle:
 
     def acquire(self, scope):
         self.check_enabled()
+        storage_headroom(self.root, STORAGE_START_BYTES)
+        prepare_cleanup_reserve(self.root)
         from experiment import ExperimentLedger
 
         ledger = ExperimentLedger(
@@ -94,6 +107,7 @@ class Private80BLifecycle:
             yield c
 
     def heartbeat(self, scope):
+        storage_headroom(self.root)
         with database(self.root) as c:
             c.execute(
                 "update leases set expires=? where scope=? and closing=0",
@@ -101,6 +115,7 @@ class Private80BLifecycle:
             )
 
     def check_lease(self, scope):
+        storage_headroom(self.root)
         if (self.root / "manual-stop").exists():
             raise Refused("manual_stop")
         with database(self.root) as c:
@@ -111,6 +126,7 @@ class Private80BLifecycle:
             raise Refused("lease_cancelled")
 
     def release(self, scope, close=False):
+        release_cleanup_reserve(self.root)
         final_close = close
         with database(self.root) as c:
             c.execute("begin immediate")
@@ -213,6 +229,7 @@ class Private80BLifecycle:
 
     def ensure_ready(self, scope, explicit=False):
         self.check_enabled()
+        storage_headroom(self.root, STORAGE_START_BYTES)
         from experiment import ExperimentLedger
 
         diagnostic_root = Path(self.settings["state_directory"]) / "private-lead"
@@ -383,6 +400,7 @@ class Private80BLifecycle:
     def sweep(self, immediate=False, manual=False):
         if not isinstance(self, PrivateLeadLifecycle):
             return self.retire(manual=manual)
+        release_cleanup_reserve(self.root)
         from experiment import ExperimentLedger
 
         ledger = ExperimentLedger(

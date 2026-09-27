@@ -14,6 +14,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+stage_spec = importlib.util.spec_from_file_location(
+    "work_stages", ROOT / "scripts/work_stages.py"
+)
+stage_module = importlib.util.module_from_spec(stage_spec)
+stage_spec.loader.exec_module(stage_module)
 s = importlib.util.spec_from_file_location(
     "release_operator", ROOT / "scripts/release_operator.py"
 )
@@ -66,6 +71,8 @@ INTEGRITY_FILES = (
     "runtime/protected-test-driver.cjs",
     "runtime/protected-test-preload.cjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
+    "src/common.py",
     "plugin/work-mode.mjs",
     "plugin/work-ledger.mjs",
     "qualify_work_mode.py",
@@ -78,6 +85,8 @@ EDIT_FILES = (
     "plugin/workspace-tools.mjs",
     "plugin/work-mode.mjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
+    "src/common.py",
     "plugin/work-ledger.mjs",
     "foundation/manifest.mjs",
     "preflight-work-intent.mjs",
@@ -436,7 +445,8 @@ def configure(prefix, proposal):
         if (
             type(item) is not dict
             or not {"name", "copy_from", "repository"} <= set(item)
-            or set(item) - {"name", "copy_from", "repository", "task_protection"}
+            or set(item)
+            - {"name", "copy_from", "repository", "task_protection", "stages"}
         ):
             raise ValueError("Invalid Work Mode profile registration")
         name = item["name"]
@@ -530,6 +540,10 @@ def configure(prefix, proposal):
             profiles["profiles"][name][
                 "task_protection"
             ] = protection_module().validate_contract(item["task_protection"])
+        if "stages" in item:
+            profiles["profiles"][name]["stages"] = stage_module.validate_stages(
+                item["stages"]
+            )
         changes["config/work-mode.json"] = json.dumps(profiles, indent=2) + "\n"
     if "integrations" in proposal:
         items = proposal["integrations"]

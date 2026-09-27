@@ -14,6 +14,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+stage_spec = importlib.util.spec_from_file_location(
+    "work_stages", ROOT / "scripts/work_stages.py"
+)
+stage_module = importlib.util.module_from_spec(stage_spec)
+stage_spec.loader.exec_module(stage_module)
 spec = importlib.util.spec_from_file_location(
     "release_operator", ROOT / "scripts/release_operator.py"
 )
@@ -21,6 +26,7 @@ op = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(op)
 
 FILES = (
+    "src/common.py",
     "src/worktree_edit.py",
     "src/task_evidence.py",
     "runtime/protected-test-driver.cjs",
@@ -77,6 +83,7 @@ FILES = (
     "plugin/source-retrieval.mjs",
     "plugin/work-mode.mjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
     "plugin/command-broker.mjs",
     "plugin/work-ledger.mjs",
     "plugin/workspace-tools.mjs",
@@ -443,7 +450,7 @@ def preserve_registered_profiles(prefix, rendered):
     previous, current = old["profiles"], new["profiles"]
     if any(name not in previous for name in current):
         raise ValueError("Missing reviewed Work Mode profile")
-    binding = {"repository", "staging_root", "task_protection"}
+    binding = {"repository", "staging_root", "task_protection", "stages"}
     budgets = {"max_iterations": 32, "max_model_calls": 32, "max_tokens": 200000}
     ignored = binding | set(budgets)
     for name, profile in previous.items():
@@ -495,6 +502,8 @@ def preserve_registered_profiles(prefix, rendered):
                 raise ValueError("Invalid registered Work Mode budget")
             if value != previous[base][key]:
                 refreshed[key] = value
+        if "stages" in profile:
+            refreshed["stages"] = stage_module.validate_stages(profile["stages"])
         current[name] = refreshed
     return json.dumps(new, indent=2) + "\n"
 

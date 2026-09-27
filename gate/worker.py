@@ -14,11 +14,15 @@ from authority import authorize
 from backends import LocalMultimodalBackend, Remote
 from command_runner import run as run_command
 from common import (
+    STORAGE_RUN_BYTES,
+    STORAGE_START_BYTES,
     Refused,
     atomic,
     canonical,
     load_settings,
     private_dir,
+    storage_error,
+    storage_headroom,
     strict_json,
     verify_release,
 )
@@ -65,6 +69,25 @@ def work_profile(settings, name):
 
 
 def execute(b, settings, remote=None, lifecycle=None):
+    # Check both the evidence filesystem and the actual workspace filesystem.
+    # Lifecycle status and cleanup remain available when admission is refused.
+    operation = b["operation"]
+    if operation.startswith("worktree_") and operation != "worktree_cleanup":
+        storage_headroom(
+            settings["state_directory"],
+            (
+                STORAGE_START_BYTES
+                if operation == "worktree_create"
+                else STORAGE_RUN_BYTES
+            ),
+        )
+        if operation == "worktree_create":
+            storage_headroom(
+                work_profile(settings, b["packet"]["profile"])["staging_root"],
+                STORAGE_START_BYTES,
+            )
+        else:
+            storage_headroom(work_record(settings, b["scope"])["root"])
     # Reads/editor manage this same lock internally; serialize all other host
     # workspace routes, including internal patch and cleanup, against mutation.
     if b["operation"] in {
@@ -301,7 +324,7 @@ if __name__ == "__main__":
         safe = (
             str(e)
             if type(e) is Refused and str(e).replace("_", "").isalnum()
-            else "operation_unavailable"
+            else storage_error(e) or "operation_unavailable"
         )
         result = {"status": "UNAVAILABLE", "reason": safe}
         if type(e) is Refused and hasattr(e, "diagnostic"):

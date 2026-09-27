@@ -1,10 +1,14 @@
 """Small local primitives. Errors are codes; never echo provider bodies or private input."""
 
 import contextlib
+import errno
+import fcntl
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import stat
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -14,6 +18,117 @@ BASE = Path(__file__).resolve().parents[1]
 
 class Refused(ValueError):
     pass
+
+
+# Local operational floors, never model-selected. Cleanup has no admission floor.
+STORAGE_START_BYTES = 2 * 1024**3
+STORAGE_RUN_BYTES = 512 * 1024**2
+_RESERVE_BYTES = 4 * 1024**2
+_RESERVE_MAGIC = b"sanctum-cleanup-reserve/v1\n"
+
+
+def storage_error(error):
+    if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EDQUOT):
+        return "local_disk_full"
+    if (
+        isinstance(error, sqlite3.Error)
+        and (getattr(error, "sqlite_errorcode", 0) & 255) == sqlite3.SQLITE_FULL
+    ):
+        return "local_disk_full"
+    return None
+
+
+def storage_headroom(path, minimum=STORAGE_RUN_BYTES):
+    probe = Path(path)
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        if shutil.disk_usage(probe).free < minimum:
+            raise Refused("local_disk_low")
+    except OSError as error:
+        raise Refused(storage_error(error) or "local_storage_unavailable") from None
+
+
+@contextlib.contextmanager
+def reserve_lock(root):
+    fd = os.open(
+        Path(root) / "cleanup-storage.lock",
+        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def prepare_cleanup_reserve(root):
+    with reserve_lock(root):
+        _prepare_cleanup_reserve(root)
+
+
+def _prepare_cleanup_reserve(root):
+    """Allocate real blocks before admission; never use a sparse reservation."""
+    path = Path(root) / "cleanup-storage.reserve"
+    if path.exists() or path.is_symlink():
+        _check_reserve(path)
+        return
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(_RESERVE_MAGIC)
+            block = bytes(64 * 1024)
+            remaining = _RESERVE_BYTES - len(_RESERVE_MAGIC)
+            while remaining:
+                size = min(remaining, len(block))
+                stream.write(block[:size])
+                remaining -= size
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _check_reserve(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        meta = os.fstat(fd)
+        if (
+            not stat.S_ISREG(meta.st_mode)
+            or meta.st_uid != os.getuid()
+            or meta.st_nlink != 1
+            or meta.st_mode & 0o077
+            or meta.st_size != _RESERVE_BYTES
+            or os.read(fd, len(_RESERVE_MAGIC)) != _RESERVE_MAGIC
+        ):
+            raise Refused("cleanup_reserve_invalid")
+        return meta.st_ino
+    finally:
+        os.close(fd)
+
+
+def release_cleanup_reserve(root):
+    with reserve_lock(root):
+        _release_cleanup_reserve(root)
+
+
+def _release_cleanup_reserve(root):
+    """Free only our marked reserve under pressure, before normal lease writes."""
+    try:
+        storage_headroom(root)
+        return
+    except Refused as error:
+        if str(error) not in ("local_disk_low", "local_disk_full"):
+            raise
+    path = Path(root) / "cleanup-storage.reserve"
+    if not path.exists() and not path.is_symlink():
+        return
+    inode = _check_reserve(path)
+    if path.lstat().st_ino != inode:
+        raise Refused("cleanup_reserve_invalid")
+    path.unlink()
 
 
 def canonical(value):

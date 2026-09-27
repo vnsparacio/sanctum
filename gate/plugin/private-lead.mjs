@@ -9,7 +9,7 @@ import {createReasonerAdapter} from '../foundation/contracts.mjs';
 export const PRIVATE_LEAD_DESTINATION=Object.freeze({kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_LEAD'});
 // Only fixed local worker refusal codes may cross into owner-visible receipts.
 // Never copy provider responses, exception text, pod identities, or URLs.
-const providerRefusals=new Set(['capacity_timeout','gpu_capacity_unavailable','gpu_price_or_identity','gpu_budget_unavailable','canonical_volume_mismatch','runpod_auth_missing','runpod_request_failed','runpod_request_uncertain','runpod_cli_drift','runpod_list_shape','runpod_response_limit','mac_guard_not_ready','ssh_key_missing','ssh_timeout','ssh_failed','tunnel_failed','model_readiness_timeout','allocation_unresolved','untracked_or_duplicate_pod','gpu_runtime_limit','lease_cancelled','operation_cancelled','private_lead_configuration','operation_unavailable']);
+const providerRefusals=new Set(['local_disk_low','local_disk_full','local_storage_unavailable','capacity_timeout','gpu_capacity_unavailable','gpu_price_or_identity','gpu_budget_unavailable','canonical_volume_mismatch','runpod_auth_missing','runpod_request_failed','runpod_request_uncertain','runpod_cli_drift','runpod_list_shape','runpod_response_limit','mac_guard_not_ready','ssh_key_missing','ssh_timeout','ssh_failed','tunnel_failed','model_readiness_timeout','allocation_unresolved','untracked_or_duplicate_pod','gpu_runtime_limit','lease_cancelled','operation_cancelled','private_lead_configuration','operation_unavailable']);
 export const safeProviderRefusal=value=>providerRefusals.has(value)?value:null;
 
 export function profileSystem(profile){
