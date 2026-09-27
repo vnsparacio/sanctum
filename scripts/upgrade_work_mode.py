@@ -95,6 +95,7 @@ FILES = (
     "runtime/private-lead-interface-profile.json",
     "runtime/private-releases.json",
     "runtime/bootstrap-vllm.sh",
+    "runtime/bootstrap-private-lead-vllm.sh",
     "runtime/work-runner.json",
     "runtime/work-runner.Dockerfile",
     "webui/bridge.mjs",

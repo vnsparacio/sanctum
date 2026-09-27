@@ -17,6 +17,80 @@ import verify_exact_runtime as exact
 import verify_serving_runtime as serving
 
 
+class BootstrapHardware(unittest.TestCase):
+    def launch(self, inventory, inventory_status=0):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            binaries = root / "bin"
+            binaries.mkdir()
+            helpers = {
+                "nvidia-smi": '#!/bin/sh\nprintf "%s\\n" "$SYNTHETIC_GPU_INVENTORY"\nexit "$SYNTHETIC_GPU_STATUS"\n',
+                "sleep": "#!/bin/sh\nexec /bin/sleep 0.1\n",
+                "vllm": "#!/bin/sh\nexec /bin/sleep 30\n",
+            }
+            for name, content in helpers.items():
+                path = binaries / name
+                path.write_text(content)
+                path.chmod(0o700)
+            script = (BASE / "runtime/bootstrap-private-lead-vllm.sh").read_text()
+            script = script.replace("/workspace/sanctum", str(root / "sanctum"))
+            script = script.replace("/tmp/spl", str(root / "tmp"))
+            script = script.replace(
+                'VLLM="$BASE/venvs/vllm-0.20.1/bin/vllm"',
+                f'VLLM="{binaries / "vllm"}"',
+            )
+            pidfile = (
+                root
+                / "sanctum/releases/private-lead-qwen35-122b-nvfp4-candidate-v1/pids/vllm.pid"
+            )
+            try:
+                result = subprocess.run(
+                    ["bash", "-s"],
+                    input=script,
+                    text=True,
+                    capture_output=True,
+                    env={
+                        **os.environ,
+                        "PATH": str(binaries) + ":/usr/bin:/bin",
+                        "SYNTHETIC_GPU_INVENTORY": inventory,
+                        "SYNTHETIC_GPU_STATUS": str(inventory_status),
+                    },
+                    timeout=10,
+                )
+                return result.returncode, pidfile.exists()
+            finally:
+                if pidfile.exists():
+                    try:
+                        os.kill(int(pidfile.read_text()), 15)
+                    except ProcessLookupError:
+                        pass
+
+    def test_reviewed_gpus_reach_server_launch(self):
+        for inventory in (
+            "NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887 MiB",
+            "NVIDIA B200, 183359 MiB",
+        ):
+            with self.subTest(inventory=inventory):
+                self.assertEqual(self.launch(inventory), (0, True))
+
+    def test_unsupported_malformed_low_memory_and_multiple_gpus_fail_closed(self):
+        for inventory in (
+            "NVIDIA H100, 183359 MiB",
+            "NVIDIA B200, 169999 MiB",
+            "NVIDIA RTX PRO 6000 Blackwell Server Edition, 89999 MiB",
+            "NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 97887 MiB",
+            "NVIDIA B200, 183359 MB",
+            "NVIDIA B200, unavailable MiB",
+            "NVIDIA B200, 183359 MiB, extra",
+            "",
+            "NVIDIA B200, 183359 MiB\nNVIDIA B200, 183359 MiB",
+            "NVIDIA B200, 183359 MiB\nmalformed",
+        ):
+            with self.subTest(inventory=inventory):
+                self.assertEqual(self.launch(inventory), (31, False))
+        self.assertEqual(self.launch("NVIDIA B200, 183359 MiB", 1), (31, False))
+
+
 class ServingContracts(unittest.TestCase):
     def setUp(self):
         self.contract = serving.launch_contract(
