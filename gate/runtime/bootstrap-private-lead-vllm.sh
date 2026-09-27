@@ -25,6 +25,10 @@ if [ -f "$BASE/pids/vllm.pid" ]; then
   rm -f "$BASE/pids/vllm.pid"
 fi
 export HF_HOME="$CACHE" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TMPDIR=/tmp/spl
+# The pinned NVFP4 path uses CUTLASS, not DeepGEMM. On B200, vLLM 0.20.1's
+# optional FP8 warmup probes an unavailable DeepGEMM API before checking layers.
+# Disable that backend explicitly, including when inherited environment enables it.
+export VLLM_USE_DEEP_GEMM=0
 "$VLLM" serve "$MODEL" --revision "$REVISION" --host 127.0.0.1 --port 8000 \
   --served-model-name "$ALIAS" --tensor-parallel-size 1 --language-model-only \
   --quantization modelopt_fp4 --moe-backend cutlass --attention-backend TRITON_ATTN \

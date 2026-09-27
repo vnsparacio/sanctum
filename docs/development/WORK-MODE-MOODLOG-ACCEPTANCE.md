@@ -27,6 +27,13 @@ Apply reviewed, owner-merged source through the supported stopped-gateway Work
 Mode upgrade and run doctor before using these changes. Keep autostart off and
 use the existing cache. See [configuration](../guides/configuration.md).
 
+The [off-peak B200 retry](../history/v1.3/WORK-MODE-B200-STARTUP-RETRY.md)
+failed during optional DeepGEMM warmup before admitting a task. The launcher
+now explicitly disables that backend for the pinned NVFP4/CUTLASS path.
+Synthetic launch tests pass; B200 readiness and inference still require live
+qualification. A package upgrade or second allocation is not an automatic
+recovery step. Preserve startup failures and confirm cleanup before retrying.
+
 ## One focused continuation task
 
 1. Preserve the previous candidate and hashes outside Git. Create a new private
