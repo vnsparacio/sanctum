@@ -3,6 +3,7 @@
  * characterized profile into a signed loopback request; it deliberately owns
  * neither capability selection nor execution.
  */
+import {detachDecisionNote} from '../foundation/decision-note.mjs';
 import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
 import {createReasonerAdapter} from '../foundation/contracts.mjs';
 
@@ -17,7 +18,7 @@ export function profileSystem(profile){
  return profile.prompt.system;
 }
 
-export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>{}}){
+export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>{},onDecision=()=>{}}){
  if(typeof execute!=='function'||typeof body!=='function')throw Error('private_lead_adapter_config');
  const system=profileSystem(profile);
  return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsWorkIntents:true,async invoke(request,signal){
@@ -32,7 +33,10 @@ export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>
      if(match){const error=Error('structured_decoding_unavailable');error.httpStatus=Number(match[1]);error.backendFailure='HTTP_REJECTED';throw error;}
      const error=Error('private_lead_unavailable');error.providerCode=safeProviderRefusal(result?.reason);if(result?.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;
    }
-   if(result.telemetry)onTelemetry(structuredClone(result.telemetry));
+   if(result.telemetry)onTelemetry({...structuredClone(result.telemetry),iteration:request.state.iteration,role:request.state.phase==='REVIEW'?'REVIEWER':'IMPLEMENTER'});
+   // Notes cannot enter the tool/action adapter or affect its validation.
+   const enabled=request.state?.workIntent?.schema?.oneOf?.some(branch=>branch.properties?.decision_note);
+   if(enabled){const detached=detachDecisionNote(result.result);try{onDecision({iteration:request.state.iteration,role:request.state.phase==='REVIEW'?'REVIEWER':'IMPLEMENTER',status:detached.status,note:detached.note});}catch{}return detached.value;}
    return result.result;
  }});
 }

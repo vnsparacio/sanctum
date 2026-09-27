@@ -241,8 +241,10 @@ class StreamingContracts(unittest.TestCase):
                 self.assertEqual(next(iter(branch["properties"])), "kind")
                 if branch["properties"]["kind"]["const"] == "TOOL_PROPOSAL":
                     self.assertEqual(
-                        list(branch["properties"]), ["kind", "capability", "arguments"]
+                        list(branch["properties"]),
+                        ["kind", "capability", "arguments", "decision_note"],
                     )
+                    self.assertNotIn("decision_note", branch["required"])
                     arguments = branch["properties"]["arguments"]
                     if "oneOf" in arguments:
                         self.assertEqual(

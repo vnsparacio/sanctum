@@ -1,4 +1,5 @@
 /* Model-facing Work Mode intent.  Host bindings never cross this boundary. */
+import {decisionNoteSchema,detachDecisionNote} from './decision-note.mjs';
 import {CONTRACT_VERSION,canonical,digest,isRecord} from './contracts.mjs';
 import {projectVllmGenerationSchema} from './vllm-structured-output.mjs';
 
@@ -55,6 +56,7 @@ export function workIntentSchema(specs,options={}){
  if(terminals.has('FINAL'))branches.push({type:'object',properties:{kind:{const:'FINAL'},text:{type:'string',minLength:1,maxLength:32768}},required:['kind','text'],additionalProperties:false});
  if(terminals.has('ESCALATION'))branches.push({type:'object',properties:{kind:{const:'ESCALATION'},reason:{type:'string',pattern:'^[A-Z][A-Z0-9_:-]{0,79}$'}},required:['kind','reason'],additionalProperties:false});
  if(!branches.length)throw Error('work_intent_empty_surface');
+ if(options.decisionNotes!==false)for(const branch of branches)branch.properties.decision_note=decisionNoteSchema();
  return {type:'object',oneOf:branches};
 }
 export function workIntentRequest(specs,options={}){
@@ -62,6 +64,7 @@ export function workIntentRequest(specs,options={}){
  return {version:WORK_INTENT_VERSION,dialect:generation.dialect,schema:generation.schema,schemaDigest:digest(generation.schema),semanticSchemaDigest:digest(authoritative)};
 }
 export function validateWorkIntent(value,options={}){
+ if(options.decisionNotes!==false)value=detachDecisionNote(value).value;
  let terminals;try{terminals=terminalVisibility(options);}catch{return fail('TERMINAL_VISIBILITY_REQUIRED');}
  const {specs=[],testOnly=false,editOperations}=options;
  if(!isRecord(value)||typeof value.kind!=='string')return fail('SEMANTIC_SHAPE',{receivedType:typeOf(value)});

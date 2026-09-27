@@ -21,6 +21,7 @@ GATE_FILES = (
     "content-telemetry/ajv.mjs",
     "content-telemetry/benchmark.mjs",
     "content-telemetry/contract.mjs",
+    "content-telemetry/redaction.mjs",
     "content-telemetry/quality.mjs",
 )
 SCHEMA_FILES = (

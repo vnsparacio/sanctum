@@ -16,11 +16,12 @@ function privateDir(path){
  return parent;
 }
 function atomic(path,value){const tmp=path+'.'+randomBytes(8).toString('hex')+'.tmp';const fd=openSync(tmp,'wx',0o600);try{writeFileSync(fd,value);chmodSync(tmp,0o600);renameSync(tmp,path);}finally{closeSync(fd);try{unlinkSync(tmp);}catch(error){if(error.code!=='ENOENT')throw error;}}}
+const numericTelemetry=new Set(['prompt_tokens','completion_tokens','promptTokens','completionTokens','decode_tokens_per_second']);
 function clean(value){
  if(value===null||typeof value==='boolean'||typeof value==='number')return value;
  if(typeof value==='string')return value.length<=160&&/^[A-Za-z0-9_.:@/+ -]*$/.test(value)?value:digest({value});
  if(Array.isArray(value))return value.slice(0,32).map(clean);
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key])=>!/(?:^goal$|prompt|content|^output$|outputText|text|body|secret|token|path|diagnostic)/i.test(key)).map(([key,item])=>[key,clean(item)]));
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key,item])=>numericTelemetry.has(key)?typeof item==='number'&&Number.isFinite(item)&&item>=0:!/(?:^goal$|prompt|content|^output$|outputText|text|body|secret|token|path|diagnostic)/i.test(key)).map(([key,item])=>[key,clean(item)]));
  return null;
 }
 export function sanitizeSemanticSurface(value){
@@ -60,7 +61,7 @@ export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()
    if(broken)throw Error('work_ledger_broken');
    if(!allowed.has(kind))throw Error('work_ledger_event');
    const sanitized=kind==='PROTECTED_EVIDENCE'?sanitizeProtectedEvidence(fields):kind==='PROTOCOL_DIAGNOSTIC'?{diagnostic:sanitizeProtocolDiagnostic(fields.diagnostic),schemaDigest:safeDigest(fields.schemaDigest)?fields.schemaDigest:null,semanticSchemaDigest:safeDigest(fields.semanticSchemaDigest)?fields.semanticSchemaDigest:null}:kind==='SEMANTIC_SURFACE'?sanitizeSemanticSurface(fields):clean(fields);
-   const base={schema:'sanctum-work-ledger/v1',taskId,sequence,time:now(),kind,previousDigest,...sanitized};
+   const base={schema:'sanctum-work-ledger/v1',taskId,sequence,time:now(),kind,previousDigest,...sanitized,...(Number.isSafeInteger(fields.checkpoint)&&fields.checkpoint>=1&&fields.checkpoint<=3?{checkpoint:fields.checkpoint}:{})};
    const eventDigest=createHash('sha256').update(canonical(base)).digest('hex'),row={...base,eventDigest};
    try{appendFileSync(events,canonical(row)+'\n',{encoding:'utf8',mode:0o600});}catch(error){broken=true;throw error;}sequence++;previousDigest=eventDigest;return eventDigest;
  }

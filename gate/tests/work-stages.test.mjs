@@ -75,7 +75,7 @@ test('owner command advances only after required files and ordinary evaluator pa
  for(const missing of [false,true]){
   const root=fs.mkdtempSync(join(tmpdir(),'work-staged-command-'));fs.chmodSync(root,0o700);
   const profileFile=join(root,'profiles.json');
-  fs.writeFileSync(profileFile,JSON.stringify({schema:'sanctum-work-mode-profiles/v1',profiles:{staged:{stages,reviewer:false,evaluators:['test'],max_iterations:8,max_model_calls:8,max_task_seconds:60}}}),{mode:0o600});
+  fs.writeFileSync(profileFile,JSON.stringify({schema:'sanctum-work-mode-profiles/v1',profiles:{staged:{stages,reviewer:!missing,evaluators:['test'],max_iterations:8,max_model_calls:8,max_task_seconds:60}}}),{mode:0o600});
   const settings={...original,work_mode:{enabled:true,profile_file:profileFile,ledger_root:join(root,'ledger')}};
   let modelCalls=0,evaluatorCalls=0;const reads=[];
   const remote=async body=>{
@@ -83,21 +83,25 @@ test('owner command advances only after required files and ordinary evaluator pa
    if(body.operation==='worktree_integrity')return {status:'OK',result:await syntheticProtection({scope:body.scope})};
    if(body.operation==='worktree_read'){reads.push(body.packet.path);return missing&&body.packet.path==='logic.test.js'?{status:'UNAVAILABLE',reason:'workspace_source_missing'}:{status:'OK',result:{text:'x'}};}
    if(body.operation==='worktree_command'){if(body.packet.operation==='test')evaluatorCalls++;return {status:'OK',result:{ok:true,code:'OK',executionState:'COMPLETED',output_digest:'d'.repeat(64),output_bytes:1,output:'x',elapsed_ms:1}};}
-   if(body.operation==='private_lead_propose'){modelCalls++;return {status:'OK',result:{kind:'TOOL_PROPOSAL',capability:'worktree_command',arguments:{operation:'test'}},telemetry:{prompt_tokens:1,completion_tokens:1,elapsed_seconds:0.01}};}
+   if(body.operation==='private_lead_propose'){modelCalls++;if(body.packet.request.request.state.phase==='REVIEW')return {status:'OK',result:{kind:'FINAL',text:JSON.stringify({verdict:'ACCEPT',findings:[{severity:'INFO',locator:'logic.js',checkCode:'TESTED',summary:'The checkpoint test passed.'}]})},telemetry:{prompt_tokens:1,completion_tokens:1,elapsed_seconds:0.01}};return {status:'OK',result:{kind:'TOOL_PROPOSAL',capability:'worktree_command',arguments:{operation:'test'},decision_note:{subgoal:'Verify current checkpoint',evidence:'Candidate prepared',expected_outcome:'Tests pass',next_validation:'Host evaluator'}},telemetry:{prompt_tokens:1,completion_tokens:1,elapsed_seconds:0.01}};}
    if(body.operation==='close')return {status:'OK',gpu:{phase:'OFFLINE'}};
    if(body.operation==='worktree_cleanup')return {status:'OK'};
    throw Error('unexpected '+body.operation);
   };
   const work=createWorkCommand({base,settings,key:Buffer.alloc(32),remote,api:{runtime:{config:{current:()=>({gateway:{bind:'loopback',port:1,auth:{mode:'token',token:'synthetic'}}})}}}});
   const tools=registeredWorkModeTools();
-  t.mock.method(globalThis,'fetch',async(_url,options)=>{const packet=JSON.parse(options.body);const result=await tools.find(tool=>tool.name===packet.name).execute('synthetic',packet.args,options.signal);return {ok:true,json:async()=>({ok:true,result})};});
+  t.mock.method(globalThis,'fetch',async(_url,options)=>{const packet=JSON.parse(options.body);assert.equal(Object.hasOwn(packet.args,'decision_note'),false);const result=await tools.find(tool=>tool.name===packet.name).execute('synthetic',packet.args,options.signal);return {ok:true,json:async()=>({ok:true,result})};});
   try{
    const ctx={isAuthorizedSender:true,gatewayClientScopes:['operator.admin'],sessionKey:'synthetic-'+missing};
    const started=await work({...ctx,args:'start staged -- Build a log'});assert.match(started.text,/started in an isolated workspace/);
    let status;
    for(let i=0;i<100;i++){await new Promise(setImmediate);status=await work({...ctx,args:'status'});if(status.text.includes('TERMINAL'))break;}
    assert.match(status.text,missing?/FINAL_WITHOUT_PASSING_EVIDENCE/:/status COMPLETE/);
-   assert.equal(modelCalls,missing?1:2);assert.equal(evaluatorCalls,missing?2:4);
+   assert.equal(modelCalls,missing?1:4);assert.equal(evaluatorCalls,missing?2:4);
+   const task=fs.readdirSync(settings.work_mode.ledger_root)[0],directory=join(settings.work_mode.ledger_root,task);
+   const notes=fs.readFileSync(join(directory,'decision-trace.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+   assert.deepEqual(notes.map(row=>row.checkpoint),missing?[1]:[1,1,2,2]);assert.ok(notes.filter(row=>row.type==='DECISION').every(row=>row.status==='RECORDED'));if(!missing)assert.equal(notes[1].findings[0].summary,'The checkpoint test passed.');
+   const summary=JSON.parse(fs.readFileSync(join(directory,'summary.json')));assert.equal(summary.decisionTrace.state,'CLOSED');assert.equal(summary.telemetry.promptTokens,modelCalls);
    assert.deepEqual(reads,missing?['logic.js','logic.test.js']:['logic.js','logic.test.js','logic.js','logic.test.js','index.html']);
   }finally{await work.close();t.mock.restoreAll();fs.rmSync(root,{recursive:true,force:true});}
  }

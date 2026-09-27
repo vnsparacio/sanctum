@@ -20,12 +20,13 @@ const examples={
 };
 function representative(branch){
  const kind=branch.properties.kind.const;
- if(kind==='FINAL')return {kind,text:'Synthetic result'};
- if(kind==='ESCALATION')return {kind,reason:'SYNTHETIC_UNAVAILABLE'};
+ const explanation=branch.properties.decision_note?{decision_note:Object.fromEntries(Object.keys(branch.properties.decision_note.properties).map(key=>[key,'Synthetic bounded explanation.']))}:{};
+ if(kind==='FINAL')return {kind,text:'Synthetic result',...explanation};
+ if(kind==='ESCALATION')return {kind,reason:'SYNTHETIC_UNAVAILABLE',...explanation};
  const capability=branch.properties.capability.const;
  const args=structuredClone(examples[capability]);
  // Fill only the real semantic arguments. Every example is checked below.
- return {kind,capability,arguments:args};
+ return {kind,capability,arguments:args,...explanation};
 }
 export function hostSemanticReadiness(schema,representatives){
  const accepts=value=>schema.oneOf.filter(branch=>argumentsMatchSchema(value,branch)).length===1;
