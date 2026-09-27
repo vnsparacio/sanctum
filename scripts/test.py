@@ -24,6 +24,7 @@ GATE_NODE_TESTS = (
     "tests/source-retrieval.test.mjs",
     "tests/work-mode-app-server.test.mjs",
     "tests/work-mode.test.mjs",
+    "tests/moodlog-acceptance.test.mjs",
     "tests/work-stages.test.mjs",
     "tests/work-trace.test.mjs",
     "tests/worktree-edit.test.mjs",

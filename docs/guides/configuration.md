@@ -174,8 +174,11 @@ three for staged work), within the same time/token/cost limits. Stage definition
 cannot change tools, commands, protection, reviewer policy or budgets. No failed
 stage is automatically retried. Passing generated tests and a file checklist
 alone does not establish app correctness; retain an owner acceptance contract
-and perform the final browser check. This staged MoodLog workflow is covered by
-synthetic contracts; a new live MoodLog run remains to be qualified.
+and perform the final browser check. The [guided MoodLog milestone](../history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md)
+records one accepted logic checkpoint and a browser-functional partial UI; full
+acceptance remains unqualified. The [continuation runbook](../development/WORK-MODE-MOODLOG-ACCEPTANCE.md)
+covers protected persistence checks, unavailable-package recovery, disclosed file
+reminders and the remaining browser acceptance requirements.
 
 ## Private Work Mode explanations and timeline
 
