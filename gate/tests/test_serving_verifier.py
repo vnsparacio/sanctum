@@ -18,7 +18,7 @@ import verify_serving_runtime as serving
 
 
 class BootstrapHardware(unittest.TestCase):
-    def launch(self, inventory, inventory_status=0):
+    def launch(self, inventory, inventory_status=0, inherited_deep_gemm=None):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             binaries = root / "bin"
@@ -26,7 +26,10 @@ class BootstrapHardware(unittest.TestCase):
             helpers = {
                 "nvidia-smi": '#!/bin/sh\nprintf "%s\\n" "$SYNTHETIC_GPU_INVENTORY"\nexit "$SYNTHETIC_GPU_STATUS"\n',
                 "sleep": "#!/bin/sh\nexec /bin/sleep 0.1\n",
-                "vllm": "#!/bin/sh\nexec /bin/sleep 30\n",
+                "vllm": (
+                    '#!/bin/sh\nprintf "%s\\n" "${VLLM_USE_DEEP_GEMM-unset}" '
+                    '> "$SYNTHETIC_BACKEND_CAPTURE"\nexec /bin/sleep 30\n'
+                ),
             }
             for name, content in helpers.items():
                 path = binaries / name
@@ -43,6 +46,11 @@ class BootstrapHardware(unittest.TestCase):
                 root
                 / "sanctum/releases/private-lead-qwen35-122b-nvfp4-candidate-v1/pids/vllm.pid"
             )
+            environment = dict(os.environ)
+            environment.pop("VLLM_USE_DEEP_GEMM", None)
+            if inherited_deep_gemm is not None:
+                environment["VLLM_USE_DEEP_GEMM"] = inherited_deep_gemm
+            capture = root / "backend.txt"
             try:
                 result = subprocess.run(
                     ["bash", "-s"],
@@ -50,13 +58,18 @@ class BootstrapHardware(unittest.TestCase):
                     text=True,
                     capture_output=True,
                     env={
-                        **os.environ,
+                        **environment,
                         "PATH": str(binaries) + ":/usr/bin:/bin",
                         "SYNTHETIC_GPU_INVENTORY": inventory,
                         "SYNTHETIC_GPU_STATUS": str(inventory_status),
+                        "SYNTHETIC_BACKEND_CAPTURE": str(capture),
                     },
                     timeout=10,
                 )
+                if result.returncode == 0:
+                    self.assertEqual(capture.read_text(), "0\n")
+                else:
+                    self.assertFalse(capture.exists())
                 return result.returncode, pidfile.exists()
             finally:
                 if pidfile.exists():
@@ -70,8 +83,11 @@ class BootstrapHardware(unittest.TestCase):
             "NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887 MiB",
             "NVIDIA B200, 183359 MiB",
         ):
-            with self.subTest(inventory=inventory):
-                self.assertEqual(self.launch(inventory), (0, True))
+            for inherited in (None, "0", "1"):
+                with self.subTest(inventory=inventory, inherited=inherited):
+                    self.assertEqual(
+                        self.launch(inventory, inherited_deep_gemm=inherited), (0, True)
+                    )
 
     def test_unsupported_malformed_low_memory_and_multiple_gpus_fail_closed(self):
         for inventory in (
