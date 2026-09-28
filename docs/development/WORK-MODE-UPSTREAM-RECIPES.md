@@ -1,8 +1,10 @@
 # Work Mode: adopting upstream Qwen recipes
 
-Status: source implementation with synthetic coverage; live coding qualification
-pending. This is a new Work Mode generation preset, not an extension of the
-historical accepted interface characterization scores.
+Status: the [2026-09-28 bounded retry](../history/v1.3/WORK-MODE-UPSTREAM-PRESET-RETRY.md)
+observed this preset on all eight live calls, but stopped on two invalid proposals
+with no edits or completed checkpoints. Full coding qualification remains open.
+This is a new Work Mode generation preset, not an extension of the historical
+accepted interface characterization scores.
 
 ## Sources and compatibility
 

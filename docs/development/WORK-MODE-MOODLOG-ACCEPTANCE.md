@@ -154,4 +154,7 @@ checklist.
 The next candidate also adopts a published non-thinking sampling preset and focused
 coding workflow guidance. Follow the [upstream recipe run plan](WORK-MODE-UPSTREAM-RECIPES.md)
 for exact settings, provenance, shared limits and cleanup. Its live qualification
-remains pending; upstream success is not evidence that this candidate has passed.
+is recorded in the [upstream preset retry](../history/v1.3/WORK-MODE-UPSTREAM-PRESET-RETRY.md):
+eight calls, no edits, and two length-invalid proposals. Correct the bounded
+schema feedback before another funded attempt. Upstream success is not evidence
+that this candidate has passed.
