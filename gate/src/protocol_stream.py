@@ -160,6 +160,7 @@ def safe_telemetry(value):
         )
     for key, allowed in {
         "result_kind": ("FINAL", "ESCALATION", "TOOL_PROPOSAL"),
+        "generationProfile": ("QWEN35_INSTRUCT_V1", "LEGACY_GREEDY_V1"),
         "streamStatus": ("COMPLETE", "INCOMPLETE", "NOT_STREAMED"),
         "finishStatus": ("stop", "length", "tool_calls", "content_filter"),
         "parseStatus": ("BEFORE_PARSE", "PARSED", "FAILED"),

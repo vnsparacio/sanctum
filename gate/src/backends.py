@@ -504,6 +504,19 @@ class Private80BBackend:
         )
 
 
+# Qwen3.5's published non-thinking preset. Fixed host settings, never task input.
+# See docs/development/WORK-MODE-UPSTREAM-RECIPES.md for provenance/qualification.
+WORK_MODE_GENERATION_PROFILE = "QWEN35_INSTRUCT_V1"
+WORK_MODE_SAMPLING = {
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0,
+}
+
+
 class PrivateLeadBackend(Private80BBackend):
     """Text-only staged backend. Its logical profile does not grant tool authority."""
 
@@ -617,7 +630,7 @@ class PrivateLeadBackend(Private80BBackend):
             # The accepted interface reserves 4,096 output tokens. Structured
             # file creation can exceed the former 1,024-token request ceiling.
             "max_tokens": 4096,
-            "temperature": 0,
+            **WORK_MODE_SAMPLING,
             "stream": True,
             "stream_options": {"include_usage": True},
             "chat_template_kwargs": {"enable_thinking": False},
@@ -637,10 +650,15 @@ class PrivateLeadBackend(Private80BBackend):
         p = self.proposal_payload(request)
         self.health_check()
         context = self.diagnostic_guard()
+        generation_profile = WORK_MODE_GENERATION_PROFILE
         if context:
             # The separately authorized historical microprobe keeps its own
             # 1,024-token reservation; ordinary Work Mode uses the full profile.
             p["max_tokens"] = 1024
+            for field in WORK_MODE_SAMPLING:
+                p.pop(field, None)
+            p["temperature"] = 0
+            generation_profile = "LEGACY_GREEDY_V1"
         started = time.monotonic()
         first = None
         usage = {}
@@ -665,6 +683,7 @@ class PrivateLeadBackend(Private80BBackend):
                     ),
                     "result_kind": kind,
                     **status,
+                    "generationProfile": generation_profile,
                     "parseStatus": parsed,
                     "normalization": normalization,
                 }

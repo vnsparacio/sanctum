@@ -150,3 +150,8 @@ Check failed-call telemetry as well as successful calls. Any nonzero
 are lower bounds; preserve the independent outer allocation deadline and spending
 cap. These accounting improvements do not qualify the candidate or relax this
 checklist.
+
+The next candidate also adopts a published non-thinking sampling preset and focused
+coding workflow guidance. Follow the [upstream recipe run plan](WORK-MODE-UPSTREAM-RECIPES.md)
+for exact settings, provenance, shared limits and cleanup. Its live qualification
+remains pending; upstream success is not evidence that this candidate has passed.

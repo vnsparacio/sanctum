@@ -47,7 +47,7 @@ export function privateLeadTelemetry(value){
  const out={prompt_tokens:numeric('prompt_tokens',true),completion_tokens:numeric('completion_tokens',true)};
  out.usage_complete=out.prompt_tokens!==null&&out.completion_tokens!==null;
  for(const key of ['elapsed_seconds','ttft_seconds','decode_seconds','decode_tokens_per_second'])out[key]=numeric(key);
- for(const [key,allowed] of Object.entries({result_kind:['FINAL','ESCALATION','TOOL_PROPOSAL'],streamStatus:['COMPLETE','INCOMPLETE','NOT_STREAMED'],finishStatus:['stop','length','tool_calls','content_filter'],parseStatus:['BEFORE_PARSE','PARSED','FAILED'],normalization:['UNCHANGED','NOT_REACHED']}))out[key]=allowed.includes(source[key])?source[key]:'UNKNOWN';
+ for(const [key,allowed] of Object.entries({result_kind:['FINAL','ESCALATION','TOOL_PROPOSAL'],generationProfile:['QWEN35_INSTRUCT_V1','LEGACY_GREEDY_V1'],streamStatus:['COMPLETE','INCOMPLETE','NOT_STREAMED'],finishStatus:['stop','length','tool_calls','content_filter'],parseStatus:['BEFORE_PARSE','PARSED','FAILED'],normalization:['UNCHANGED','NOT_REACHED']}))out[key]=allowed.includes(source[key])?source[key]:'UNKNOWN';
  return out;
 }
 

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "src"))
@@ -64,6 +64,55 @@ class StreamingContracts(unittest.TestCase):
         ):
             opener.return_value.open.return_value = io.BytesIO(raw.encode())
             return backend.propose(self.request)
+
+    def test_task_data_cannot_override_host_sampling(self):
+        for phase in ("PLAN", "REVIEW"):
+            self.request["request"].update(
+                {
+                    "temperature": 2,
+                    "top_p": 1,
+                    "max_tokens": 99999,
+                    "chat_template_kwargs": {"enable_thinking": True},
+                }
+            )
+            self.request["request"]["state"]["phase"] = phase
+            payload = PrivateLeadBackend(self.settings).proposal_payload(self.request)
+            self.assertEqual(payload["temperature"], 0.7)
+            self.assertEqual(payload["top_p"], 0.8)
+            self.assertEqual(payload["top_k"], 20)
+            self.assertEqual(payload["presence_penalty"], 1.5)
+            self.assertEqual(payload["max_tokens"], 4096)
+            self.assertEqual(
+                payload["chat_template_kwargs"], {"enable_thinking": False}
+            )
+            self.assertNotIn("tools", payload)
+            self.assertEqual(payload["response_format"]["type"], "json_schema")
+
+    def test_historical_microprobe_keeps_its_sampling_and_output_reservation(self):
+        backend = PrivateLeadBackend(self.settings)
+        context = MagicMock()
+        context.timeout.return_value = 120
+        wire = b'data: {"choices":[{"delta":{"content":"{\\"kind\\":\\"ESCALATION\\",\\"reason\\":\\"SYNTHETIC\\"}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+        with (
+            patch.object(backend, "health_check"),
+            patch.object(backend, "diagnostic_guard", return_value=context),
+            patch("backends.urllib.request.build_opener") as opener,
+        ):
+            opener.return_value.open.return_value = io.BytesIO(wire)
+            result = backend.propose(self.request)
+            payload = json.loads(opener.return_value.open.call_args.args[0].data)
+        self.assertEqual(payload["temperature"], 0)
+        self.assertEqual(payload["max_tokens"], 1024)
+        for key in (
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repetition_penalty",
+        ):
+            self.assertNotIn(key, payload)
+        context.attempt.assert_called_once_with("proposal", 1024)
+        self.assertEqual(result["telemetry"]["generationProfile"], "LEGACY_GREEDY_V1")
 
     def test_split_unicode_escapes_and_reasoning_survive(self):
         value = {"kind": "FINAL", "text": 'quoted " \\ 雪'}
@@ -273,7 +322,12 @@ class StreamingContracts(unittest.TestCase):
                 rendered["state"]["correction"]["code"], "REASONER_RESULT_SCHEMA"
             )
             self.assertEqual(sent["max_tokens"], 4096)
-            self.assertEqual(sent["temperature"], 0)
+            self.assertEqual(sent["temperature"], 0.7)
+            self.assertEqual(sent["top_p"], 0.8)
+            self.assertEqual(sent["top_k"], 20)
+            self.assertEqual(sent["min_p"], 0.0)
+            self.assertEqual(sent["presence_penalty"], 1.5)
+            self.assertEqual(sent["repetition_penalty"], 1.0)
             self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
 
     def test_message_data_is_encoded_once_and_repository_bytes_are_preserved(self):
