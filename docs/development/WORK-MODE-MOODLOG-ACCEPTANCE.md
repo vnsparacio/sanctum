@@ -161,3 +161,9 @@ now gives the existing correction attempt an exact field, length bound and fixed
 small-edit guidance, with synthetic and signed-path coverage. Apply only reviewed,
 merged source before the next bounded attempt. Upstream success and synthetic
 recovery are not evidence that the live candidate has passed.
+
+The [edit-length feedback retry](../history/v1.3/WORK-MODE-EDIT-LENGTH-RETRY.md)
+qualified the field/limit diagnostics live, but stopped after seven calls with
+two oversized `old_text` proposals and no edits. Small-edit feedback alone did
+not recover this attempt. Investigate enforceable bounded edit generation before
+another unchanged funded retry; full acceptance remains open.
