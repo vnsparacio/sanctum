@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {privateLeadTelemetry} from '../plugin/private-lead.mjs';
 import assert from 'node:assert/strict';
 import {leadRun,reviewerRun,plan,valid,bad,tool,manifest,ordinary,scope,snapshot} from './fixtures/targeted-harness.mjs';
 import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
@@ -61,7 +62,7 @@ test('R1 guidance and active correction count toward the exact context boundary'
    reasoner:{async invoke(q){requests.push(q);return requests.length<=6?tool('worktree_read',{path:'index.js'}):correcting&&requests.length===7?bad:valid;}},
    authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),
    egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),
-   invoke:async()=>({ok:true,executionState:'COMPLETED',verifier:'VERIFIED',data:{text:'x'.repeat(9500+Math.floor(extra/6)+(++actions===6?extra%6:0))}}),evaluate:async()=>({passed:false})}).run({task:'essential goal',scope,capabilities:ordinary,maxIterations:16});
+   invoke:async()=>({ok:true,executionState:'COMPLETED',verifier:'VERIFIED',data:{text:'x'.repeat(9000+Math.floor(extra/6)+(++actions===6?extra%6:0))}}),evaluate:async()=>({passed:false})}).run({task:'essential goal',scope,capabilities:ordinary,maxIterations:16});
   return {result,requests};
  }
  for(const correcting of [false,true]){
@@ -125,4 +126,44 @@ test('R4 ACCEPT REJECT REVISE and separate verdict parser retain existing policy
   const run=await reviewerRun(plan({kind:'FINAL',text}));assert.ok(run.status.text.includes(outcome),run.status.text);assert.equal(run.attempts,calls);assert.equal(diagnostics(run.rows).length,0);
   assert.equal(run.captures.filter(x=>request(x).state.phase==='REVIEW').length,1);assert.ok(!JSON.stringify(run.captures[1]).includes(pattern));
  }
+});
+
+test('truncated usage crosses the real worker boundary once without exposing partial text',async()=>{
+ const usage={prompt_tokens:7000,completion_tokens:4096,INJECTED_PRIVATE_KEY:'INJECTED_PRIVATE_VALUE'};
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":"INJECTED_PRIVATE_BODY'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'length'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage})+'\n\ndata: [DONE]\n\n';
+ const run=await leadRun([{wire},plan(valid)]);
+ assert.equal(run.result.reason,'MODEL_OUTPUT_LIMIT');assert.equal(run.result.metrics.modelCalls,1);assert.equal(run.effects,0);assert.equal(run.attempts,1);
+ assert.equal(run.telemetry.length,1);const event=run.telemetry[0];
+ assert.equal(event.prompt_tokens,7000);assert.equal(event.completion_tokens,4096);assert.equal(event.usage_complete,true);assert.equal(event.finishStatus,'length');assert.equal(event.parseStatus,'BEFORE_PARSE');assert.ok(event.elapsed_seconds>=0);
+ assert.ok(!JSON.stringify(run.responses).includes('INJECTED_PRIVATE'));assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
+});
+test('malformed completed output and missing usage retain honest accounting',async()=>{
+ for(const input of [{text:'{"INJECTED_PRIVATE_KEY":'}, {...plan(valid),finish:'length'}]){
+  const run=await leadRun([input,plan(valid)]);
+  assert.equal(run.telemetry.length,run.attempts);assert.equal(run.result.metrics.modelCalls,run.attempts);
+  assert.equal(run.telemetry[0].usage_complete,false);assert.equal(run.telemetry[0].prompt_tokens,null);assert.equal(run.telemetry[0].completion_tokens,null);
+  assert.ok(run.telemetry[0].elapsed_seconds>=0);assert.ok(!JSON.stringify(run.telemetry).includes('INJECTED_PRIVATE'));
+ }
+});
+test('reviewer truncation records one failed reviewer attempt with usage',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:'length'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage:{prompt_tokens:12,completion_tokens:4096}})+'\n\ndata: [DONE]\n\n';
+ const run=await reviewerRun({wire});
+ assert.equal(run.summary.telemetry.modelCalls,2);assert.equal(run.summary.telemetry.usageIncompleteCalls,1);assert.equal(run.summary.telemetry.promptTokens,12);assert.equal(run.summary.telemetry.completionTokens,4096);assert.ok(run.summary.telemetry.inferenceSeconds>0);
+ const calls=run.rows.filter(x=>x.kind==='MODEL_CALL'&&x.role==='REVIEWER');assert.equal(calls.length,1);assert.equal(calls[0].completion_tokens,4096);assert.equal(calls[0].usage_complete,true);assert.ok(run.status.text.includes('REVIEWER_UNAVAILABLE'));
+});
+
+test('telemetry metadata uses fixed names and finite nonnegative numeric values',()=>{
+ for(const value of [true,-1,'8',Infinity,NaN,Number.MAX_SAFE_INTEGER+1]){
+  const event=privateLeadTelemetry({prompt_tokens:value,completion_tokens:3,elapsed_seconds:value,result_kind:'INJECTED_PRIVATE',INJECTED_PRIVATE:'secret',usage_complete:true});
+  assert.equal(event.prompt_tokens,null);assert.equal(event.elapsed_seconds,null);assert.equal(event.usage_complete,false);assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
+ }
+ assert.equal(privateLeadTelemetry({prompt_tokens:1.5}).prompt_tokens,null);
+ assert.equal(privateLeadTelemetry({prompt_tokens:0,completion_tokens:0}).usage_complete,true);
+});
+
+test('failed-response usage stops the shared token budget before a correction call',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:'stop'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage:{prompt_tokens:1001,completion_tokens:8}})+'\n\ndata: [DONE]\n\n';
+ const run=await reviewerRun(plan(valid),{leadPlan:{wire},maxTokens:1000});
+ assert.equal(run.attempts,1);assert.equal(run.endpointDispatches,1);assert.ok(run.status.text.includes('TOKEN_BUDGET'),run.status.text);
+ assert.equal(run.summary.telemetry.modelCalls,1);assert.equal(run.summary.telemetry.promptTokens,1001);assert.equal(run.summary.telemetry.completionTokens,8);assert.equal(run.summary.telemetry.usageIncompleteCalls,0);
 });

@@ -31,7 +31,7 @@ from experiment import installed_identity
 from experiment_lifecycle import DiagnosticLifecycle
 from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from media import expand, load
-from protocol_stream import safe_diagnostic
+from protocol_stream import safe_diagnostic, safe_telemetry
 from source_policy import minimize_query
 from workspace import (
     cleanup_worktree,
@@ -329,5 +329,7 @@ if __name__ == "__main__":
         result = {"status": "UNAVAILABLE", "reason": safe}
         if type(e) is Refused and hasattr(e, "diagnostic"):
             result["diagnostic"] = safe_diagnostic(e.diagnostic)
+        if type(e) is Refused and hasattr(e, "telemetry"):
+            result["telemetry"] = safe_telemetry(e.telemetry)
         print(canonical(result))
         sys.exit(1)

@@ -41,12 +41,25 @@ export function privateLeadPacket(system,request,maxContextBytes=32768){
  throw Error('model_context_limit');
 }
 
+export function privateLeadTelemetry(value){
+ const source=value&&typeof value==='object'?value:{};
+ const numeric=(key,integer=false)=>typeof source[key]==='number'&&Number.isFinite(source[key])&&source[key]>=0&&source[key]<=Number.MAX_SAFE_INTEGER&&(!integer||Number.isSafeInteger(source[key]))?source[key]:null;
+ const out={prompt_tokens:numeric('prompt_tokens',true),completion_tokens:numeric('completion_tokens',true)};
+ out.usage_complete=out.prompt_tokens!==null&&out.completion_tokens!==null;
+ for(const key of ['elapsed_seconds','ttft_seconds','decode_seconds','decode_tokens_per_second'])out[key]=numeric(key);
+ for(const [key,allowed] of Object.entries({result_kind:['FINAL','ESCALATION','TOOL_PROPOSAL'],streamStatus:['COMPLETE','INCOMPLETE','NOT_STREAMED'],finishStatus:['stop','length','tool_calls','content_filter'],parseStatus:['BEFORE_PARSE','PARSED','FAILED'],normalization:['UNCHANGED','NOT_REACHED']}))out[key]=allowed.includes(source[key])?source[key]:'UNKNOWN';
+ return out;
+}
+
 export function createPrivateLeadReasoner({execute,profile,body,maxContextBytes=32768,onTelemetry=()=>{},onDecision=()=>{}}){
  if(typeof execute!=='function'||typeof body!=='function')throw Error('private_lead_adapter_config');
  const system=profileSystem(profile);
  return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsWorkIntents:true,async invoke(request,signal){
    const packet=privateLeadPacket(system,request,maxContextBytes);
-   const result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:packet},'private_lead_workmode'),signal);
+   const report=value=>onTelemetry({...privateLeadTelemetry(value),iteration:request.state.iteration,role:request.state.phase==='REVIEW'?'REVIEWER':'IMPLEMENTER'});
+   let result;try{result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:packet},'private_lead_workmode'),signal);}catch(error){report(null);throw error;}
+   // Account once before parsing or refusing; unavailable usage stays explicitly unknown.
+   report(result?.telemetry);
    // A syntactically malformed model result is a proposal-schema failure, not
    // loss of the private runtime.  Preserve that distinction so Work Mode can
    // spend its single accepted correction turn. Packet limits exhaust the
@@ -58,7 +71,6 @@ export function createPrivateLeadReasoner({execute,profile,body,maxContextBytes=
      if(match){const error=Error('structured_decoding_unavailable');error.httpStatus=Number(match[1]);error.backendFailure='HTTP_REJECTED';throw error;}
      const error=Error('private_lead_unavailable');error.providerCode=safeProviderRefusal(result?.reason);if(result?.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;
    }
-   if(result.telemetry)onTelemetry({...structuredClone(result.telemetry),iteration:request.state.iteration,role:request.state.phase==='REVIEW'?'REVIEWER':'IMPLEMENTER'});
    // Notes cannot enter the tool/action adapter or affect its validation.
    const enabled=request.state?.workIntent?.schema?.oneOf?.some(branch=>branch.properties?.decision_note);
    if(enabled){const detached=detachDecisionNote(result.result);try{onDecision({iteration:request.state.iteration,role:request.state.phase==='REVIEW'?'REVIEWER':'IMPLEMENTER',status:detached.status,note:detached.note});}catch{}return detached.value;}

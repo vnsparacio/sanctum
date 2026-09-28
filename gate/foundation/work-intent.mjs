@@ -4,6 +4,7 @@ import {CONTRACT_VERSION,canonical,digest,isRecord} from './contracts.mjs';
 import {projectVllmGenerationSchema} from './vllm-structured-output.mjs';
 
 export const WORK_INTENT_VERSION='sanctum-work-intent/v1';
+export const WORK_EDIT_LIMITS=Object.freeze({old_text:512,new_text:2048});
 export const WORK_INTENT_TERMINALS=Object.freeze(['FINAL','ESCALATION']);
 const hostFields=new Set(['schema','proposalId','requestId','revision','reasoner','capabilityDigest','task_id','scope','workspace','manifestDigest','authority','egress','approval']);
 const own=(o,k)=>Object.hasOwn(o,k);
@@ -26,14 +27,17 @@ function semanticArguments(spec,{testOnly=false}={}){
  const schema=structuredClone(spec.arguments);
  delete schema.properties.task_id;
  schema.required=(schema.required??[]).filter(k=>k!=='task_id');
- if(spec.name==='worktree_edit'&&hasEditVariants(schema))schema.properties.operation.enum=['replace',...schema.properties.operation.enum];
+ if(spec.name==='worktree_edit'){
+  for(const [field,limit] of Object.entries(WORK_EDIT_LIMITS))if(schema.properties[field])schema.properties[field].maxLength=Math.min(schema.properties[field].maxLength??limit,limit);
+  if(hasEditVariants(schema))schema.properties.operation.enum=['replace',...schema.properties.operation.enum];
+ }
  if(testOnly&&spec.name==='worktree_command')schema.properties.operation={type:'string',enum:['test']};
  return schema;
 }
 const hasEditVariants=schema=>schema?.properties?.operation?.enum?.includes('create')&&schema.properties.destination&&schema.properties.old_text&&schema.properties.new_text;
 export function workIntentDescription(spec){
  if(spec.name!=='worktree_edit'||!hasEditVariants(spec.arguments))return spec.description;
- return 'Perform one bounded file action. Every Work Intent edit selects operation explicitly: replace {operation:replace,path,old_text,new_text}; create {operation:create,path,new_text}; delete {operation:delete,path}; move {operation:move,path,destination}. Use only fields belonging to that shape. Create requires an absent path and an existing parent directory. Replace, delete and move require reading the existing source first. Replace matches old_text exactly and uniquely; it is not a whole-file overwrite. The Mac enforces protected paths, symlinks, scope and exact diff authorization.';
+ return 'Perform one small file action. old_text is at most 512 UTF-16 code units; new_text at most 2048. Replace one short unique section, not the whole file. For a larger new file, create a small valid scaffold, read it, then grow it with separate exact replacements retaining a unique insertion anchor. Re-read after each edit before the next replacement. Keep decision notes brief. These limits reserve space within the unchanged 4096-token response ceiling; no partial proposal can execute. Every Work Intent edit selects operation explicitly: replace {operation:replace,path,old_text,new_text}; create {operation:create,path,new_text}; delete {operation:delete,path}; move {operation:move,path,destination}. Use only fields belonging to that shape. Create requires an absent path and an existing parent directory. Replace, delete and move require reading the existing source first. Replace matches old_text exactly and uniquely; it is not a whole-file overwrite. The Mac enforces protected paths, symlinks, scope and exact diff authorization.';
 }
 function editArgumentsSchema(schema,operations){
  return {oneOf:visibleEditShapes(operations).map(shape=>({type:'object',properties:Object.fromEntries(shape.fields.map(field=>[field,field==='operation'?{const:shape.operation}:structuredClone(schema.properties[field])])),required:[...shape.fields],additionalProperties:false}))};

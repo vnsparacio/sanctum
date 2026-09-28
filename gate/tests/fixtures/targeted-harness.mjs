@@ -51,8 +51,9 @@ export function signedHarness(plans){
  };
  const body=(_op,_tier,packet)=>({operation:'private_lead_propose',tier:'PRIVATE_LEAD',packet,state:{scope,high_stakes:false,privacy_floor:'PERSONAL',revision:0},scope,approval:'private_lead_workmode',strong:false,nonce:randomBytes(32).toString('hex'),expires:Date.now()/1000+60,spec_sha256:sha(readFileSync(join(pkg,'SETTINGS.json')))});
  const profile=JSON.parse(readFileSync(join(root,'gate/runtime/private-lead-interface-profile.json')));
- const reasoner=createPrivateLeadReasoner({execute:dispatch,body,profile});
- return {dir,pkg,settings,key,reasoner,dispatch,execute,captures,responses,bodies,get attempts(){return attempts;},get endpointDispatches(){try{return readFileSync(join(dir,'dispatches.jsonl'),'utf8').trim().split('\n').length;}catch{return 0;}},close(){rmSync(dir,{recursive:true,force:true});}};
+ const telemetry=[];
+ const reasoner=createPrivateLeadReasoner({execute:dispatch,body,profile,onTelemetry:event=>telemetry.push(event)});
+ return {dir,pkg,settings,key,reasoner,dispatch,execute,telemetry,captures,responses,bodies,get attempts(){return attempts;},get endpointDispatches(){try{return readFileSync(join(dir,'dispatches.jsonl'),'utf8').trim().split('\n').length;}catch{return 0;}},close(){rmSync(dir,{recursive:true,force:true});}};
 }
 export async function leadRun(plans,{capabilities=ordinary,bytes=0}={}){
  const h=signedHarness(plans);let effects=0;
@@ -64,15 +65,15 @@ export async function leadRun(plans,{capabilities=ordinary,bytes=0}={}){
    invoke:async()=>{effects++;return {ok:true,data:{text:'synthetic observation'},executionState:'COMPLETED',verifier:'VERIFIED'};},evaluate:async()=>({passed:false}),onEvent:(kind,value)=>ledger.event(kind,value)}).run({task:'essential goal',scope,capabilities});
   const rows=checkLedger(join(h.dir,'ledger',scope,'events.jsonl'));
   const replay=await h.execute(h.bodies[0]);assert.equal(replay.status,'UNAVAILABLE');assert.equal(h.endpointDispatches,h.attempts);
-  return {result,rows,effects,attempts:h.attempts,endpointDispatches:h.endpointDispatches,captures:h.captures,responses:h.responses};
+  return {result,rows,effects,telemetry:h.telemetry,attempts:h.attempts,endpointDispatches:h.endpointDispatches,captures:h.captures,responses:h.responses};
  }finally{h.close();}
 }
-export async function reviewerRun(reviewPlan){
- const h=signedHarness([plan({kind:'FINAL',text:'synthetic completion'}),reviewPlan,plan({kind:'FINAL',text:'synthetic revised completion'})]);
+export async function reviewerRun(reviewPlan,{leadPlan=plan({kind:'FINAL',text:'synthetic completion'}),maxTokens=100000}={}){
+ const h=signedHarness([leadPlan,reviewPlan,plan({kind:'FINAL',text:'synthetic revised completion'})]);
  let handler;const settings=structuredClone(h.settings);
  try{
   settings.work_mode.enabled=true;settings.work_mode.profile_file=join(h.dir,'profiles.json');settings.work_mode.ledger_root=join(h.dir,'ledger');
-  writeFileSync(settings.work_mode.profile_file,JSON.stringify({schema:'sanctum-work-mode-profiles/v1',profiles:{synthetic:{reviewer:true,evaluators:['test']}}}),{mode:0o600});
+  writeFileSync(settings.work_mode.profile_file,JSON.stringify({schema:'sanctum-work-mode-profiles/v1',profiles:{synthetic:{reviewer:true,evaluators:['test'],max_tokens:maxTokens}}}),{mode:0o600});
   settings.settingsFileHash=sha(readFileSync(join(h.pkg,'SETTINGS.json')));
   publishCapabilityManifest(manifest);
   handler=createWorkCommand({api:{},base:join(root,'gate'),settings,key:h.key,remote:async(body,signal)=>{
@@ -87,6 +88,6 @@ export async function reviewerRun(reviewPlan){
   for(let i=0;i<500;i++){status=await handler({...ctx,args:'status'});if(status.text.includes('TERMINAL'))break;await new Promise(r=>setTimeout(r,10));}
   assert.ok(status.text.includes('TERMINAL'),status.text);
   const id=readdirSync(settings.work_mode.ledger_root)[0],rows=checkLedger(join(settings.work_mode.ledger_root,id,'events.jsonl'));
-  return {status,rows,captures:h.captures,requests:h.bodies.map(body=>body.packet.request.request),attempts:h.attempts,endpointDispatches:h.endpointDispatches};
+  return {status,rows,summary:JSON.parse(readFileSync(join(settings.work_mode.ledger_root,id,'summary.json'))),captures:h.captures,requests:h.bodies.map(body=>body.packet.request.request),attempts:h.attempts,endpointDispatches:h.endpointDispatches};
  }finally{await handler?.close();h.close();}
 }

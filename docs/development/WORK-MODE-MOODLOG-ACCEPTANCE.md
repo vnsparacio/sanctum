@@ -138,3 +138,15 @@ its unit tests pass. Do not mark full acceptance when any row lacks evidence.
 Record the result in Linear and a new dated sanitized report, retaining this
 partial milestone unchanged. Owner review/merge and Done transitions remain
 owner actions.
+
+## Output-limit continuation
+
+Before the next funded retry, follow the [output-limit repair report](../history/v1.3/WORK-MODE-OUTPUT-LIMIT-RETRY.md).
+The previous merged progress retry changed no files and completed no checkpoints.
+Use short exact edits or an incremental scaffold within the model-facing 512/2,048
+code-unit limits; do not increase the 4,096-token response ceiling to force progress.
+Check failed-call telemetry as well as successful calls. Any nonzero
+`usageIncompleteCalls` or `timingIncompleteCalls` means the corresponding totals
+are lower bounds; preserve the independent outer allocation deadline and spending
+cap. These accounting improvements do not qualify the candidate or relax this
+checklist.

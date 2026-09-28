@@ -227,9 +227,11 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      const context={callId:rid(),scope,workspace:workspace??null,requestId,turn:state.iteration,reasoner:'PRIVATE_LEAD',manifestDigest:manifest.digest,phase:state.phase,visible:new Set(phaseVisible.map(x=>x.name)),terminalKinds:new Set(terminalKinds),specDigests:Object.freeze(Object.fromEntries(phaseVisible.map(x=>[x.name,x.digest]))),observationDigest:safeDigest(state.observations),workspaceGeneration:state.workspaceGeneration,workspaceFingerprint:captured.digest,proposalId:rid(),consumed:false};Object.freeze(context.specDigests);
      let request;try{request=buildWorkRequest({requestId,scope,state,decisionState,decisionArtifact,phaseVisible,eligibility,completionPolicy,captured,manifest,terminalKinds,editOperations});}catch{return stop('BUDGET_EXHAUSTED','MODEL_CONTEXT_LIMIT');}
      const modelDeadline=callDeadline();let result;
-     try{result=await reasoner.invoke(request,modelDeadline.signal);state.modelCalls++;emit('MODEL_CALL',{resultKind:result.kind});}
+     // Count each reasoner attempt, including rejected or truncated responses.
+     state.modelCalls++;
+     try{result=await reasoner.invoke(request,modelDeadline.signal);emit('MODEL_CALL',{resultKind:result.kind});}
      catch(error){
-       if(error?.message==='model_context_limit'&&!signal?.aborted&&!modelDeadline.timedOut())return stop('BUDGET_EXHAUSTED','MODEL_CONTEXT_LIMIT');
+       if(error?.message==='model_context_limit'&&!signal?.aborted&&!modelDeadline.timedOut()){state.modelCalls--;return stop('BUDGET_EXHAUSTED','MODEL_CONTEXT_LIMIT');}
        if(error?.diagnostic){try{emit('PROTOCOL_DIAGNOSTIC',{diagnostic:sanitizeProtocolDiagnostic(error.diagnostic),schemaDigest:semantic.schemaDigest,semanticSchemaDigest:semantic.semanticSchemaDigest});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}}
        if(error?.diagnostic?.stage==='STREAM'&&error.diagnostic.streamStatus==='INCOMPLETE'&&error.diagnostic.finishStatus==='length'&&!signal?.aborted&&!modelDeadline.timedOut())return stop('BUDGET_EXHAUSTED','MODEL_OUTPUT_LIMIT');
        if(error?.message==='structured_decoding_unavailable'&&!signal?.aborted&&!modelDeadline.timedOut()){
@@ -237,7 +239,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
          return stop('ENVIRONMENT_FAILURE','STRUCTURED_DECODING_UNAVAILABLE');
        }
        if(error?.message==='reasoner_result_shape'&&!signal?.aborted&&!modelDeadline.timedOut()){
-         state.modelCalls++;state.invalidProposals++;
+         state.invalidProposals++;
          try{emit('MODEL_CALL',{resultKind:'REJECTED'});emit('SEMANTIC_SURFACE',surface('RESULT','REJECTED','REASONER_RESULT_SCHEMA'));emit('PROPOSAL',{outcome:'REJECTED',code:'REASONER_RESULT_SCHEMA'});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}
          if(state.invalidProposals>1)return stop('SAFETY_POLICY_BLOCK','REPEATED_INVALID_PROPOSAL');
          state.correction={code:'REASONER_RESULT_SCHEMA',resultRequirements:decisionArtifact.resultRequirements,diagnostic:error?.diagnostic?sanitizeProtocolDiagnostic(error.diagnostic):null,attempt:1,correctionsRemaining:1,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest,allowedCapabilities:[...context.visible],allowedTerminalKinds:[...context.terminalKinds]};state.observations.push({kind:'REJECTION',code:'REASONER_RESULT_SCHEMA'});state.iteration++;continue;
