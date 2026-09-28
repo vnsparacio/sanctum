@@ -148,3 +148,36 @@ test('microprobe runner stops on wrong semantic choice or repeated invalidity wi
   assert.equal(report.passed,false);assert.equal(report.rows.length,1);assert.equal(calls,value.reason==='bad reason'?2:1);
  }
 });
+
+test('nested edit diagnostics select replace/create/delete/move by operation',()=>{
+ const built=decisionSurface({manifest,names:['worktree_edit'],terminalKinds:['ESCALATION']});
+ const cases=[
+  [{operation:'replace',path:'a.js',old_text:'x'.repeat(1636),new_text:'new'},'old_text','maxLength',512],
+  [{operation:'replace',path:'a.js',old_text:'x'.repeat(1724),new_text:'new'},'old_text','maxLength',512],
+  [{operation:'create',path:'a.js',new_text:'x'.repeat(2049)},'new_text','maxLength',2048],
+  [{operation:'delete',path:'../private'},'path','pattern',null],
+  [{operation:'move',path:'a.js',destination:'x'.repeat(513)},'destination','maxLength',512],
+  [{path:'a.js'},'operation','required',null],
+  [{operation:'private operation',path:'a.js'},'operation','enum',null],
+ ];
+ for(const [args,field,keyword,limit] of cases){
+  const value={kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:args};
+  const d=schemaDiagnostic(value,built.authoritativeSchema);
+  assert.equal(d.field,field);assert.equal(d.keyword,keyword);assert.equal(d.lengthLimit,limit);
+  assert.equal(d.lengthUnit,limit===null?null:'UTF-16 code units');
+ }
+ const narrowed=decisionSurface({manifest,names:['worktree_edit'],terminalKinds:['ESCALATION'],editOperations:['create']});
+ const d=schemaDiagnostic({kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{operation:'replace',path:'a.js',old_text:'old',new_text:'new'}},narrowed.authoritativeSchema);
+ assert.equal(d.field,'operation');assert.equal(d.keyword,'enum');
+});
+
+test('length diagnostics keep bounded facts without source or arbitrary units',()=>{
+ const built=decisionSurface({manifest,names:['worktree_edit'],terminalKinds:['ESCALATION']});
+ const value={kind:'TOOL_PROPOSAL',capability:'worktree_edit',arguments:{operation:'replace',path:'a.js',old_text:'😀'.repeat(257),new_text:''}};
+ const d=schemaDiagnostic(value,built.authoritativeSchema);
+ assert.equal(d.stringLength,514);assert.equal(d.lengthLimit,512);assert.equal(d.field,'old_text');
+ assert.ok(!JSON.stringify(d).includes('😀'));
+ for(const lengthLimit of [-1,1.2,Infinity,65537,'512',true])assert.equal(sanitizeProtocolDiagnostic({keyword:'maxLength',lengthLimit,lengthUnit:'private data'}).lengthLimit,null);
+ const safe=sanitizeProtocolDiagnostic({...d,source:'private source',lengthUnit:'private unit'});
+ assert.equal(safe.lengthUnit,'UTF-16 code units');assert.ok(!JSON.stringify(safe).includes('private'));
+});

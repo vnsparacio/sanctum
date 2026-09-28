@@ -2,7 +2,7 @@
 import {randomBytes} from 'node:crypto';
 import {CONTRACT_VERSION,canonical,createToolResultEnvelope,digest,egressMatches,validateAuthorityDecision,validateToolProposal} from '../foundation/contracts.mjs';
 import {PRIVATE_LEAD_DESTINATION,safeProviderRefusal} from './private-lead.mjs';
-import {bindWorkIntent,validateWorkIntent,workIntentDiagnostics,workIntentDescription} from '../foundation/work-intent.mjs';
+import {bindWorkIntent,validateWorkIntent,workIntentDiagnostics,workIntentDescription,workIntentRecovery} from '../foundation/work-intent.mjs';
 
 import {decisionSurface,selectCapabilities} from '../foundation/decision-surface.mjs';
 import {sanitizeProtocolDiagnostic,schemaDiagnostic} from '../foundation/protocol-diagnostics.mjs';
@@ -259,7 +259,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
        state.invalidProposals++;const diagnostic=workIntentDiagnostics(intent);
        try{emit('PROPOSAL',{outcome:'REJECTED',...diagnostic,callDigest:safeDigest({callId:context.callId,turn:context.turn,semantic:semantic.semanticSchemaDigest})});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}
        if(state.invalidProposals>1)return stop('SAFETY_POLICY_BLOCK','REPEATED_INVALID_PROPOSAL');
-       state.correction={...diagnostic,diagnostic:structural,resultRequirements:decisionArtifact.resultRequirements,attempt:1,correctionsRemaining:1,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest,allowedCapabilities:[...context.visible],allowedTerminalKinds:[...context.terminalKinds]};state.observations.push({kind:'REJECTION',code:intent.code});state.iteration++;continue;
+       state.correction={...diagnostic,diagnostic:structural,recovery:workIntentRecovery(intent),resultRequirements:decisionArtifact.resultRequirements,attempt:1,correctionsRemaining:1,schemaVersion:semantic.version,schemaDigest:semantic.schemaDigest,allowedCapabilities:[...context.visible],allowedTerminalKinds:[...context.terminalKinds]};state.observations.push({kind:'REJECTION',code:intent.code});state.iteration++;continue;
      }
      state.invalidProposals=0;delete state.correction;
      guarded=guardedStop();if(guarded)return guarded;
