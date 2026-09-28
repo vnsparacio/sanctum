@@ -9,6 +9,14 @@ acceptance is still open.
 
 ## Current continuation after the JSDOM repair
 
+The [first bounded unassisted post-UI run](../history/v1.3/WORK-MODE-UNASSISTED-INSPECTION-RETRY.md)
+stopped after 10 repeated file reads and no edit. The follow-up checkpoint now
+requires `logic.js` and gives Qwen a small first collision repair before the
+broader UI wiring. This is a source change awaiting owner review and a new live
+qualification run; it does not establish autonomous acceptance. After merge,
+apply the reviewed source through the stopped-gateway Work Mode upgrade, run
+doctor, and inspect the resulting private profile before another bounded run.
+
 The [assisted result](../history/v1.3/WORK-MODE-MOODLOG-ASSISTED-RESULT.md)
 separates the working human-assisted copy from the unfinished model-produced
 baseline. The operator fixed the test environment with the
@@ -23,7 +31,8 @@ intended starting condition for another model continuation.
 Use the [two-stage post-UI plan](../../gate/qualification/moodlog/post-ui-stages.json)
 and [post-UI task](../../gate/qualification/moodlog/post-ui-task.txt) for that
 baseline. The operator already registered an equivalent private profile while
-the gateway was stopped and ran doctor; no task has run under it yet. For a new
+the gateway was stopped and ran doctor; one task ran under the previous staged
+goal and stopped before making an edit. For a new
 private candidate, copy the reviewed UI fixture to `ui.test.js` beside its real
 app scripts and commit that qualification input before admission. Keep
 `persistence.test.cjs` byte-for-byte unchanged and protected by
