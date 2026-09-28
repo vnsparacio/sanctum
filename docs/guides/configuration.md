@@ -112,6 +112,15 @@ Project 3G installs Work Mode only through the stopped-gateway, reversible `scri
 
 PRIVATE_LEAD Work Mode proposals now use the accepted interface profile's 4,096-token output reserve per request. The separate owner-authorized diagnostic microprobe retains its 1,024-token ceiling. A response ending at the output ceiling stops the task as `BUDGET_EXHAUSTED / MODEL_OUTPUT_LIMIT` before any incomplete proposal can execute; it does not trigger a larger automatic retry. Apply the reviewed source through the stopped-gateway amendment before relying on this behavior in an installed runtime.
 
+Ordinary Work Mode implementer and reviewer proposals use the fixed
+`QWEN35_INSTRUCT_V1` sampling preset: temperature 0.7, top-p 0.8, top-k 20,
+min-p 0, presence penalty 1.5 and repetition penalty 1. Thinking stays off and
+the output ceiling stays 4,096 tokens. The host selects this preset; task input
+cannot override it. Receipts label the generation profile. Historical interface
+characterization scores do not qualify this new coding preset. The separate
+microprobe keeps its legacy sampling and 1,024-token reservation. See the
+[upstream recipe and bounded qualification plan](../development/WORK-MODE-UPSTREAM-RECIPES.md).
+
 On later Work Mode upgrades, the amendment retains owner-registered private profiles, their repository and staging bindings, their task-protection contracts, validated optional stages, and reviewed budget overrides. It refreshes runner bindings and other reviewed profile settings from the corresponding built-in profile. If a registration cannot be matched to a reviewed base or its private paths are unsafe, the amendment refuses before changing the installed runtime. Verify the registered profile is present after upgrade and run `make doctor PREFIX=/absolute/private/prefix` before restart.
 
 The local Qwen catalog now uses a 24,576-token context window while retaining its 4,096-token per-turn output limit. OpenClaw estimates input conservatively for loopback proxy endpoints; with the previous 16,384-token catalog window, a tool-heavy Gmail search/read exchange could reduce the final generation allowance to one token even though MLX had room to answer. This change does not alter weights, tools, routing, or fallback policy. Existing private Work Mode installations receive the reviewed catalog change through the stopped-gateway amendment, then require a gateway restart.

@@ -134,7 +134,7 @@ test('truncated usage crosses the real worker boundary once without exposing par
  const run=await leadRun([{wire},plan(valid)]);
  assert.equal(run.result.reason,'MODEL_OUTPUT_LIMIT');assert.equal(run.result.metrics.modelCalls,1);assert.equal(run.effects,0);assert.equal(run.attempts,1);
  assert.equal(run.telemetry.length,1);const event=run.telemetry[0];
- assert.equal(event.prompt_tokens,7000);assert.equal(event.completion_tokens,4096);assert.equal(event.usage_complete,true);assert.equal(event.finishStatus,'length');assert.equal(event.parseStatus,'BEFORE_PARSE');assert.ok(event.elapsed_seconds>=0);
+ assert.equal(event.generationProfile,'QWEN35_INSTRUCT_V1');assert.equal(event.prompt_tokens,7000);assert.equal(event.completion_tokens,4096);assert.equal(event.usage_complete,true);assert.equal(event.finishStatus,'length');assert.equal(event.parseStatus,'BEFORE_PARSE');assert.ok(event.elapsed_seconds>=0);
  assert.ok(!JSON.stringify(run.responses).includes('INJECTED_PRIVATE'));assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
 });
 test('malformed completed output and missing usage retain honest accounting',async()=>{
@@ -157,6 +157,7 @@ test('telemetry metadata uses fixed names and finite nonnegative numeric values'
   const event=privateLeadTelemetry({prompt_tokens:value,completion_tokens:3,elapsed_seconds:value,result_kind:'INJECTED_PRIVATE',INJECTED_PRIVATE:'secret',usage_complete:true});
   assert.equal(event.prompt_tokens,null);assert.equal(event.elapsed_seconds,null);assert.equal(event.usage_complete,false);assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
  }
+ assert.equal(privateLeadTelemetry({generationProfile:'INJECTED_PRIVATE'}).generationProfile,'UNKNOWN');
  assert.equal(privateLeadTelemetry({prompt_tokens:1.5}).prompt_tokens,null);
  assert.equal(privateLeadTelemetry({prompt_tokens:0,completion_tokens:0}).usage_complete,true);
 });
@@ -166,4 +167,16 @@ test('failed-response usage stops the shared token budget before a correction ca
  const run=await reviewerRun(plan(valid),{leadPlan:{wire},maxTokens:1000});
  assert.equal(run.attempts,1);assert.equal(run.endpointDispatches,1);assert.ok(run.status.text.includes('TOKEN_BUDGET'),run.status.text);
  assert.equal(run.summary.telemetry.modelCalls,1);assert.equal(run.summary.telemetry.promptTokens,1001);assert.equal(run.summary.telemetry.completionTokens,8);assert.equal(run.summary.telemetry.usageIncompleteCalls,0);
+});
+
+test('upstream sampling and focused workflow survive the signed production path',async()=>{
+ const run=await leadRun([plan(valid)]);
+ const sent=run.captures[0];
+ assert.deepEqual(Object.fromEntries(['temperature','top_p','top_k','min_p','presence_penalty','repetition_penalty'].map(key=>[key,sent[key]])),{temperature:0.7,top_p:0.8,top_k:20,min_p:0,presence_penalty:1.5,repetition_penalty:1});
+ assert.equal(sent.max_tokens,4096);assert.equal(sent.chat_template_kwargs.enable_thinking,false);assert.equal(run.attempts,1);assert.equal(run.effects,0);assert.equal(run.telemetry[0].generationProfile,'QWEN35_INSTRUCT_V1');
+ const prompt=request(sent).messages[0].content;
+ assert.match(prompt,/an import alone does not prove the package is installed/);assert.match(prompt,/diagnose the reported error/);assert.match(prompt,/only host-listed command operations/);assert.match(prompt,/do not emit a separate plan or essay/);
+ const reviewer=await reviewerRun(plan({kind:'FINAL',text:JSON.stringify({verdict:'ACCEPT',findings:[]})}));
+ assert.ok(reviewer.status.text.includes('COMPLETE'));assert.equal(reviewer.captures[1].temperature,0.7);
+ const calls=reviewer.rows.filter(row=>row.kind==='MODEL_CALL'&&row.generationProfile);assert.equal(calls.length,2);assert.ok(calls.every(row=>row.generationProfile==='QWEN35_INSTRUCT_V1'));
 });

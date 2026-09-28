@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,13 @@ class BootstrapHardware(unittest.TestCase):
                     timeout=10,
                 )
                 if result.returncode == 0:
+                    # The fixture shortens bootstrap's sleep; a successful
+                    # background fork does not mean its capture is written yet.
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline and (
+                        not capture.exists() or not capture.read_text()
+                    ):
+                        time.sleep(0.01)
                     self.assertEqual(capture.read_text(), "0\n")
                 else:
                     self.assertFalse(capture.exists())
