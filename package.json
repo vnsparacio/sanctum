@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@opentelemetry/context-async-hooks": "2.10.0",
-    "@opentelemetry/sdk-metrics": "2.10.0",
+    "@opentelemetry/sdk-metrics": "2.11.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
