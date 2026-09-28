@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/resources": "2.11.0",
     "@splunk/otel": "4.11.0",
     "ajv": "8.20.0",
     "openclaw": "2026.8.1",
