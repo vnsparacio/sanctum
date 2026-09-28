@@ -1,0 +1,17 @@
+[
+  {
+    "name": "test-repair",
+    "goal": "Repair only ui.test.js so existing UI behavior is meaningfully tested without jsdom. Read ui.test.js, then index.js only to learn the real DOM interface; replace the unavailable dependency with node:test, node:assert/strict and a small DOM double that executes the real script. Test mood selection, save with/without note, newest-five history, text-safe rendering and clear. Do not implement persistence wiring yet or read all other files. Preserve logic.test.js and persistence.test.cjs. Run the listed lint/build/test operations and fix concrete failures before completion.",
+    "required_files": ["ui.test.js", "storage.js"]
+  },
+  {
+    "name": "persistence-wiring",
+    "goal": "Wire the existing tested storage helper into the real UI, one file at a time. Read index.html and immediately place storage.js before index.js. Then read index.js and wire startup load, every check-in save and persisted clear to the actual history state. Handle window.localStorage access throwing and show an honest warning when writes fail while in-memory controls remain usable. Extend ui.test.js to execute the actual HTML script order and cover save/fresh-page-load, clear/fresh-page-load, malformed data, throwing storage access and failed writes. Check shared classic-script names for collisions. Preserve the protected oracle and existing behavior; run lint/build/test.",
+    "required_files": ["index.html", "index.js", "ui.test.js", "storage.js"]
+  },
+  {
+    "name": "documentation",
+    "goal": "Read README.md and update only that file to accurately explain operation, reload/clear persistence, storage-error behavior and the available test command. Do not claim a browser check occurred. Do not reread or rewrite implementation that passed the previous checkpoint unless a new test failure requires it. Run the listed lint/build/test operations once for this checkpoint and finish only on host-validated evidence.",
+    "required_files": ["README.md"]
+  }
+]

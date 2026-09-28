@@ -5,6 +5,7 @@ import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {stagePlan} from '../plugin/work-stages.mjs';
 const oracle=readFileSync(new URL('../qualification/moodlog/persistence.test.cjs',import.meta.url),'utf8');
 const contract=JSON.parse(readFileSync(new URL('../qualification/moodlog/task-protection.json',import.meta.url),'utf8'));
 const prompt=readFileSync(new URL('../qualification/moodlog/task.txt',import.meta.url),'utf8');
@@ -24,6 +25,11 @@ function run(source){
 }
 test('MoodLog oracle and protected contract agree; focused prompt fits admission',()=>{
  assert.equal(prompt.length<4000,true);
+ const continuation=readFileSync(new URL('../qualification/moodlog/continuation-task.txt',import.meta.url),'utf8');
+ const stages=JSON.parse(readFileSync(new URL('../qualification/moodlog/continuation-stages.json',import.meta.url),'utf8'));
+ const plan=stagePlan(continuation,stages);
+ assert.equal(plan.length,3);
+ for(const checkpoint of plan)assert.ok(checkpoint.task.length<=4000);
  assert.deepEqual(contract.protected,['persistence.test.cjs']);
  assert.equal(contract.acceptance.runner,'node-test-v1');
  assert.deepEqual([...oracle.matchAll(/^test\('([^']+)'/gm)].map(x=>x[1]),contract.acceptance.entries[0].names);

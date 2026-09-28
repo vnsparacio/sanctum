@@ -1,9 +1,10 @@
 # Completing the guided MoodLog POC
 
-The [milestone](../history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md) records a working
-in-memory UI, one accepted logic checkpoint, failed UI tests and absent reload
-persistence. This procedure continues that exact private candidate. It does not
-claim that the remaining application code has been implemented or qualified.
+The [first milestone](../history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md) records a working
+in-memory UI. The [storage milestone](../history/v1.3/WORK-MODE-STORAGE-MILESTONE.md)
+adds a Qwen-authored helper that independently passes all four protected tests,
+but its UI suite and browser integration remain incomplete. Continue the exact
+latest preserved candidate; full acceptance is still open.
 
 ## Reviewed source preparation
 
@@ -39,32 +40,38 @@ reached readiness but stopped after six reads and no edits. PRIVATE_LEAD now fit
 its entire UTF-8 request to the configured worker byte cap, omitting only older
 disclosed observations while retaining the newest result and host state. An
 irreducible request stops as `MODEL_CONTEXT_LIMIT`; review evidence is never
-trimmed. This correction is verified offline and still needs a live retry after
-owner merge and supported upgrade. Do not increase caps or infer full acceptance
-from a successful context replay.
+trimmed. The subsequent B200 storage-milestone run passed the former six-call
+failure boundary and made edits, but exhausted its aggregate token budget.
+This qualifies the corrected path on that run, not full application acceptance.
 
-## One focused continuation task
+## One staged continuation task
 
-1. Preserve the previous candidate and hashes outside Git. Create a new private
-   repository from its exact unchanged app files; do not supply a repaired app.
+1. Preserve the latest storage-milestone candidate and hashes outside Git.
+   Create a new private repository from its exact unchanged app files, including
+   Qwen's `storage.js` and partial `index.js`; do not supply a repaired app.
    Inspect/record its baseline before committing. The old failed task remains a
    failed historical result. A new task starts from the new private baseline;
-   no automatic retry or reset of the old task's budget is implied.
+   no automatic retry or reset of the old task's budget is implied. Run the fixed
+   isolated test command on this preserved baseline before admission: expect four
+   protected storage tests and logic to pass, with UI failing on `jsdom`. If the
+   result differs, investigate the candidate identity first.
 2. Copy the reviewed
    [persistence oracle](../../gate/qualification/moodlog/persistence.test.cjs)
    unchanged into the candidate root as `persistence.test.cjs`. Commit it as
    owner acceptance input, distinct from Qwen's mutable tests. Never copy the
    repository's synthetic oracle-calibration implementation into the candidate.
-3. Register a **new, unstaged** private profile through `scripts/configure.py`
-   using an existing reviewed base with no `stages`, its fixed Node test
-   command, and the
+3. Register a **new staged** private profile through `scripts/configure.py`
+   using the reviewed unstaged `moodaccept` profile as its base, the same fixed
+   Node test command and
    [protection contract](../../gate/qualification/moodlog/task-protection.json).
-   A registration copies unspecified fields, so do not copy `moodguided` and
-   accidentally retain all three stages. The protected test must be immutable
-   and its four named tests must execute under `node-test-v1`. Preserve the
-   existing logic/UI candidate tests; no skip/delete workaround.
-4. Inspect the resulting profile: reviewer enabled, no stages, correct private
-   repository/staging paths, protected oracle and fixed commands. Use explicit
+   Explicitly set `stages` to the array in
+   [continuation-stages.json](../../gate/qualification/moodlog/continuation-stages.json);
+   do not inherit the old broad `moodguided` goals. These checkpoints repair UI
+   tests, integrate persistence, then document the result. The protected test
+   must stay immutable and its four named tests must execute under `node-test-v1`.
+   Preserve existing logic/UI coverage; no skip/delete workaround.
+4. Inspect the resulting profile: reviewer enabled, the exact three stages,
+   correct private repository/staging paths, protected oracle and fixed commands. Use explicit
    limits no greater than 32 implementation calls, 200,000 total tokens and
    1,200 task seconds, with finite inference/cost limits. Set supported budget
    amendments while stopped, never by editing runtime JSON. The next live run
@@ -73,10 +80,13 @@ from a successful context replay.
    Prepare model readiness inside that window before task admission where
    practical so cold startup does not consume the task's entire useful time.
 5. Submit `/work start PROFILE -- ` followed by the
-   [focused task](../../gate/qualification/moodlog/task.txt). Qwen must repair
-   `ui.test.js` using `node:test`, `node:assert/strict` and a small DOM double,
-   then implement and wire persistence. It must read actual files and APIs;
+   [continuation task](../../gate/qualification/moodlog/continuation-task.txt).
+   The older `task.txt` is retained as historical input to the unstaged attempt.
+   Qwen must repair `ui.test.js` using `node:test`, `node:assert/strict` and a small DOM double,
+   then wire the existing storage helper. It must read actual files and APIs;
    no operator-authored persistence implementation is supplied.
+   Each checkpoint starts fresh context but shares calls, tokens, time and cost.
+   A failed checkpoint stops the task; never reset its budget or skip a check.
 6. Preserve the final files/hashes, result, tests and trace before `/work end`.
    Stop after one task: success, repeated blocker or budget exhaustion is a
    result to inspect, not permission for another allocation or a larger cap.
