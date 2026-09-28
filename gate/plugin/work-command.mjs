@@ -6,7 +6,7 @@ import {CONTRACT_VERSION,digest,egressMatches} from '../foundation/contracts.mjs
 import {decisionSurface} from '../foundation/decision-surface.mjs';
 import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
 import {currentCapabilityManifest} from '../foundation/manifest.mjs';
-import {createPrivateLeadReasoner,PRIVATE_LEAD_DESTINATION} from './private-lead.mjs';
+import {createPrivateLeadReasoner,PRIVATE_LEAD_DESTINATION,WORK_MODE_PACKET_BYTES} from './private-lead.mjs';
 import {createSourceRetrieval} from './source-retrieval.mjs';
 import {createWorkMode,MUTABLE_WORKTREE_COMPLETION_POLICY,WORKSPACE_EVIDENCE_VERSION} from './work-mode.mjs';
 import {createCommandBroker} from './command-broker.mjs';
@@ -135,7 +135,7 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      return {ok:true,data:response.result,executionState:response.result?.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};
    });
    task.telemetry={promptTokens:0,completionTokens:0,inferenceSeconds:0,estimatedCostUsd:0,modelCalls:0,usageIncompleteCalls:0,timingIncompleteCalls:0};
-   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,maxContextBytes:settings.max_context_bytes,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onDecision:event=>task.trace.append({type:'DECISION',checkpoint:task.checkpoint??1,...event}),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.inferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;if(event.usage_complete!==true)task.telemetry.usageIncompleteCalls=(task.telemetry.usageIncompleteCalls??0)+1;if(event.elapsed_seconds===null)task.telemetry.timingIncompleteCalls=(task.telemetry.timingIncompleteCalls??0)+1;try{task.ledger.modelCall({...event,checkpoint:task.checkpoint??1,estimatedCostUsd:task.telemetry.estimatedCostUsd});}catch(error){task.storageFailure=storageCode(error?.code);throw error;}}});
+   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,maxContextBytes:WORK_MODE_PACKET_BYTES,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onDecision:event=>task.trace.append({type:'DECISION',checkpoint:task.checkpoint??1,...event}),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.inferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;if(event.usage_complete!==true)task.telemetry.usageIncompleteCalls=(task.telemetry.usageIncompleteCalls??0)+1;if(event.elapsed_seconds===null)task.telemetry.timingIncompleteCalls=(task.telemetry.timingIncompleteCalls??0)+1;try{task.ledger.modelCall({...event,checkpoint:task.checkpoint??1,estimatedCostUsd:task.telemetry.estimatedCostUsd});}catch(error){task.storageFailure=storageCode(error?.code);throw error;}}});
    const verifyProtectedEvidence=async({signal}={})=>{
      const response=await call(task,'worktree_integrity',{task_id:task.id,profile:task.profile},signal);
      if(response?.status!=='OK')throw Error('protected_evidence_unavailable');
