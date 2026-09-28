@@ -8,6 +8,12 @@ latest preserved candidate; full acceptance is still open.
 
 ## Reviewed source preparation
 
+The [progress recovery plan](WORK-MODE-PROGRESS-PLAN.md) records the current
+coordinator fix, next qualification steps and likely blockers. Disclosed edit/check
+reminders now survive result eviction, newer reads replace older bodies for the
+same path, and repeated unchanged reads receive guidance before a bounded stall
+stop. These contracts need live Qwen qualification on the staged continuation.
+
 Work Mode now gives each call up to 32 compact file-existence reminders derived
 only from results already allowed through result egress. They survive the
 six-result observation window, record their observed workspace generation, and
@@ -31,8 +37,8 @@ use the existing cache. See [configuration](../guides/configuration.md).
 The [off-peak B200 retry](../history/v1.3/WORK-MODE-B200-STARTUP-RETRY.md)
 failed during optional DeepGEMM warmup before admitting a task. The launcher
 now explicitly disables that backend for the pinned NVFP4/CUTLASS path.
-Synthetic launch tests pass; B200 readiness and inference still require live
-qualification. A package upgrade or second allocation is not an automatic
+Synthetic launch tests pass. The subsequent storage-milestone run qualified
+B200 readiness and inference once; cold-start speed and availability remain variable. A package upgrade or second allocation is not an automatic
 recovery step. Preserve startup failures and confirm cleanup before retrying.
 
 The subsequent [RTX request-budget retry](../history/v1.3/WORK-MODE-CONTEXT-BUDGET-RETRY.md)
