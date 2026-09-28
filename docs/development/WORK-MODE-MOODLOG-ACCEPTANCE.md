@@ -34,6 +34,15 @@ Synthetic launch tests pass; B200 readiness and inference still require live
 qualification. A package upgrade or second allocation is not an automatic
 recovery step. Preserve startup failures and confirm cleanup before retrying.
 
+The subsequent [RTX request-budget retry](../history/v1.3/WORK-MODE-CONTEXT-BUDGET-RETRY.md)
+reached readiness but stopped after six reads and no edits. PRIVATE_LEAD now fits
+its entire UTF-8 request to the configured worker byte cap, omitting only older
+disclosed observations while retaining the newest result and host state. An
+irreducible request stops as `MODEL_CONTEXT_LIMIT`; review evidence is never
+trimmed. This correction is verified offline and still needs a live retry after
+owner merge and supported upgrade. Do not increase caps or infer full acceptance
+from a successful context replay.
+
 ## One focused continuation task
 
 1. Preserve the previous candidate and hashes outside Git. Create a new private

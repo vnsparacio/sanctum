@@ -4,13 +4,13 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
-import {CONTRACT_VERSION,digest,validateToolProposal} from '../foundation/contracts.mjs';
+import {CONTRACT_VERSION,canonical,digest,validateToolProposal} from '../foundation/contracts.mjs';
 import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} from '../foundation/work-intent.mjs';
 import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerationSchema} from '../foundation/vllm-structured-output.mjs';
 import {rememberFileFacts,testRecoveryCode,argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
 import {normalizeWorkspacePacket,selectWorkCapabilityNames,workCapabilityErrorCode} from '../plugin/work-command.mjs';
-import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
+import {createPrivateLeadReasoner,privateLeadPacket} from '../plugin/private-lead.mjs';
 import {createWorkLedger} from '../plugin/work-ledger.mjs';
 import {workModeTools} from '../plugin/workspace-tools.mjs';
 import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
@@ -427,4 +427,60 @@ test('dependency recovery is fixed guidance derived only from disclosed failure 
  assert.equal(testRecoveryCode('COMMAND_FAILED','MODULE_NOT_FOUND'),'DEPENDENCY_UNAVAILABLE');
  assert.equal(testRecoveryCode('COMMAND_FAILED','assertion failed'),'TEST_FAILED');
  assert.equal(testRecoveryCode('OTHER','ERR_MODULE_NOT_FOUND'),'TEST_FAILED');
+});
+
+
+test('PRIVATE_LEAD budgets the full UTF-8 packet and retains the newest complete observation',()=>{
+ const system='profile overhead '.repeat(40);
+ const observations=Array.from({length:6},(_,n)=>({kind:'RESULT',result:{path:`file${n}.js`,text:'界🙂'.repeat(750)}}));
+ const context={task:'synthetic task',state:{observations,fileFacts:[{path:'file0.js',exists:true}],lastTest:{passed:false,currentForWorkspace:false},tests:{required:true},readRequired:['file5.js'],completion:{completionEligible:false}},capabilities:[{name:'worktree_read'}]};
+ const request={messages:[{role:'system',content:'fixed host instructions'},{role:'user',content:canonical(context)}],state:{workIntent:{schema:{const:'fixed schema'}}}};
+ const original=structuredClone(request),bytes=x=>Buffer.byteLength(canonical(x),'utf8');
+ assert.ok(bytes({system,request})>32768);
+ const packet=privateLeadPacket(system,request),sent=JSON.parse(packet.request.messages[1].content);
+ assert.ok(bytes(packet)<=32768);assert.ok(sent.state.earlierObservationsOmitted>0);
+ assert.deepEqual(sent.state.observations,observations.slice(sent.state.earlierObservationsOmitted));
+ assert.deepEqual(sent.state.observations.at(-1),observations.at(-1));
+ const {observations:ignored,earlierObservationsOmitted:removed,...sentState}=sent.state;
+ const {observations:alsoIgnored,...originalState}=context.state;
+ assert.deepEqual(sentState,originalState);assert.equal(sent.task,context.task);assert.deepEqual(sent.capabilities,context.capabilities);
+ assert.deepEqual(request,original);assert.deepEqual(packet.request.state,request.state);assert.equal(packet.system,system);assert.deepEqual(packet.request.messages[0],request.messages[0]);
+ const exact=bytes(packet);assert.deepEqual(privateLeadPacket(system,packet.request,exact),packet);
+ assert.ok(bytes(privateLeadPacket(system,packet.request,exact-1))<=exact-1);
+});
+
+test('PRIVATE_LEAD context fitting stops before dispatch when essential or newest content cannot fit',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ for(const workerRefusal of [false,true]){
+  let dispatches=0;
+  const adapter=createPrivateLeadReasoner({profile,maxContextBytes:workerRefusal?32768:128,body:()=>({}),execute:async()=>{dispatches++;return {status:'UNAVAILABLE',reason:'private_lead_proposal_limit'};}});
+  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>{throw Error('must not execute');},egress:defaultResultEgress,evaluate:async()=>{throw Error('must not evaluate');}})).run({task:'synthetic',scope,requestId});
+  assert.equal(result.status,'BUDGET_EXHAUSTED');assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(result.metrics.modelCalls,0);assert.equal(result.metrics.iterations,0);assert.equal(dispatches,workerRefusal?1:0);
+ }
+ const request={messages:[{role:'system',content:'host'},{role:'user',content:canonical({state:{observations:[{kind:'RESULT',result:{text:'界'.repeat(1000)}}]}})}]};
+ assert.throws(()=>privateLeadPacket('profile',request,1000),/model_context_limit/);
+ const review={messages:[{role:'system',content:'review'},{role:'user',content:canonical({reviewEvidence:'x'.repeat(1000)})}]};
+ assert.throws(()=>privateLeadPacket('profile',review,100),/model_context_limit/);
+ assert.throws(()=>privateLeadPacket('x'.repeat(196609),{},999999),/model_context_limit/);
+ for(const invalid of [0,-1,1.5,NaN,'32768'])assert.throws(()=>privateLeadPacket('profile',{},invalid),/private_lead_adapter_config/);
+});
+
+test('PRIVATE_LEAD omission does not reintroduce withheld results or change authoritative state',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ let calls=0;const requests=[];
+ const adapter=createPrivateLeadReasoner({profile,maxContextBytes:18000,body:(_operation,_tier,packet)=>packet,execute:async({request:packet})=>{
+  assert.ok(Buffer.byteLength(canonical(packet),'utf8')<=18000);
+  assert.equal(canonical(packet).includes('PRIVATE_SENTINEL'),false);
+  requests.push(JSON.parse(packet.request.messages[1].content));
+  return {status:'OK',result:++calls===1?proposal('gmail_search',{query:'synthetic'}):calls<=6?proposal('calc',{expression:'1'}):final};
+ }});
+ const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async({proposal:p})=>({ok:true,data:{text:p.capability==='gmail_search'?'PRIVATE_SENTINEL':'界'.repeat(2600)},executionState:'COMPLETED',verifier:'VERIFIED'}),egress:defaultResultEgress,evaluate:async()=>({passed:true})})).run({task:'synthetic',scope,requestId});
+ assert.equal(result.status,'COMPLETE');assert.equal(calls,7);assert.equal(result.state.observations.length,6);
+ const last=requests.at(-1);assert.ok(last.state.earlierObservationsOmitted>0);assert.equal(last.state.observations.at(-1).result.data.text,'界'.repeat(2600));
+ assert.equal(result.state.observations[0].kind,'RESULT_WITHHELD');assert.equal(result.state.earlierObservationsOmitted,undefined);
+});
+
+test('review context exhaustion is reported without accepting completion',async()=>{
+ const result=await run({rows:[final],reviewer:async()=>{throw Error('model_context_limit');}});
+ assert.equal(result.status,'BUDGET_EXHAUSTED');assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(result.state.review,null);
 });

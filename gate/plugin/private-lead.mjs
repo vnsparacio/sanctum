@@ -5,7 +5,7 @@
  */
 import {detachDecisionNote} from '../foundation/decision-note.mjs';
 import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
-import {createReasonerAdapter} from '../foundation/contracts.mjs';
+import {canonical,createReasonerAdapter} from '../foundation/contracts.mjs';
 
 export const PRIVATE_LEAD_DESTINATION=Object.freeze({kind:'PRIVATE_REASONER',service:'runpod-loopback',model:'PRIVATE_LEAD'});
 // Only fixed local worker refusal codes may cross into owner-visible receipts.
@@ -18,16 +18,41 @@ export function profileSystem(profile){
  return profile.prompt.system;
 }
 
-export function createPrivateLeadReasoner({execute,profile,body,onTelemetry=()=>{},onDecision=()=>{}}){
+// Match the worker's UTF-8 packet limit, including the profile and schema.
+// Only older, already-disclosed observations may be removed. Never trim source
+// text in place, essential host state, or the newest observation.
+export function privateLeadPacket(system,request,maxContextBytes=32768){
+ if(!Number.isSafeInteger(maxContextBytes)||maxContextBytes<=0)throw Error('private_lead_adapter_config');
+ const limit=Math.min(maxContextBytes,196608),packet={system,request};
+ const fits=()=>Buffer.byteLength(canonical(packet),'utf8')<=limit;
+ if(fits())return packet;
+ packet.request=structuredClone(request);
+ const messages=packet.request?.messages;
+ if(!Array.isArray(messages)||messages.length!==2||messages[0]?.role!=='system'||messages[1]?.role!=='user')throw Error('model_context_limit');
+ let context;try{context=JSON.parse(messages[1].content);}catch{throw Error('model_context_limit');}
+ if(!Array.isArray(context?.state?.observations))throw Error('model_context_limit');
+ let removed=0;
+ while(context.state.observations.length>1){
+  context.state.observations.shift();
+  context.state.earlierObservationsOmitted=++removed;
+  messages[1].content=canonical(context);
+  if(fits())return packet;
+ }
+ throw Error('model_context_limit');
+}
+
+export function createPrivateLeadReasoner({execute,profile,body,maxContextBytes=32768,onTelemetry=()=>{},onDecision=()=>{}}){
  if(typeof execute!=='function'||typeof body!=='function')throw Error('private_lead_adapter_config');
  const system=profileSystem(profile);
  return createReasonerAdapter({id:'PRIVATE_LEAD',kind:'private-loopback',supportsWorkIntents:true,async invoke(request,signal){
-   const result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:{system,request}},'private_lead_workmode'),signal);
+   const packet=privateLeadPacket(system,request,maxContextBytes);
+   const result=await execute(body('private_lead_propose','PRIVATE_LEAD',{request:packet},'private_lead_workmode'),signal);
    // A syntactically malformed model result is a proposal-schema failure, not
    // loss of the private runtime.  Preserve that distinction so Work Mode can
-   // spend its single accepted correction turn.  All other worker failures
-   // remain availability failures and stop closed.
+   // spend its single accepted correction turn. Packet limits exhaust the
+   // context budget; provider availability failures still stop closed.
    if(result?.status!=='OK'||!result.result){
+     if(result?.reason==='private_lead_proposal_limit')throw Error('model_context_limit');
      if(result?.reason==='private_lead_result_schema'){const error=Error('reasoner_result_shape');if(result.diagnostic)error.diagnostic=sanitizeProtocolDiagnostic(result.diagnostic);throw error;}
      const match=String(result?.reason??'').match(/^structured_decoding_http_(400|422)$/);
      if(match){const error=Error('structured_decoding_unavailable');error.httpStatus=Number(match[1]);error.backendFailure='HTTP_REJECTED';throw error;}
