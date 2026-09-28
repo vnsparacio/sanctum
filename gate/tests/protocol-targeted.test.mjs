@@ -180,3 +180,21 @@ test('upstream sampling and focused workflow survive the signed production path'
  assert.ok(reviewer.status.text.includes('COMPLETE'));assert.equal(reviewer.captures[1].temperature,0.7);
  const calls=reviewer.rows.filter(row=>row.kind==='MODEL_CALL'&&row.generationProfile);assert.equal(calls.length,2);assert.ok(calls.every(row=>row.generationProfile==='QWEN35_INSTRUCT_V1'));
 });
+
+test('edit-length correction crosses signed worker requests and preserves payload-free receipts',async()=>{
+ const marker='INJECTED_PRIVATE_OVERSIZE';
+ const oversized=tool('worktree_edit',{operation:'replace',path:'index.js',old_text:marker.padEnd(1636,'x'),new_text:'new'});
+ const corrected=tool('worktree_edit',{operation:'replace',path:'index.js',old_text:'old',new_text:'new'});
+ const run=await leadRun([plan(oversized),plan(corrected),plan(valid)]);
+ assert.equal(run.attempts,3);assert.equal(run.effects,1);assert.equal(run.result.reason,'MODEL_ESCALATION');
+ const correction=context(run.captures[1]).state.correction;
+ assert.equal(correction.field,'old_text');assert.equal(correction.keyword,'maxLength');
+ assert.equal(correction.lengthLimit,512);assert.equal(correction.stringLength,1636);
+ assert.equal(correction.recovery.code,'EDIT_LENGTH_LIMIT');assert.equal(correction.recovery.maxLength,512);
+ assert.equal(correction.correctionsRemaining,1);assert.ok(!JSON.stringify(run.captures).includes(marker));
+ const d=diagnostics(run.rows)[0].diagnostic;
+ assert.equal(d.field,'old_text');assert.equal(d.lengthLimit,512);assert.equal(d.lengthUnit,'UTF-16 code units');
+ const rejected=run.rows.find(row=>row.kind==='PROPOSAL'&&row.outcome==='REJECTED');
+ assert.equal(rejected.keyword,'maxLength');assert.equal(rejected.field,'old_text');assert.equal(rejected.lengthLimit,512);
+ assert.ok(!JSON.stringify(run.rows).includes(marker));
+});

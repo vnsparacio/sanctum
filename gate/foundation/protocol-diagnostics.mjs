@@ -1,10 +1,12 @@
 /* Diagnostics are data, never acceptance. No arbitrary keys, values or pointers. */
 export const DIAGNOSTIC_VERSION='sanctum-protocol-diagnostic/v1';
-const enums={stage:['STREAM','JSON_PARSE','BACKEND_RESULT','GENERIC_RESULT','WORK_INTENT','REQUEST'],validatorVersion:['stream/v1','json/v1','backend-result/v1','sanctum-capability/v1','sanctum-work-intent/v1','request/v1'],resultKind:['FINAL','ESCALATION','TOOL_PROPOSAL','UNKNOWN'],field:['root','kind','reason','text','capability','arguments','path','operation','patch','source_need','max_chars','max_entries','UNKNOWN'],keyword:['type','required','additionalProperties','pattern','minLength','maxLength','minimum','maximum','enum','const','visibility','forbiddenCharacter','syntax','duplicateKey','nonfinite','completion','toolCalls','refusal','choices','limit','UNKNOWN'],receivedType:['object','array','string','number','boolean','null','undefined','UNKNOWN'],streamStatus:['COMPLETE','INCOMPLETE','NOT_STREAMED','UNKNOWN'],finishStatus:['stop','length','tool_calls','content_filter','UNKNOWN'],parseStatus:['BEFORE_PARSE','PARSED','FAILED','UNKNOWN'],normalization:['UNCHANGED','NOT_REACHED','UNKNOWN']};
+const enums={stage:['STREAM','JSON_PARSE','BACKEND_RESULT','GENERIC_RESULT','WORK_INTENT','REQUEST'],validatorVersion:['stream/v1','json/v1','backend-result/v1','sanctum-capability/v1','sanctum-work-intent/v1','request/v1'],resultKind:['FINAL','ESCALATION','TOOL_PROPOSAL','UNKNOWN'],field:['root','kind','reason','text','capability','arguments','path','operation','old_text','new_text','destination','patch','source_need','max_chars','max_entries','UNKNOWN'],keyword:['type','required','additionalProperties','pattern','minLength','maxLength','minimum','maximum','enum','const','visibility','forbiddenCharacter','syntax','duplicateKey','nonfinite','completion','toolCalls','refusal','choices','limit','UNKNOWN'],receivedType:['object','array','string','number','boolean','null','undefined','UNKNOWN'],streamStatus:['COMPLETE','INCOMPLETE','NOT_STREAMED','UNKNOWN'],finishStatus:['stop','length','tool_calls','content_filter','UNKNOWN'],parseStatus:['BEFORE_PARSE','PARSED','FAILED','UNKNOWN'],normalization:['UNCHANGED','NOT_REACHED','UNKNOWN']};
 export function sanitizeProtocolDiagnostic(value){
  const out={schema:DIAGNOSTIC_VERSION};
  for(const [key,values] of Object.entries(enums))out[key]=values.includes(value?.[key])?value[key]:'UNKNOWN';
  for(const key of ['stringLength','unknownFieldCount'])out[key]=Number.isSafeInteger(value?.[key])&&value[key]>=0?Math.min(value[key],65537):null;
+ out.lengthLimit=Number.isSafeInteger(value?.lengthLimit)&&value.lengthLimit>=0&&value.lengthLimit<=65536?value.lengthLimit:null;
+ out.lengthUnit=out.lengthLimit!==null&&['minLength','maxLength'].includes(out.keyword)?'UTF-16 code units':null;
  out.patternMatch=typeof value?.patternMatch==='boolean'?value.patternMatch:null;
  out.missingField=value?.missingField===true;
  return out;
@@ -15,8 +17,16 @@ export function schemaDiagnostic(value,schema,{stage='WORK_INTENT',validatorVers
  const fail=(v,field,keyword,extra={})=>sanitizeProtocolDiagnostic({...base,field,keyword,receivedType:type(v),stringLength:typeof v==='string'?v.length:null,...extra});
  function visit(v,s,field){
   if(s.oneOf){
-   const branch=s.oneOf.find(x=>x.properties?.kind?.const===v?.kind&&(v?.kind!=='TOOL_PROPOSAL'||x.properties?.capability?.const===v?.capability));
-   return branch?visit(v,branch,field):fail(v,field,'visibility');
+   // Match every explicit discriminator, including nested edit operations.
+   // Undefined kind values must never select the first nested branch.
+   const branch=s.oneOf.find(x=>{const fixed=Object.entries(x.properties??{}).filter(([,sub])=>Object.hasOwn(sub,'const'));return fixed.length>0&&fixed.every(([key,sub])=>v!==null&&typeof v==='object'&&Object.hasOwn(v,key)&&v[key]===sub.const);});
+   if(branch)return visit(v,branch,field);
+   if(s.oneOf.every(x=>Object.hasOwn(x.properties??{},'operation'))){
+    if(v===null||typeof v!=='object'||Array.isArray(v))return fail(v,field,'type');
+    const missing=!Object.hasOwn(v,'operation');
+    return fail(v.operation,'operation',missing?'required':'enum',{missingField:missing});
+   }
+   return fail(v,field,'visibility');
   }
   if(s.type&&(s.type==='integer'?!Number.isSafeInteger(v):type(v)!==s.type))return fail(v,field,'type');
   if(Object.hasOwn(s,'const')&&v!==s.const)return fail(v,field,'const');
@@ -28,8 +38,8 @@ export function schemaDiagnostic(value,schema,{stage='WORK_INTENT',validatorVers
    for(const [key,sub] of Object.entries(s.properties??{}))if(Object.hasOwn(v,key)){const error=visit(v[key],sub,key);if(error)return error;}
   }
   if(typeof v==='string'){
-   if(s.minLength!==undefined&&v.length<s.minLength)return fail(v,field,'minLength');
-   if(s.maxLength!==undefined&&v.length>s.maxLength)return fail(v,field,'maxLength');
+   if(s.minLength!==undefined&&v.length<s.minLength)return fail(v,field,'minLength',{lengthLimit:s.minLength});
+   if(s.maxLength!==undefined&&v.length>s.maxLength)return fail(v,field,'maxLength',{lengthLimit:s.maxLength});
    if(s.pattern&&!new RegExp(s.pattern,'u').test(v))return fail(v,field,'pattern',{patternMatch:false});
    if(s.noNul&&v.includes('\0'))return fail(v,field,'forbiddenCharacter');
   }

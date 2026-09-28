@@ -1,6 +1,7 @@
 /* Model-facing Work Mode intent.  Host bindings never cross this boundary. */
 import {decisionNoteSchema,detachDecisionNote} from './decision-note.mjs';
 import {CONTRACT_VERSION,canonical,digest,isRecord} from './contracts.mjs';
+import {sanitizeProtocolDiagnostic} from './protocol-diagnostics.mjs';
 import {projectVllmGenerationSchema} from './vllm-structured-output.mjs';
 
 export const WORK_INTENT_VERSION='sanctum-work-intent/v1';
@@ -80,9 +81,23 @@ export function validateWorkIntent(value,options={}){
  const spec=specs.find(x=>x.name===value.capability);if(!spec)return fail('CAPABILITY_NOT_VISIBLE',{capability:'UNKNOWN'});
  const schema=semanticArguments(spec,{testOnly}); const a=value.arguments, props=schema.properties??{}, required=schema.required??[];
  if(Object.keys(a).some(k=>!own(props,k)))return fail('ARGUMENT_SCHEMA',{keyword:'additionalProperties',unknownFieldCount:Object.keys(a).filter(k=>!own(props,k)).length});
- const check=(v,s)=>{if(s.type==='string')return typeof v==='string'&&(s.minLength===undefined||v.length>=s.minLength)&&(s.maxLength===undefined||v.length<=s.maxLength)&&(!s.pattern||new RegExp(s.pattern,'u').test(v))&&(!s.enum||s.enum.includes(v));if(s.type==='integer')return Number.isSafeInteger(v)&&(s.minimum===undefined||v>=s.minimum)&&(s.maximum===undefined||v<=s.maximum);return false;};
+ const invalid=(v,s)=>{
+  if(s.type==='string'){
+   if(typeof v!=='string')return 'type';
+   if(s.minLength!==undefined&&v.length<s.minLength)return 'minLength';
+   if(s.maxLength!==undefined&&v.length>s.maxLength)return 'maxLength';
+   if(s.pattern&&!new RegExp(s.pattern,'u').test(v))return 'pattern';
+   return s.enum&&!s.enum.includes(v)?'enum':null;
+  }
+  if(s.type==='integer'){
+   if(!Number.isSafeInteger(v))return 'type';
+   if(s.minimum!==undefined&&v<s.minimum)return 'minimum';
+   return s.maximum!==undefined&&v>s.maximum?'maximum':null;
+  }
+  return 'type';
+ };
  for(const key of required)if(!own(a,key))return fail('ARGUMENT_SCHEMA',{keyword:'required',field:key,missingRequired:true});
- for(const [key,v] of Object.entries(a))if(!check(v,props[key]))return fail('ARGUMENT_SCHEMA',{keyword:props[key].enum?'enum':'type',field:key,receivedType:typeOf(v)});
+ for(const [key,v] of Object.entries(a)){const keyword=invalid(v,props[key]);if(keyword)return fail('ARGUMENT_SCHEMA',{capability:spec.name,keyword,field:key,receivedType:typeOf(v),stringLength:typeof v==='string'?v.length:null,lengthLimit:['minLength','maxLength'].includes(keyword)?props[key][keyword]:null});}
  if(spec.name==='worktree_edit'&&hasEditVariants(schema)&&!exactEditShape(a,editOperations))return fail('ARGUMENT_SCHEMA',{keyword:'oneOf',field:'operation'});
  return {ok:true,value:structuredClone(value),spec};
 }
@@ -95,4 +110,14 @@ export function bindWorkIntent(intent,context){
  if(spec.name==='worktree_edit'&&hasEditVariants(spec.arguments)&&argumentsValue.operation==='replace')delete argumentsValue.operation;
  return {schema:CONTRACT_VERSION,proposalId:context.proposalId,requestId:context.requestId,revision:context.turn,reasoner:context.reasoner,capability:spec.name,capabilityDigest:context.specDigests[spec.name],arguments:{...taskBound,...argumentsValue}};
 }
-export const workIntentDiagnostics=result=>({code:result.code,capability:result.detail?.capability??'UNKNOWN',terminal:WORK_INTENT_TERMINALS.includes(result.detail?.terminal)?result.detail.terminal:null,keyword:result.detail?.keyword??null,field:['path','operation','source_need','max_chars','max_entries'].includes(result.detail?.field)?result.detail.field:null,receivedType:result.detail?.receivedType??null,missingRequired:result.detail?.missingRequired===true,unknownFieldCount:Number.isSafeInteger(result.detail?.unknownFieldCount)?result.detail.unknownFieldCount:0});
+export const workIntentDiagnostics=result=>{
+ const structural=sanitizeProtocolDiagnostic(result.detail);
+ return {code:result.code,capability:result.detail?.capability??'UNKNOWN',terminal:WORK_INTENT_TERMINALS.includes(result.detail?.terminal)?result.detail.terminal:null,keyword:result.detail?.keyword??null,field:['path','operation','old_text','new_text','destination','source_need','max_chars','max_entries'].includes(result.detail?.field)?result.detail.field:null,receivedType:result.detail?.receivedType??null,missingRequired:result.detail?.missingRequired===true,unknownFieldCount:Number.isSafeInteger(result.detail?.unknownFieldCount)?result.detail.unknownFieldCount:0,stringLength:structural.stringLength,lengthLimit:structural.lengthLimit,lengthUnit:structural.lengthUnit};
+};
+export function workIntentRecovery(result){
+ const d=workIntentDiagnostics(result);
+ if(result.code!=='ARGUMENT_SCHEMA'||d.capability!=='worktree_edit'||d.keyword!=='maxLength'||!['old_text','new_text'].includes(d.field)||d.lengthLimit===null)return null;
+ return {code:'EDIT_LENGTH_LIMIT',field:d.field,receivedLength:d.stringLength,maxLength:d.lengthLimit,unit:'UTF-16 code units',guidance:d.field==='old_text'
+  ?'The rejected edit did not run. Select one short exact unique section from the observed file as old_text and change only that section. Do not copy the whole file into old_text. To insert code, keep a short unique existing anchor in new_text with one small addition. Read again after a successful edit before the next replacement.'
+  :'The rejected edit did not run. Make new_text one small complete replacement. For a new file, create a small valid scaffold; for an existing file, use a short exact unique observed anchor and retain it with one small addition. Read again after each successful edit and grow the file in separate calls. Do not blindly truncate code or delete/recreate an existing file.'};
+}

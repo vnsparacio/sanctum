@@ -230,3 +230,34 @@ test('small edit budgets apply before authority while preserving the underlying 
  assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'😀'.repeat(1024)}),options).ok,true);
  assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'😀'.repeat(1025)}),options).ok,false);
 });
+
+test('oversized edit gets one field-specific correction and only the corrected edit executes',async()=>{
+ for(const [field,length,limit] of [['old_text',1636,512],['old_text',1724,512],['new_text',3000,2048]]){
+  const marker='REJECTED_PRIVATE_SOURCE_',bad=structuredClone(edit);bad.arguments[field]=marker.padEnd(length,'x');
+  let source='old';
+  const out=await run([read,bad,edit,intent('worktree_command',{operation:'test'})],{invoke:p=>{
+   if(p.capability==='worktree_read')return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED',data:{text:source}};
+   if(p.capability==='worktree_edit'){assert.equal(p.arguments.old_text,source);source=p.arguments.new_text;}
+   if(p.capability==='worktree_command')assert.equal(source,'new');
+   return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};
+  }});
+  const correction=JSON.parse(out.requests[2].messages[1].content).state.correction;
+  assert.equal(correction.field,field);assert.equal(correction.keyword,'maxLength');assert.equal(correction.lengthLimit,limit);
+  assert.equal(correction.diagnostic.field,field);assert.equal(correction.diagnostic.stringLength,length);
+  assert.equal(correction.recovery.field,field);assert.equal(correction.recovery.maxLength,limit);
+  assert.equal(correction.recovery.unit,'UTF-16 code units');assert.match(correction.recovery.guidance,/short exact unique/);
+  assert.equal(correction.attempt,1);assert.equal(correction.correctionsRemaining,1);
+  assert.ok(!JSON.stringify(out.requests).includes(marker));assert.ok(!JSON.stringify(out.events).includes(marker));
+  assert.equal(out.calls.filter(p=>p.capability==='worktree_edit').length,1);assert.equal(source,'new');
+  assert.equal(out.result.metrics.modelCalls,4);assert.equal(out.result.status,'COMPLETE');
+  const rejected=out.events.find(e=>e.kind==='PROPOSAL'&&e.outcome==='REJECTED');
+  assert.equal(rejected.field,field);assert.equal(rejected.keyword,'maxLength');assert.equal(rejected.lengthLimit,limit);
+ }
+});
+
+test('repeated oversized edits still stop before authority or execution',async()=>{
+ const bad=structuredClone(edit);bad.arguments.old_text='x'.repeat(1636);
+ const out=await run([bad,bad]);
+ assert.equal(out.result.reason,'REPEATED_INVALID_PROPOSAL');assert.equal(out.result.metrics.modelCalls,2);
+ assert.equal(out.calls.length,0);assert.equal(out.events.filter(e=>e.kind==='AUTHORITY').length,0);
+});

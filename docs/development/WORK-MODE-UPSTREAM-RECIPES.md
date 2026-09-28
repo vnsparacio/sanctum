@@ -98,3 +98,31 @@ Larger output limits, alternative quants, server upgrades, speculative decoding 
 persistent model plans remain separate experiments, not prerequisites for this run.
 Runtime/dependency pins and the historical interface profile are unchanged. Freeze
 only the intentional source, tests and documentation in this change.
+
+## Edit-length recovery before the next run
+
+The host now keeps fixed edit-field names (`old_text`, `new_text`, `destination`)
+in structural diagnostics. Length failures include the observed length, applicable
+host bound and UTF-16 unit; argument validation reports `maxLength` rather than
+the generic `type` keyword. Nested schema diagnostics match the actual edit
+operation, including create-only recovery, instead of selecting the replace
+branch merely because both objects lack a top-level `kind`.
+
+The existing single correction request includes fixed guidance for an oversized
+edit: choose one short unique observed source section or insertion anchor, retain
+the anchor when inserting, and grow larger content across separate read/edit
+calls. The host does not truncate or execute the rejected proposal, echo its
+source into correction/receipts, add retries, or expand edit/output/task limits.
+The unchanged authority and edit guards still validate each corrected proposal.
+
+Synthetic tests cover the previous observed failure lengths, both edit fields,
+UTF-16 counting, operation selection, repeated rejection, corrected edit/test
+execution, and the signed worker request plus hash-chained receipt path. These
+tests demonstrate host recovery behavior, not that Qwen will follow it. Live
+qualification requires another owner-bounded run after review and merge.
+
+For that run, first verify **Controls → Advanced Params → Function Calling →
+Legacy** in the owner WebUI chat before starting paid allocation. Then use the
+same baseline, preset, three checkpoints, 32-call shared budget and one-allocation
+window above. Check the corrected field/limit feedback if rejection occurs and
+preserve the result even if the model still fails. No automatic retry is implied.

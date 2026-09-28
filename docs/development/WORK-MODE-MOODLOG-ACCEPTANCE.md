@@ -155,6 +155,9 @@ The next candidate also adopts a published non-thinking sampling preset and focu
 coding workflow guidance. Follow the [upstream recipe run plan](WORK-MODE-UPSTREAM-RECIPES.md)
 for exact settings, provenance, shared limits and cleanup. Its live qualification
 is recorded in the [upstream preset retry](../history/v1.3/WORK-MODE-UPSTREAM-PRESET-RETRY.md):
-eight calls, no edits, and two length-invalid proposals. Correct the bounded
-schema feedback before another funded attempt. Upstream success is not evidence
-that this candidate has passed.
+eight calls, no edits, and two length-invalid proposals. The
+[edit-length recovery](WORK-MODE-UPSTREAM-RECIPES.md#edit-length-recovery-before-the-next-run)
+now gives the existing correction attempt an exact field, length bound and fixed
+small-edit guidance, with synthetic and signed-path coverage. Apply only reviewed,
+merged source before the next bounded attempt. Upstream success and synthetic
+recovery are not evidence that the live candidate has passed.
