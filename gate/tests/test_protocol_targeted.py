@@ -12,6 +12,7 @@ BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "src"))
 from backends import PrivateLeadBackend
 from common import Refused, canonical
+from protocol_stream import safe_telemetry
 
 
 def propose(text, metadata=None):
@@ -43,6 +44,38 @@ def propose(text, metadata=None):
 
 
 class TargetedParser(unittest.TestCase):
+    def test_telemetry_rejects_invalid_numbers_and_arbitrary_fields(self):
+        for value in [
+            True,
+            -1,
+            "8",
+            float("inf"),
+            float("nan"),
+            9007199254740992,
+            10**1000,
+        ]:
+            with self.subTest(value=value):
+                result = safe_telemetry(
+                    {
+                        "prompt_tokens": value,
+                        "completion_tokens": 3,
+                        "elapsed_seconds": value,
+                        "result_kind": "INJECTED_PRIVATE",
+                        "INJECTED_PRIVATE": "secret",
+                        "usage_complete": True,
+                    }
+                )
+                self.assertIsNone(result["prompt_tokens"])
+                self.assertIsNone(result["elapsed_seconds"])
+                self.assertFalse(result["usage_complete"])
+                self.assertNotIn("INJECTED_PRIVATE", json.dumps(result))
+        self.assertIsNone(safe_telemetry({"prompt_tokens": 1.5})["prompt_tokens"])
+        self.assertTrue(
+            safe_telemetry({"prompt_tokens": 0, "completion_tokens": 0})[
+                "usage_complete"
+            ]
+        )
+
     def test_R2_overflow_and_literal_nonfinite_reject_before_recognition(self):
         for number in ("1e400", "-1e400", "NaN", "Infinity", "-Infinity"):
             for text in (

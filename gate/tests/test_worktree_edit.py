@@ -32,7 +32,7 @@ class ExactEdit(unittest.TestCase):
             "schema": evidence.VERSION,
             "protected": ["oracle.test.js"],
             "mutable": ["a.js", "b.js"],
-            "mutable_tests": [],
+            "mutable_tests": ["controls.test.cjs"],
             "allow_new": True,
             "acceptance": None,
         }
@@ -130,6 +130,45 @@ class ExactEdit(unittest.TestCase):
             check=True,
             capture_output=True,
         )
+        self.assertEqual(
+            evidence.check(self.settings, self.record)["integrity"], "PASS"
+        )
+
+    def test_large_test_file_assembled_with_small_fresh_edits(self):
+        anchor = "// NEXT_TEST\n"
+        header = "const test = require('node:test');\nconst assert = require('node:assert/strict');\n"
+        chunks = [
+            f"test('control {index} dispatches a click', () => {{\n"
+            "  const control = { listeners: {}, value: '',\n"
+            "    addEventListener(type, fn) { this.listeners[type] = fn; },\n"
+            "    click() { this.listeners.click(); } };\n"
+            "  const entries = [];\n"
+            "  control.addEventListener('click', () => entries.push(control.value));\n"
+            "  control.value = 'calm';\n"
+            "  control.click();\n"
+            "  assert.deepEqual(entries, ['calm']);\n"
+            "});\n"
+            for index in range(8)
+        ]
+        path = "controls.test.cjs"
+        self.assertGreater(len(header + "".join(chunks)), 2048)
+        self.assertTrue(self.fileop("create", path, new_text=header + anchor)["ok"])
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk + anchor), 2048)
+            self.rejected(
+                "EDIT_SOURCE_NOT_OBSERVED", path=path, old=anchor, new=chunk + anchor
+            )
+            self.read(path)
+            result = self.edit(anchor, chunk + anchor, path=path)
+            self.assertTrue(result["ok"], result)
+            self.assert_diff_receipt(result)
+        self.assertEqual(
+            (self.root / path).read_text(), header + "".join(chunks) + anchor
+        )
+        subprocess.run(
+            ["node", "--test", path], cwd=self.root, check=True, capture_output=True
+        )
+        self.assertEqual((self.root / "oracle.test.js").read_bytes(), b"original\n")
         self.assertEqual(
             evidence.check(self.settings, self.record)["integrity"], "PASS"
         )

@@ -15,7 +15,13 @@ from pathlib import Path
 
 from common import NoRedirect, Refused, canonical, database, http, strict_json
 from experiment import ExperimentLedger
-from protocol_stream import completion_stream, parse_result, rejection
+from protocol_stream import (
+    completion_stream,
+    parse_result,
+    rejection,
+    safe_telemetry,
+    safe_usage,
+)
 from schema import SCHEMA, enum, obj, validate
 
 ANSWER_SCHEMA = obj(
@@ -638,85 +644,103 @@ class PrivateLeadBackend(Private80BBackend):
         started = time.monotonic()
         first = None
         usage = {}
-        with (
-            context.attempt("proposal", p["max_tokens"])
-            if context
-            else contextlib.nullcontext()
+
+        def telemetry(
+            status, kind="UNKNOWN", parsed="BEFORE_PARSE", normalization="NOT_REACHED"
         ):
-            if self.send is http:
-                opener = urllib.request.build_opener(
-                    urllib.request.ProxyHandler({}),
-                    *([NoRedirect()] if context else []),
-                )
-                req = urllib.request.Request(
-                    self.url + "/chat/completions",
-                    data=generation_wire_json(p).encode(),
-                    headers={"Content-Type": "application/json"},
-                )
-                try:
-                    with opener.open(
-                        req, timeout=context.timeout(120) if context else 120
-                    ) as response:
-                        text, usage, first, stream_status = completion_stream(response)
-                except Refused:
-                    raise
-                except urllib.error.HTTPError as e:
-                    raise Refused(structured_http_reason(e.code)) from None
-                except Exception:
-                    raise Refused("transport_unavailable") from None
-            else:
-                # Deterministic unit-test adapters do not implement SSE.
-                p["stream"] = False
-                p.pop("stream_options", None)
-                response = self.send(
-                    self.url + "/chat/completions",
-                    p,
-                    {"Content-Type": "application/json"},
-                    timeout=context.timeout(120) if context else 120,
-                )
-                text = extract_chat(response)
-                usage = response.get("usage") or {}
-                first = None
-                stream_status = {"streamStatus": "NOT_STREAMED", "finishStatus": "stop"}
-            if context:
-                context.completed()
-        ended = time.monotonic()
-        value = parse_result(text, stream_status)
-        if len(canonical(value).encode()) > 65536:
-            raise rejection(
-                "private_lead_result_limit",
-                "BACKEND_RESULT",
-                "limit",
-                stream_status=stream_status["streamStatus"],
-                finish=stream_status["finishStatus"],
-                parsed=True,
-                value=value,
+            ended = time.monotonic()
+            decode = max(ended - (first if first is not None else started), 0)
+            observed = safe_usage(usage)
+            tokens = observed.get("completion_tokens")
+            return safe_telemetry(
+                {
+                    **observed,
+                    "elapsed_seconds": ended - started,
+                    "ttft_seconds": None if first is None else first - started,
+                    "decode_seconds": decode,
+                    "decode_tokens_per_second": (
+                        tokens / decode
+                        if type(tokens) is int and tokens >= 0 and decode > 0
+                        else None
+                    ),
+                    "result_kind": kind,
+                    **status,
+                    "parseStatus": parsed,
+                    "normalization": normalization,
+                }
             )
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        decode = max(ended - (first or started), 0)
-        rate = (
-            completion_tokens / decode
-            if type(completion_tokens) is int and completion_tokens >= 0 and decode > 0
-            else None
-        )
+
+        try:
+            with (
+                context.attempt("proposal", p["max_tokens"])
+                if context
+                else contextlib.nullcontext()
+            ):
+                if self.send is http:
+                    opener = urllib.request.build_opener(
+                        urllib.request.ProxyHandler({}),
+                        *([NoRedirect()] if context else []),
+                    )
+                    req = urllib.request.Request(
+                        self.url + "/chat/completions",
+                        data=generation_wire_json(p).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    try:
+                        with opener.open(
+                            req, timeout=context.timeout(120) if context else 120
+                        ) as response:
+                            text, usage, first, stream_status = completion_stream(
+                                response
+                            )
+                    except Refused:
+                        raise
+                    except urllib.error.HTTPError as e:
+                        raise Refused(structured_http_reason(e.code)) from None
+                    except Exception:
+                        raise Refused("transport_unavailable") from None
+                else:
+                    # Deterministic unit-test adapters do not implement SSE.
+                    p["stream"] = False
+                    p.pop("stream_options", None)
+                    response = self.send(
+                        self.url + "/chat/completions",
+                        p,
+                        {"Content-Type": "application/json"},
+                        timeout=context.timeout(120) if context else 120,
+                    )
+                    usage = response.get("usage") or {}
+                    text = extract_chat(response)
+                    first = None
+                    stream_status = {
+                        "streamStatus": "NOT_STREAMED",
+                        "finishStatus": "stop",
+                    }
+                if context:
+                    context.completed()
+            value = parse_result(text, stream_status)
+            if len(canonical(value).encode()) > 65536:
+                raise rejection(
+                    "private_lead_result_limit",
+                    "BACKEND_RESULT",
+                    "limit",
+                    stream_status=stream_status["streamStatus"],
+                    finish=stream_status["finishStatus"],
+                    parsed=True,
+                    value=value,
+                )
+        except Refused as error:
+            usage = getattr(error, "usage", usage)
+            first = getattr(error, "first", first)
+            status = getattr(error, "diagnostic", {})
+            error.telemetry = telemetry(
+                status, parsed=status.get("parseStatus", "BEFORE_PARSE")
+            )
+            raise
         return {
             "status": "OK",
             "result": value,
-            "telemetry": {
-                "elapsed_seconds": ended - started,
-                "ttft_seconds": None if first is None else first - started,
-                "decode_seconds": decode,
-                "decode_tokens_per_second": rate,
-                "prompt_tokens": prompt_tokens if type(prompt_tokens) is int else 0,
-                "completion_tokens": (
-                    completion_tokens if type(completion_tokens) is int else 0
-                ),
-                "result_kind": value["kind"],
-                **stream_status,
-                "parseStatus": "PARSED",
-                "normalization": "UNCHANGED",
-            },
+            "telemetry": telemetry(stream_status, value["kind"], "PARSED", "UNCHANGED"),
         }
 
 

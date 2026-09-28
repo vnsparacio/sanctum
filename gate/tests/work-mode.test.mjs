@@ -189,7 +189,7 @@ test('structured decoding rejection is distinct and never retries or falls back'
  const request={schema:CONTRACT_VERSION,requestId:'r'.repeat(32),scope:'a'.repeat(32),revision:0,messages:[{role:'user',content:'synthetic'}],manifestDigest:'b'.repeat(64),state:{phase:'PLAN'}};
  await assert.rejects(adapter.invoke(request,new AbortController().signal),error=>error.message==='structured_decoding_unavailable'&&error.httpStatus===400);assert.equal(calls,1);
  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>{throw Error('must not execute')},egress:defaultResultEgress,evaluate:async()=>({passed:true})})).run({task:'synthetic',scope,requestId,capabilities:['calc']});
- assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'STRUCTURED_DECODING_UNAVAILABLE');assert.equal(calls,2);assert.equal(result.metrics.modelCalls,0);
+ assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'STRUCTURED_DECODING_UNAVAILABLE');assert.equal(calls,2);assert.equal(result.metrics.modelCalls,1);
 });
 test('a changed host workspace fingerprint rejects a delayed mutation before authority',async()=>{
  const patch={name:'worktree_edit',parameters:{type:'object',properties:{task_id:{type:'string'},path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'}},required:['task_id','path','old_text','new_text'],additionalProperties:false}};

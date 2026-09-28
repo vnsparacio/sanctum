@@ -40,6 +40,15 @@ attempt when guidance fails. It does not guarantee a successful model response.
 List-only, alternating-content and repeated-test loops still rely on the existing
 shared call/token/time/cost limits. No automatic retry or budget extension is added.
 
+## Output-limit follow-up
+
+The merged progress changes reached a new live stop: five valid reads, then a
+truncated response, with no edits. The [retry report and source repair](../history/v1.3/WORK-MODE-OUTPUT-LIMIT-RETRY.md)
+record the exact qualification boundary. Small model-facing edits (512 code units
+of old text; 2,048 of new text), incremental scaffold guidance and failed-response
+usage accounting are the next repair. The existing response cap and bounded stop
+remain in place; full acceptance is still pending.
+
 ## Next steps
 
 1. Review and owner-merge this source change into `v1.3-dev`. Apply the supported
@@ -71,7 +80,7 @@ shared call/token/time/cost limits. No automatic retry or budget extension is ad
 | UI tests import unavailable packages | Use `node:test`, assertions and a small DOM double exercising the real scripts. Preserve coverage; no installation, skips or fake package shim. If a dependency is essential, stop for a reviewed runner change. |
 | Storage helper passes but UI does not persist | Test actual HTML script order and save/load/clear controls, then real reload. Cover classic-script global collisions and actual helper signatures. Unit helper success alone is insufficient. |
 | Denied storage, quota, malformed data | Test the `localStorage` getter as well as methods; retain usable in-memory controls and an honest warning. Verify failed writes do not claim persistence. |
-| Exact replacement or output limits | Read the target and make small exact replacements within existing limits. Never blind retry stale/missing source, emit partial files or broaden patch authority. |
+| Exact replacement or output limits | Read the target and use short unique replacements within the 512/2,048 code-unit proposal limits. Grow larger files with a scaffold and separate fresh reads/edits. Never blind retry stale/missing source, emit partial files or broaden patch authority. |
 | Repeated inspection continues | Preserve the candidate and report the new stall reason. Inspect the failed stage and missing evidence before proposing a narrower task; no automatic new allocation. |
 | Shared budget ends before all stages | Treat passing stages as partial evidence only. Review decomposition and prompt load; do not silently reset counters or skip reviewer/protected tests. |
 | Irreducible request or reviewer context | Stop as context exhaustion. Preserve exact evidence; review a separate evidence-compaction design rather than trimming protected review evidence to force acceptance. |

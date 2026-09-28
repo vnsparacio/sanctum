@@ -211,3 +211,22 @@ test('action context is bound by egress and withheld results cannot disclose it 
  assert.equal(next.editRecovery,null);
  assert.ok(!JSON.stringify(next.observations).includes('relative.txt'));
 });
+
+test('small edit budgets apply before authority while preserving the underlying tool contract',async()=>{
+ const original=manifest.byName.worktree_edit.arguments.properties;
+ assert.equal(original.old_text.maxLength,4096);assert.equal(original.new_text.maxLength,8192);
+ const shape=workIntentSchema([manifest.byName.worktree_edit],options).oneOf[0].properties.arguments.oneOf[0].properties;
+ assert.equal(shape.old_text.maxLength,512);assert.equal(shape.new_text.maxLength,2048);
+ for(const [field,length] of [['old_text',512],['new_text',2048]]){
+  const args={operation:'replace',path:'a.js',old_text:'old',new_text:'new',[field]:'x'.repeat(length)};
+  assert.equal(validateWorkIntent(intent('worktree_edit',args),options).ok,true);
+  args[field]+='x';assert.equal(validateWorkIntent(intent('worktree_edit',args),options).ok,false);
+  const out=await run([intent('worktree_edit',args),{kind:'ESCALATION',reason:'SMALLER_EDIT_REQUIRED'}]);assert.equal(out.calls.length,0);
+  assert.equal(JSON.parse(out.requests[0].messages[1].content).state.resultRequirements.worktree_edit[field],length);
+ }
+ assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'x'.repeat(2049)}),options).ok,false);
+ const generated=workIntentRequest([manifest.byName.worktree_edit],options).schema.oneOf[0].properties.arguments.oneOf[0].properties;
+ assert.equal(generated.old_text.maxLength,undefined); // Pinned decoder cannot enforce escaped string lengths.
+ assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'😀'.repeat(1024)}),options).ok,true);
+ assert.equal(validateWorkIntent(intent('worktree_edit',{operation:'create',path:'new.js',new_text:'😀'.repeat(1025)}),options).ok,false);
+});
