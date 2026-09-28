@@ -10,7 +10,7 @@ import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerati
 import {rememberFileFacts,testRecoveryCode,argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
 import {normalizeWorkspacePacket,selectWorkCapabilityNames,workCapabilityErrorCode} from '../plugin/work-command.mjs';
-import {createPrivateLeadReasoner,privateLeadPacket} from '../plugin/private-lead.mjs';
+import {createPrivateLeadReasoner,privateLeadPacket,WORK_MODE_PACKET_BYTES} from '../plugin/private-lead.mjs';
 import {createWorkLedger} from '../plugin/work-ledger.mjs';
 import {workModeTools} from '../plugin/workspace-tools.mjs';
 import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
@@ -447,6 +447,20 @@ test('PRIVATE_LEAD budgets the full UTF-8 packet and retains the newest complete
  assert.deepEqual(request,original);assert.deepEqual(packet.request.state,request.state);assert.equal(packet.system,system);assert.deepEqual(packet.request.messages[0],request.messages[0]);
  const exact=bytes(packet);assert.deepEqual(privateLeadPacket(system,packet.request,exact),packet);
  assert.ok(bytes(privateLeadPacket(system,packet.request,exact-1))<=exact-1);
+});
+
+test('Work Mode packet retains the five small sources needed before a first edit',()=>{
+ const files=[['storage.js',3118],['logic.js',2262],['index.html',1532],['index.js',4896],['ui.test.js',9340]];
+ const observations=files.map(([path,size])=>({kind:'RESULT',capability:'worktree_read',result:{ok:true,data:{path,text:'s'.repeat(size)}}}));
+ const request={messages:[{role:'system',content:'Host instructions '.repeat(700)},{role:'user',content:canonical({task:'synthetic MoodLog checkpoint',state:{observations}})}],state:{workIntent:{schema:{const:'synthetic'}}}};
+ const bytes=value=>Buffer.byteLength(canonical(value),'utf8');
+ const raw={system:'private profile',request};
+ assert.ok(bytes(raw)>32768);assert.ok(bytes(raw)<WORK_MODE_PACKET_BYTES);
+ const old=JSON.parse(privateLeadPacket(raw.system,request,32768).request.messages[1].content);
+ assert.ok(old.state.earlierObservationsOmitted>0);
+ const fitted=privateLeadPacket(raw.system,request,WORK_MODE_PACKET_BYTES);
+ assert.ok(bytes(fitted)<=WORK_MODE_PACKET_BYTES);
+ assert.deepEqual(JSON.parse(fitted.request.messages[1].content).state.observations,observations);
 });
 
 test('PRIVATE_LEAD context fitting stops before dispatch when essential or newest content cannot fit',async()=>{

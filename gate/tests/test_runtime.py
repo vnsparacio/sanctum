@@ -328,6 +328,28 @@ class Authority(Temp):
             with self.assertRaises(Refused):
                 self.auth(bad)
 
+    def test_private_lead_work_packet_has_separate_bounded_context(self):
+        from authority import WORK_MODE_PACKET_BYTES
+
+        b = self.body()
+        b.update(
+            operation="private_lead_propose",
+            tier="PRIVATE_LEAD",
+            approval="private_lead_workmode",
+            packet={"request": {"system": "synthetic", "request": {}}},
+        )
+        self.assertEqual(self.s["max_context_bytes"], 32768)
+        payload = b["packet"]["request"]
+        payload["system"] = (
+            "s" * (WORK_MODE_PACKET_BYTES - len(canonical(payload).encode()))
+            + payload["system"]
+        )
+        self.assertEqual(len(canonical(payload).encode()), WORK_MODE_PACKET_BYTES)
+        self.auth(b)
+        payload["system"] += "s"
+        with self.assertRaisesRegex(Refused, "private_lead_proposal_limit"):
+            self.auth(b)
+
 
 class Transport(Temp):
     def test_minimal_classifier_packet_and_provider_policy(self):

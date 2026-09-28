@@ -12,10 +12,17 @@ acceptance is still open.
 The [first bounded unassisted post-UI run](../history/v1.3/WORK-MODE-UNASSISTED-INSPECTION-RETRY.md)
 stopped after 10 repeated file reads and no edit. The follow-up checkpoint now
 requires `logic.js` and gives Qwen a small first collision repair before the
-broader UI wiring. This is a source change awaiting owner review and a new live
-qualification run; it does not establish autonomous acceptance. After merge,
-apply the reviewed source through the stopped-gateway Work Mode upgrade, run
-doctor, and inspect the resulting private profile before another bounded run.
+broader UI wiring. The merged checkpoint received one live qualification run;
+it did not establish autonomous acceptance.
+
+The [next bounded retry](../history/v1.3/WORK-MODE-CONTEXT-RETENTION-RETRY.md)
+read `logic.js` but again stopped without an edit. A local packet replay showed
+that the 32 KiB Work Mode request evicted earlier source bodies after the fifth
+read. The proposed 48 KiB Work Mode-only cap is a testable recovery, not yet
+live-qualified. Keep the same protected oracle, reviewer and aggregate limits
+for the next owner-reviewed run. After merge, apply reviewed source through the
+stopped-gateway Work Mode upgrade, run doctor and inspect the private profile;
+a larger packet alone does not establish UI acceptance.
 
 The [assisted result](../history/v1.3/WORK-MODE-MOODLOG-ASSISTED-RESULT.md)
 separates the working human-assisted copy from the unfinished model-produced

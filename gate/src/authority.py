@@ -32,6 +32,7 @@ OPERATIONS = {
     "worktree_cleanup",
     "work_source_policy",
 }
+WORK_MODE_PACKET_BYTES = 49152
 
 
 def authorize(envelope, settings, now=time.time, settings_hash=None):
@@ -162,7 +163,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         if "experiment" in b["packet"]:
             validate_binding(b["packet"]["experiment"])
         raw = canonical(b["packet"]["request"])
-        if len(raw.encode()) > min(settings["max_context_bytes"], 196608):
+        if len(raw.encode()) > WORK_MODE_PACKET_BYTES:
             raise Refused("private_lead_proposal_limit")
     if b["operation"].startswith("work"):
         if b["tier"] != "PRIVATE_LEAD" or b["approval"] != "private_lead_workmode":
