@@ -2,9 +2,46 @@
 
 The [first milestone](../history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md) records a working
 in-memory UI. The [storage milestone](../history/v1.3/WORK-MODE-STORAGE-MILESTONE.md)
-adds a Qwen-authored helper that independently passes all four protected tests,
-but its UI suite and browser integration remain incomplete. Continue the exact
-latest preserved candidate; full acceptance is still open.
+adds a Qwen-authored helper that independently passes all four protected tests.
+The later owner-seeded baseline has repaired UI tests, but still needs Qwen to
+integrate persistence. Continue that exact preserved baseline; full autonomous
+acceptance is still open.
+
+## Current continuation after the JSDOM repair
+
+The [assisted result](../history/v1.3/WORK-MODE-MOODLOG-ASSISTED-RESULT.md)
+separates the working human-assisted copy from the unfinished model-produced
+baseline. The operator fixed the test environment with the
+[Node-only UI fixture](../../gate/qualification/moodlog/ui.test.js), then seeded
+that fixture into a separate private candidate with the existing app and
+protected oracle. The fixture runs the real scripts named by `index.html`; it
+needs only Node built-ins. Do not install JSDOM or alter the isolated runner for
+this candidate. The baseline UI integration tests should fail on missing
+persistence, while the logic and protected storage tests pass. This is the
+intended starting condition for another model continuation.
+
+Use the [two-stage post-UI plan](../../gate/qualification/moodlog/post-ui-stages.json)
+and [post-UI task](../../gate/qualification/moodlog/post-ui-task.txt) for that
+baseline. The operator already registered an equivalent private profile while
+the gateway was stopped and ran doctor; no task has run under it yet. For a new
+private candidate, copy the reviewed UI fixture to `ui.test.js` beside its real
+app scripts and commit that qualification input before admission. Keep
+`persistence.test.cjs` byte-for-byte unchanged and protected by
+[task-protection.json](../../gate/qualification/moodlog/task-protection.json).
+Create a private `scripts/configure.py --proposal` document with a
+`work_profile` amendment: `name`, `copy_from` the reviewed profile,
+`repository` set to the exact private baseline, and `stages` equal to the
+two-stage JSON array. Apply it only with the gateway stopped; inspect its
+resolved repository, test command, protection, reviewer and aggregate limits,
+then run `make doctor PREFIX=/absolute/private/prefix`. Preserve the existing
+bounded time, call, token and spending limits and independent cleanup hold.
+
+The first checkpoint must make an actual persistence change to the app. An
+already-passing test-repair checkpoint with a required nonempty diff caused the
+last comparison to stop before persistence work. Do not add a gratuitous edit or
+weaken completion evidence to satisfy that obsolete checkpoint. The older
+three-stage procedure below remains historical guidance for a candidate whose
+UI test still imports JSDOM; it is not the plan for the current seeded baseline.
 
 ## Reviewed source preparation
 
@@ -50,7 +87,7 @@ trimmed. The subsequent B200 storage-milestone run passed the former six-call
 failure boundary and made edits, but exhausted its aggregate token budget.
 This qualifies the corrected path on that run, not full application acceptance.
 
-## One staged continuation task
+## Earlier three-stage continuation plan
 
 1. Preserve the latest storage-milestone candidate and hashes outside Git.
    Create a new private repository from its exact unchanged app files, including

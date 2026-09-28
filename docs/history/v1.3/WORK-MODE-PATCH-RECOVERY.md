@@ -1,6 +1,8 @@
 # Local patch recovery diagnostic amendment
 
-The owner requested an on-the-fly repair without another PR. This amendment is local and unmerged.
+The owner initially requested an on-the-fly repair. This local amendment is now
+included in the assisted MoodLog review PR. Its diagnostic behavior was
+validated separately from the later assisted application result.
 
 ## Observed behavior
 
@@ -14,4 +16,7 @@ Replace the generic patch-format error with fixed categories and static correcti
 
 Synthetic tests exercise malformed patches, unchanged file inventories, absence of mutation authority calls, successful corrected patches, and guidance reaching the next reasoner request. These checks do not qualify live Qwen recovery or MoodLog acceptance.
 
-SOURCE-MANIFEST.json is explicitly refrozen only for the reviewed editor, regression tests, and this document. Runtime pins remain unchanged. A stopped-gateway supported Work Mode amendment is required before live use; live deployment and any subsequent result are recorded in the private owner evidence.
+SOURCE-MANIFEST.json was explicitly refrozen for the reviewed editor, regression
+tests, and this document. Runtime pins stayed unchanged. The supported
+stopped-gateway Work Mode amendment was applied and checked with doctor; its
+receipt and any subsequent live result remain in private owner evidence.
