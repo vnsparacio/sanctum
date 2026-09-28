@@ -261,3 +261,15 @@ test('repeated oversized edits still stop before authority or execution',async()
  assert.equal(out.result.reason,'REPEATED_INVALID_PROPOSAL');assert.equal(out.result.metrics.modelCalls,2);
  assert.equal(out.calls.length,0);assert.equal(out.events.filter(e=>e.kind==='AUTHORITY').length,0);
 });
+
+test('patch correction guidance reaches the next reasoner turn and permits an exact retry',async()=>{
+ const bad=intent('worktree_patch',{patch:'--- a/a.js\n+++ b/a.js\n@@ -1,2 +1 @@\n-old\n+new\n'});
+ const good=intent('worktree_patch',{patch:bad.arguments.patch.replace('-1,2','-1')});
+ const diagnostic='Recount each hunk: old_count = context plus removed lines; new_count = context plus added lines.';
+ let attempts=0;
+ const out=await run([bad,good],{invoke:()=>++attempts===1?{ok:false,error:{code:'EDIT_PATCH_HUNK_COUNT_INVALID',diagnostic},executionState:'NOT_STARTED',verifier:'REJECTED'}:{ok:true,executionState:'COMPLETED',verifier:'VERIFIED'}});
+ assert.equal(out.calls.length,2);
+ assert.ok(out.requests[1].messages[1].content.includes(diagnostic));
+ assert.ok(out.requests[1].messages[1].content.includes('EDIT_PATCH_HUNK_COUNT_INVALID'));
+ assert.equal(out.result.state.workspaceGeneration,1);
+});

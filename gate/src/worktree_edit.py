@@ -38,12 +38,29 @@ RECOVER = {
 }
 
 
+# Fixed guidance only: never echo rejected patch content or host paths.
+PATCH_RECOVERY = {
+    "EDIT_PATCH_HEADER_INVALID": "Use plain unified diff: --- a/path followed by +++ b/path, then a hunk. Do not include Markdown fences or commentary.",
+    "EDIT_PATCH_LINE_MARKER_INVALID": "Prefix every hunk line with a space for unchanged context, - for removal, or + for addition. A blank context line still needs its leading space.",
+    "EDIT_PATCH_NO_NEWLINE_INVALID": "Place the exact no-newline marker only after a complete diff line. Prefer a small replacement when this notation is unnecessary.",
+    "EDIT_PATCH_HUNK_HEADER_INVALID": "Use @@ -old_start,old_count +new_start,new_count @@ with numeric positions and counts.",
+    "EDIT_PATCH_HUNK_COUNT_INVALID": "Recount each hunk: old_count = context plus removed lines; new_count = context plus added lines. Use a smaller hunk or a small worktree_edit replacement.",
+    "EDIT_PATCH_HUNK_RANGE_INVALID": "Nonempty old and new ranges use one-based line positions; zero is only valid for an empty range.",
+    "EDIT_PATCH_HUNK_REQUIRED_INVALID": "Each file header must be followed by at least one @@ hunk.",
+    "EDIT_PATCH_HUNK_ORDER_INVALID": "Order hunks by source position without overlap. Combine overlapping changes into one small hunk.",
+    "EDIT_PATCH_NEW_POSITION_INVALID": "Correct the new hunk start for the cumulative line-count changes of earlier hunks. Prefer one small hunk per patch.",
+}
+
+
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
 def fail(code):
-    return {"ok": False, "code": code, "executionState": "NOT_STARTED"}
+    result = {"ok": False, "code": code, "executionState": "NOT_STARTED"}
+    if code in PATCH_RECOVERY:
+        result["diagnostic"] = PATCH_RECOVERY[code]
+    return result
 
 
 def validate(arguments):
@@ -275,7 +292,7 @@ def mutation_authority(settings, record, diff):
 
 def _patch_path(header, prefix):
     if not header.startswith(prefix):
-        raise Refused("EDIT_PATCH_INVALID")
+        raise Refused("EDIT_PATCH_HEADER_INVALID")
     value = header[len(prefix) :].rstrip("\n")
     if "\t" in value:
         value = value.split("\t", 1)[0]
@@ -291,12 +308,12 @@ def _patch_path(header, prefix):
 
 def _patch_line(lines, index, marker):
     if not lines[index].startswith(marker):
-        raise Refused("EDIT_PATCH_INVALID")
+        raise Refused("EDIT_PATCH_LINE_MARKER_INVALID")
     value = lines[index][1:].encode("utf-8")
     index += 1
     if index < len(lines) and lines[index] == "\\ No newline at end of file\n":
         if not value.endswith(b"\n"):
-            raise Refused("EDIT_PATCH_INVALID")
+            raise Refused("EDIT_PATCH_NO_NEWLINE_INVALID")
         value = value[:-1]
         index += 1
     return value, index
@@ -325,7 +342,7 @@ def parse_patch(patch):
         ):
             index += 1
         if index + 1 >= len(lines) or not lines[index].startswith("--- "):
-            raise Refused("EDIT_PATCH_INVALID")
+            raise Refused("EDIT_PATCH_HEADER_INVALID")
         old_path = _patch_path(lines[index], "--- ")
         new_path = _patch_path(lines[index + 1], "+++ ")
         index += 2
@@ -335,7 +352,7 @@ def parse_patch(patch):
         while index < len(lines) and lines[index].startswith("@@ "):
             match = HUNK.fullmatch(lines[index])
             if not match:
-                raise Refused("EDIT_PATCH_INVALID")
+                raise Refused("EDIT_PATCH_HUNK_HEADER_INVALID")
             old_start, old_count, new_start, new_count = (
                 int(match.group(1)),
                 int(match.group(2) or 1),
@@ -349,16 +366,16 @@ def parse_patch(patch):
             ):
                 marker = lines[index][:1]
                 if marker not in (" ", "-", "+"):
-                    raise Refused("EDIT_PATCH_INVALID")
+                    raise Refused("EDIT_PATCH_LINE_MARKER_INVALID")
                 value, index = _patch_line(lines, index, marker)
                 if marker in (" ", "-"):
                     old_lines.append(value)
                 if marker in (" ", "+"):
                     new_lines.append(value)
             if len(old_lines) != old_count or len(new_lines) != new_count:
-                raise Refused("EDIT_PATCH_INVALID")
+                raise Refused("EDIT_PATCH_HUNK_COUNT_INVALID")
             if (old_count and old_start == 0) or (new_count and new_start == 0):
-                raise Refused("EDIT_PATCH_INVALID")
+                raise Refused("EDIT_PATCH_HUNK_RANGE_INVALID")
             entry["hunks"].append(
                 {
                     "old_start": old_start,
@@ -371,7 +388,7 @@ def parse_patch(patch):
             if hunks > MAX_PATCH_HUNKS:
                 raise Refused("EDIT_PATCH_TOO_LARGE")
         if not entry["hunks"]:
-            raise Refused("EDIT_PATCH_INVALID")
+            raise Refused("EDIT_PATCH_HUNK_REQUIRED_INVALID")
         files.append(entry)
         if len(files) > MAX_PATCH_FILES:
             raise Refused("EDIT_PATCH_TOO_LARGE")
@@ -411,14 +428,14 @@ def _candidate(entry, raw):
         if old and len(matches) != 1:
             raise Refused("EDIT_PATCH_CONTEXT_DUPLICATE")
         if expected < cursor:
-            raise Refused("EDIT_PATCH_INVALID")
+            raise Refused("EDIT_PATCH_HUNK_ORDER_INVALID")
         if expected > len(source):
             raise Refused("EDIT_PATCH_CONTEXT_STALE")
         if source[expected : expected + len(old)] != old:
             raise Refused("EDIT_PATCH_CONTEXT_STALE")
         next_start = expected + delta + (1 if hunk["new"] else 0)
         if hunk["new_start"] != next_start:
-            raise Refused("EDIT_PATCH_INVALID")
+            raise Refused("EDIT_PATCH_NEW_POSITION_INVALID")
         output.extend(source[cursor:expected])
         output.extend(hunk["new"])
         cursor = expected + len(old)

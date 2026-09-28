@@ -1,0 +1,12 @@
+[
+  {
+    "name": "persistence-wiring",
+    "goal": "Wire persistence into the actual UI. The owner-provided ui.test.js already fixes the unavailable JSDOM dependency and tests real UI behavior. Preserve that test environment; extend it for persistence only as needed. Read the relevant app files, resolve duplicate top-level constant names in storage.js versus logic.js, load storage.js before index.js, and connect startup load, save and clear. Keep controls usable on throwing storage access or failed writes/clears and show an honest visible warning. Preserve logic and protected tests. Run lint/build/test; make only necessary code changes.",
+    "required_files": ["index.html", "index.js", "ui.test.js", "storage.js"]
+  },
+  {
+    "name": "documentation",
+    "goal": "Read README.md and update only that file to accurately explain operation, reload/clear persistence, storage-error behavior and the available test command. Do not claim a browser check occurred. Do not reread or rewrite implementation that passed the previous checkpoint unless a new test failure requires it. Run the listed lint/build/test operations once for this checkpoint and finish only on host-validated evidence.",
+    "required_files": ["README.md"]
+  }
+]

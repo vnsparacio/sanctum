@@ -241,6 +241,45 @@ class ExactEdit(unittest.TestCase):
         self.assertIn(b"a.js", diff)
         self.assertIn(b"new.js", diff)
 
+    def test_patch_syntax_feedback_is_precise_private_and_nonmutating(self):
+        header = "--- a/a.js\n+++ b/a.js\n"
+        cases = [
+            ("HEADER", "PRIVATE_REJECTED_TEXT\n"),
+            ("HEADER", "--- a/a.js\nPRIVATE_REJECTED_TEXT\n"),
+            ("HUNK_HEADER", header + "@@ invalid PRIVATE_REJECTED_TEXT\n"),
+            ("LINE_MARKER", header + "@@ -1 +1 @@\nPRIVATE_REJECTED_TEXT\n"),
+            ("HUNK_COUNT", header + "@@ -1,2 +1 @@\n-PRIVATE_REJECTED_TEXT\n+new\n"),
+            ("HUNK_RANGE", header + "@@ -0 +1 @@\n-old\n+new\n"),
+            ("HUNK_REQUIRED", header),
+            ("NEW_POSITION", header + "@@ -1 +2 @@\n-  const x = 10;\n+new\n"),
+            (
+                "HUNK_ORDER",
+                header
+                + "@@ -2 +2 @@\n-\treturn x;\n+new\n@@ -1 +1 @@\n-  const x = 10;\n+new\n",
+            ),
+        ]
+        for reason, value in cases:
+            with self.subTest(reason=reason):
+                before = evidence.inventory(self.record["root"])
+                with patch.object(editor, "mutation_authority") as authority:
+                    result = self.patch(value, authorize=authority)
+                    authority.assert_not_called()
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["code"], f"EDIT_PATCH_{reason}_INVALID")
+                self.assertEqual(result["executionState"], "NOT_STARTED")
+                self.assertTrue(result["diagnostic"])
+                self.assertNotIn("PRIVATE_REJECTED_TEXT", json.dumps(result))
+                self.assertNotIn(str(self.root), json.dumps(result))
+                self.assertEqual(evidence.inventory(self.record["root"]), before)
+
+    def test_patch_count_correction_succeeds_without_relaxing_context(self):
+        bad = "--- a/a.js\n+++ b/a.js\n@@ -1,2 +1 @@\n-  const x = 10;\n+  const x = 20;\n"
+        self.assertEqual(self.patch(bad)["code"], "EDIT_PATCH_HUNK_COUNT_INVALID")
+        fixed = bad.replace("@@ -1,2 +1 @@", "@@ -1 +1 @@")
+        result = self.patch(fixed)
+        self.assertTrue(result["ok"], result)
+        self.assert_diff_receipt(result)
+
     def test_patch_accepts_exact_insertion_with_context_and_git_headers(self):
         value = """diff --git a/a.js b/a.js
 index 1234567..7654321 100644
