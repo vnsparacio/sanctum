@@ -484,3 +484,90 @@ test('review context exhaustion is reported without accepting completion',async(
  const result=await run({rows:[final],reviewer:async()=>{throw Error('model_context_limit');}});
  assert.equal(result.status,'BUDGET_EXHAUSTED');assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(result.state.review,null);
 });
+
+const progressNames=['worktree_read','worktree_edit','worktree_command'];
+const progressSchemas=workModeTools.filter(x=>progressNames.includes(x.name));
+const progressManifest=deriveCapabilityManifest({schemas:progressSchemas,declaredTools:progressNames,registeredTools:progressNames,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:progressNames}}});
+const syntheticRead=p=>({ok:true,data:{...(p.arguments.path?{path:p.arguments.path}:{}),text:'synthetic source',truncated:false},executionState:'COMPLETED',verifier:'VERIFIED'});
+const runProgress=({rows,requests=[],invoke=async({proposal:p})=>syntheticRead(p),egress=allowEgress,observeRead,evaluate=async()=>({passed:true}),reviewer}={})=>createWorkMode(workConfig({manifest:progressManifest,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress,invoke,observeRead,evaluate,reviewer})).run({task:'Complete a synthetic utility',scope,requestId,capabilities:progressNames,maxIterations:32,maxModelCalls:32});
+
+test('progress survives source eviction and preserves the edit-test-review completion path',async()=>{
+ const requests=[],rows=[proposal('worktree_edit',{operation:'create',path:'helper.js',new_text:'PRIVATE_SYNTHETIC_BODY'}),...Array.from({length:7},(_,i)=>proposal('worktree_read',{path:`file${i}.js`})),proposal('worktree_read',{path:'helper.js'}),proposal('worktree_edit',{operation:'replace',path:'helper.js',old_text:'old',new_text:'new'}),proposal('worktree_command',{operation:'test'})];
+ let observed=0,reviewed=0;
+ const result=await runProgress({rows,requests,observeRead:async()=>{observed++;return true;},reviewer:async()=>{reviewed++;return {verdict:'ACCEPT'};}});
+ assert.equal(result.status,'COMPLETE');assert.equal(observed,8);assert.equal(reviewed,1);
+ assert.ok(!requests[8].state.observations.some(x=>x.capability==='worktree_edit'));
+ assert.deepEqual(requests[8].state.progress.recentActions,[{capability:'worktree_edit',operation:'create',path:'helper.js',outcome:'SUCCEEDED',workspaceGeneration:1}]);
+ assert.ok(!JSON.stringify(requests[8].state.progress).includes('PRIVATE_SYNTHETIC_BODY'));
+ assert.equal(requests[8].state.tests.required,true);assert.deepEqual(requests[8].state.readRequired,['helper.js']);
+ assert.deepEqual(requests[9].state.readRequired,[]);
+ assert.equal(requests[10].state.progress.recentActions.at(-1).operation,'replace');
+ assert.equal(requests[10].state.tests.required,true);assert.deepEqual(requests[10].state.progress.inspectedFiles,[]);
+});
+
+test('repeated reads warn then stop before another inference, without skipping read mediation',async()=>{
+ const requests=[],rows=Array.from({length:12},()=>proposal('worktree_read',{path:'file.js'}));let reads=0,observed=0;
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>{reads++;return syntheticRead(p);},observeRead:async()=>{observed++;return true;},evaluate:async()=>{throw Error('stalled task must not evaluate');}});
+ assert.equal(result.status,'BLOCKED');assert.equal(result.reason,'WORKSPACE_INSPECTION_STALLED');
+ assert.equal(result.metrics.modelCalls,7);assert.equal(reads,7);assert.equal(observed,7);
+ assert.equal(requests[2].state.progress.guidance,null);assert.match(requests[3].state.progress.guidance,/one concrete edit/);
+ assert.equal(requests[6].state.progress.repeatedReads,5);assert.equal(result.state.progress.repeatedReads,6);
+ assert.equal(result.state.observations.length,1);assert.equal(result.state.observations[0].result.data.text,'synthetic source');
+});
+
+test('changed source and distinct files are not treated as unchanged rereading',async()=>{
+ for(const changed of [false,true]){
+  const requests=[],rows=[...Array.from({length:26},(_,i)=>proposal('worktree_read',{path:changed?'file.js':`file${i}.js`})),{kind:'ESCALATION',reason:'STOP'}];let sequence=0;
+  const result=await runProgress({rows,requests,invoke:async({proposal:p})=>{const value=syntheticRead(p);if(changed)value.data.text=`version ${sequence++}`;return value;}});
+  assert.equal(result.reason,'MODEL_ESCALATION');assert.equal(requests[26].state.progress.repeatedReads,0);
+  assert.equal(requests[26].state.progress.inspectedFiles.length,changed?1:24);
+  assert.equal(result.state.observations.length,changed?1:6);
+  if(changed)assert.equal(result.state.observations[0].result.data.text,'version 25');
+ }
+});
+
+test('disclosed edits and checks break a reading cycle without claiming failed validation passed',async()=>{
+ const requests=[],rows=[...Array.from({length:5},()=>proposal('worktree_read',{path:'file.js'})),proposal('worktree_edit',{operation:'replace',path:'file.js',old_text:'old',new_text:'new'}),...Array.from({length:5},()=>proposal('worktree_read',{path:'file.js'})),proposal('worktree_command',{operation:'test'}),proposal('worktree_read',{path:'file.js'}),{kind:'ESCALATION',reason:'STOP'}];
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:'COMMAND_FAILED',diagnostic:'MODULE_NOT_FOUND'},executionState:'COMPLETED',verifier:'REJECTED'}:syntheticRead(p),evaluate:async()=>{throw Error('failed tests cannot complete');}});
+ assert.equal(result.reason,'MODEL_ESCALATION');
+ for(const i of [6,12,13])assert.equal(requests[i].state.progress.repeatedReads,0);
+ assert.equal(requests[12].state.progress.recentActions.at(-1).outcome,'FAILED');assert.equal(requests[12].state.lastTest.code,'DEPENDENCY_UNAVAILABLE');
+ assert.equal(requests[12].state.tests.passed,false);assert.equal(requests[6].state.tests.required,true);
+});
+
+test('withheld, omitted and failed reads add no progress memory or duplicate-read stop',async()=>{
+ for(const variant of ['denied','omitted','failed']){
+  const requests=[],rows=[proposal('worktree_edit',{operation:'create',path:'hidden.js',new_text:'PRIVATE_BODY'}),...Array.from({length:9},()=>proposal('worktree_read',{path:'hidden.js'})),{kind:'ESCALATION',reason:'STOP'}];
+  const result=await runProgress({rows,requests,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async({proposal:p})=>variant==='failed'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:{...syntheticRead(p),data:{path:p.arguments.path,text:'x'.repeat(13000)}}});
+  assert.equal(result.reason,'MODEL_ESCALATION');
+  for(const request of requests){assert.deepEqual(request.state.progress.recentActions,[]);assert.deepEqual(request.state.progress.inspectedFiles,[]);assert.equal(request.state.progress.repeatedReads,0);}
+ }
+});
+
+test('progress retains only twelve fixed action summaries and survives request-byte fitting',async()=>{
+ const requests=[],rows=[...Array.from({length:14},(_,i)=>proposal('worktree_edit',{operation:'create',path:`file${i}.js`,new_text:'BODY_NOT_A_SUMMARY'})),...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i}.js`})),{kind:'ESCALATION',reason:'STOP'}];
+ let fitted;
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>({...syntheticRead(p),data:{path:p.arguments.path,text:'界'.repeat(2000)}})});
+ assert.equal(result.reason,'MODEL_ESCALATION');const context=requests.at(-1);
+ assert.equal(context.state.progress.recentActions.length,12);assert.equal(context.state.progress.recentActions[0].path,'file2.js');
+ const packet=privateLeadPacket('profile',{messages:[{role:'system',content:'fixed'},{role:'user',content:canonical(context)}]},20000);
+ fitted=JSON.parse(packet.request.messages[1].content);
+ assert.deepEqual(fitted.state.progress,context.state.progress);assert.ok(fitted.state.observations.length<context.state.observations.length);
+ assert.ok(!JSON.stringify(fitted.state.progress).includes('BODY_NOT_A_SUMMARY'));assert.ok(!JSON.stringify(fitted.state.progress).includes('contentDigest'));
+});
+
+test('alternating unchanged files and failed edits cannot erase the repeat counter',async()=>{
+ const requests=[],rows=[...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i%2}.js`})),proposal('worktree_edit',{operation:'replace',path:'file0.js',old_text:'old',new_text:'new'}),...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i%2}.js`}))];
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>p.capability==='worktree_edit'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:syntheticRead(p)});
+ assert.equal(result.reason,'WORKSPACE_INSPECTION_STALLED');assert.equal(result.metrics.modelCalls,9);
+ assert.equal(requests[5].state.progress.repeatedReads,3);assert.equal(requests[6].state.progress.repeatedReads,3);
+ assert.deepEqual(requests[6].state.progress.recentActions,[]);assert.equal(result.state.observations.filter(x=>x.capability==='worktree_read').length,2);
+});
+
+test('a failed or omitted read does not supersede the last disclosed successful source',async()=>{
+ for(const variant of ['failed','omitted']){
+  let sequence=0;const requests=[],rows=[proposal('worktree_read',{path:'file.js'}),proposal('worktree_read',{path:'file.js'}),{kind:'ESCALATION',reason:'STOP'}];
+  await runProgress({rows,requests,invoke:async({proposal:p})=>sequence++===0?syntheticRead(p):variant==='failed'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:{...syntheticRead(p),data:{path:'file.js',text:'x'.repeat(13000)}}});
+  assert.equal(requests[2].state.observations.length,2);assert.equal(requests[2].state.observations[0].result.data.text,'synthetic source');assert.equal(requests[2].state.progress.repeatedReads,0);
+ }
+});
