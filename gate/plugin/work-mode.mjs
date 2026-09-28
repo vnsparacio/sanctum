@@ -156,7 +156,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      if(reviewer&&!state.reviewUsed){
        state.phase='REVIEW';state.reviewUsed=true;const reviewDeadline=callDeadline();let critique;
        try{critique=await reviewer({task,state:structuredClone(state),claim,evidence,signal:reviewDeadline.signal});}
-       catch{return {terminal:stop(signal?.aborted?'BLOCKED':reviewDeadline.timedOut()?'BUDGET_EXHAUSTED':'ENVIRONMENT_FAILURE',signal?.aborted?'OWNER_CANCELLED':reviewDeadline.timedOut()?'TASK_TIME_BUDGET':'REVIEWER_UNAVAILABLE')};}
+       catch(error){if(error?.message==='model_context_limit'&&!signal?.aborted&&!reviewDeadline.timedOut())return {terminal:stop('BUDGET_EXHAUSTED','MODEL_CONTEXT_LIMIT')};return {terminal:stop(signal?.aborted?'BLOCKED':reviewDeadline.timedOut()?'BUDGET_EXHAUSTED':'ENVIRONMENT_FAILURE',signal?.aborted?'OWNER_CANCELLED':reviewDeadline.timedOut()?'TASK_TIME_BUDGET':'REVIEWER_UNAVAILABLE')};}
        finally{reviewDeadline.dispose();}
        guarded=guardedStop();if(guarded)return {terminal:guarded};
        if(!critique||!['ACCEPT','REVISE','REJECT'].includes(critique.verdict))return {terminal:stop('ENVIRONMENT_FAILURE','REVIEW_SCHEMA')};
@@ -194,6 +194,7 @@ export function createWorkMode({reasoner,manifest,invoke,authorize=policyDecisio
      const modelDeadline=callDeadline();let result;
      try{result=await reasoner.invoke(request,modelDeadline.signal);state.modelCalls++;emit('MODEL_CALL',{resultKind:result.kind});}
      catch(error){
+       if(error?.message==='model_context_limit'&&!signal?.aborted&&!modelDeadline.timedOut())return stop('BUDGET_EXHAUSTED','MODEL_CONTEXT_LIMIT');
        if(error?.diagnostic){try{emit('PROTOCOL_DIAGNOSTIC',{diagnostic:sanitizeProtocolDiagnostic(error.diagnostic),schemaDigest:semantic.schemaDigest,semanticSchemaDigest:semantic.semanticSchemaDigest});}catch{return stop('ENVIRONMENT_FAILURE','LEDGER_UNAVAILABLE');}}
        if(error?.diagnostic?.stage==='STREAM'&&error.diagnostic.streamStatus==='INCOMPLETE'&&error.diagnostic.finishStatus==='length'&&!signal?.aborted&&!modelDeadline.timedOut())return stop('BUDGET_EXHAUSTED','MODEL_OUTPUT_LIMIT');
        if(error?.message==='structured_decoding_unavailable'&&!signal?.aborted&&!modelDeadline.timedOut()){
