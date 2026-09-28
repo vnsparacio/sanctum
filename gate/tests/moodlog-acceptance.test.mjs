@@ -43,6 +43,8 @@ test('post-UI MoodLog plan uses the repaired Node-only test environment',()=>{
  assert.deepEqual(plan.map(x=>x.name),['persistence-wiring','documentation']);
  for(const checkpoint of plan)assert.ok(checkpoint.task.length<=4000);
  assert.ok(stages[0].required_files.includes('ui.test.js'));
+ assert.ok(stages[0].required_files.includes('logic.js'));
+ assert.ok(stages[0].required_files.includes('storage.js'));
  const fixture=readFileSync(new URL('../qualification/moodlog/ui.test.js',import.meta.url),'utf8');
  const imports=[...fixture.matchAll(/^import .* from '([^']+)';$/gm)].map(x=>x[1]);
  assert.deepEqual(imports,['node:test','node:assert/strict','node:fs','node:vm']);
