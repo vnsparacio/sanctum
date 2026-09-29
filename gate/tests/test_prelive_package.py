@@ -25,6 +25,7 @@ class PackageClosure(unittest.TestCase):
         required = {
             "worker.py",
             "src/task_evidence.py",
+            "src/qwen_snapshot.py",
             "runtime/protected-test-driver.cjs",
             "runtime/protected-test-preload.cjs",
             "src/experiment.py",

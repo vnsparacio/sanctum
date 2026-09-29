@@ -8,6 +8,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
+import qwen_snapshot
 import task_evidence
 import worktree_edit
 from authority import authorize
@@ -180,6 +181,19 @@ def _execute(b, settings, remote=None, lifecycle=None):
         return {
             "status": "OK",
             "result": worktree_edit.apply_patch(settings, record, p["patch"]),
+        }
+    if op in ("worktree_qwen_export", "worktree_qwen_import"):
+        p = b["packet"]
+        record = work_record(settings, scope)
+        if record["profile"] != p["profile"]:
+            raise Refused("worktree_profile_mismatch")
+        return {
+            "status": "OK",
+            "result": (
+                qwen_snapshot.export(settings, record)
+                if op == "worktree_qwen_export"
+                else qwen_snapshot.import_output(settings, record)
+            ),
         }
     if op == "worktree_command":
         p = b["packet"]

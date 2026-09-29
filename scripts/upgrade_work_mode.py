@@ -28,6 +28,7 @@ spec.loader.exec_module(op)
 FILES = (
     "src/common.py",
     "src/worktree_edit.py",
+    "src/qwen_snapshot.py",
     "src/task_evidence.py",
     "runtime/protected-test-driver.cjs",
     "runtime/protected-test-preload.cjs",
