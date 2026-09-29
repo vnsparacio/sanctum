@@ -77,14 +77,58 @@ managed hold. To check cleanup, run the installed
 zero leases and zero active requests; also confirm the owner account has no
 managed pod. Persistent model storage is retained.
 
+## VS Code GUI
+
+Qwen Code also has a VS Code sidebar. The reviewed GUI path uses VS Code 1.96+
+and Qwen Code Companion 0.24.6. The extension bundles its own Qwen process;
+opening VS Code directly does **not** start Sanctum's bridge. Launch each coding
+session with `qwen-gui` so the extension inherits a short-lived loopback token.
+The bridge starts the GPU on the first message to the Sanctum private model and
+releases the hold when that VS Code window closes. The GUI has the same direct
+Mac project permissions as the terminal path, not Work Mode isolation.
+
+After merging the GUI source PR into `v1.3-dev`, install VS Code from its official
+distribution (or `brew install --cask visual-studio-code`). Then, from the
+canonical checkout, run:
+
+```sh
+.venv/bin/python -B scripts/qwen_gui.py --install \
+  --sanctum-prefix /absolute/private/prefix
+cd /path/to/your/project
+qwen-gui
+```
+
+The installer creates an owner-only VS Code profile under the private prefix,
+pins the Companion extension, disables its automatic extension updates in that
+profile, and writes `~/.local/bin/qwen-gui`. In VS Code, choose the Qwen icon or
+`Qwen Code: Open`, then select **Sanctum private 122B (Runpod on demand)** in the
+model picker. Merely opening the GUI or selecting the model does not allocate a
+GPU. Close the `qwen-gui` window to release the hold. Keep the launching terminal
+open until the window closes; if it is interrupted, the independent janitor
+remains the recovery owner. Avoid opening the dedicated GUI profile from another
+VS Code process because it would not inherit the bridge token.
+
+GUI source contracts cover the pinned extension, token inheritance, model hold
+cleanup, and extension update settings. On the owner Mac, VS Code 1.139.1 with
+Companion 0.24.6 completed a synthetic local GUI model turn. The extension
+inherited the bridge token, displayed the mock answer, and closing the window
+closed the bridge without allocating a GPU. A separate, single owner-approved
+private-model GUI prompt then returned the expected answer. Closing the window
+ended the hold; Sanctum reported `OFFLINE`, zero leases and zero active requests,
+and the Runpod account reported zero pods. No retry was made. The direct GUI
+bridge does not populate the lifecycle's `first_inference_at` field, so the GUI
+answer is the inference evidence. Raw prompt and private run evidence remain
+under the external owner prefix.
+
 ## Qualification state
 
 The installed Qwen CLI and the provider entry have been tested against a local
 synthetic streaming endpoint. Contract tests cover static model listing, local
-authentication, model identity, single hold startup, and clean hold exit. A
-billable live interactive call through the new bridge remains to be observed.
-Historical headless MoodLog and Work Mode results do not qualify this direct
-Mac coding path.
+authentication, model identity, single hold startup, and clean hold exit. The
+VS Code GUI has now completed one live private-model call through that bridge
+with confirmed managed GPU cleanup. The terminal interface has not had a
+separate live private-model turn. Historical headless MoodLog and Work Mode
+results do not qualify this direct Mac coding path.
 
 Official references: [Qwen model providers](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/model-providers/),
 [Qwen tools](https://qwenlm.github.io/qwen-code-docs/en/developers/tools/introduction/),
