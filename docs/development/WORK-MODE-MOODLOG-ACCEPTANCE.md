@@ -7,6 +7,12 @@ The later owner-seeded baseline has repaired UI tests, but still needs Qwen to
 integrate persistence. Continue that exact preserved baseline; full autonomous
 acceptance is still open.
 
+The [fourth isolated Qwen Code proof](../history/v1.3/WORK-MODE-QWEN-CODE-FOURTH-ISOLATED-POC.md)
+did integrate persistence unassisted and passed the ordinary and protected tests
+plus observed browser save/clear/reload behavior. It ran on a disposable snapshot
+outside Sanctum Work Mode. Host task authorization, import, evaluator, reviewer,
+receipt, and Human Review acceptance remain open.
+
 ## Current continuation after the JSDOM repair
 
 The [first bounded unassisted post-UI run](../history/v1.3/WORK-MODE-UNASSISTED-INSPECTION-RETRY.md)
