@@ -58,8 +58,10 @@ PATTERNS = {
 
 def scan(root=ROOT):
     issues = []
+    found = set()
     for p in sources(root):
         rel = str(p.relative_to(root))
+        found.add(rel)
         if p.is_symlink():
             issues.append((rel, "symlink"))
             continue
@@ -85,6 +87,17 @@ def scan(root=ROOT):
             for label, pattern in PATTERNS.items():
                 if re.search(pattern, text):
                     issues.append((rel, label))
+    manifest_path = root / "SOURCE-MANIFEST.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            if not isinstance(manifest, dict):
+                raise ValueError("invalid manifest")
+        except (OSError, ValueError):
+            issues.append(("SOURCE-MANIFEST.json", "invalid source manifest"))
+        else:
+            for name in sorted(found - set(manifest) - {"SOURCE-MANIFEST.json"}):
+                issues.append((name, "unlisted source"))
     return issues
 
 

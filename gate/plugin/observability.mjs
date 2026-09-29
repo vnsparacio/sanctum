@@ -121,7 +121,7 @@ export function currentTraceContext(){
  try{const value=trace.getSpan(context.active())?.spanContext();return value&&trace.isSpanContextValid(value)?{traceId:value.traceId,spanId:value.spanId}:{traceId:null,spanId:null};}catch{return {traceId:null,spanId:null};}
 }
 
-export function initializeObservability({env=process.env,serviceVersion=packageVersion,gitCommit=null,start=splunkStart,stop:splunkStop}={}){
+export function initializeObservability({env=process.env,serviceVersion=packageVersion,gitCommit=null,start=splunkStart,stop=splunkStop}={}){
  if(env.SANCTUM_O11Y_ENABLED!=='1')return createObservability({enabled:false});
  const realm=safeString(env.SPLUNK_REALM),token=typeof env.SPLUNK_ACCESS_TOKEN==='string'&&env.SPLUNK_ACCESS_TOKEN.trim()?env.SPLUNK_ACCESS_TOKEN:null;
  const serviceName=safeString(env.OTEL_SERVICE_NAME)??'sanctum-gateway';
@@ -142,7 +142,8 @@ export function gatewayObservability(options={}){
 }
 
 export async function boundedShutdown(observability,timeoutMs=2000){
- try{let timer;await Promise.race([Promise.resolve(observability?.shutdown?.()).catch(()=>{}),new Promise(resolve=>{timer=setTimeout(resolve,timeoutMs);timer.unref?.();})]);clearTimeout(timer);}catch{}
+ let timer;
+ try{await Promise.race([Promise.resolve(observability?.shutdown?.()).catch(()=>{}),new Promise(resolve=>{timer=setTimeout(resolve,timeoutMs);})]);}catch{}finally{clearTimeout(timer);}
 }
 
 export const observabilityPolicy={spanNames:SPAN_NAMES,spanAttributes:SPAN_ATTRIBUTES,resourceAttributes:RESOURCE_ATTRIBUTES,sourceNeeds:SOURCE_NEEDS};

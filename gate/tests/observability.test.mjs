@@ -75,9 +75,10 @@ test('startup, exporter, and bounded flush failures never change application res
 });
 
 test('supported Splunk startup receives only manual signals and safe resources',async()=>{
- let options;const env={SANCTUM_O11Y_ENABLED:'1',SPLUNK_REALM:'us0',SPLUNK_ACCESS_TOKEN:'private-value',OTEL_SERVICE_NAME:'sanctum-gateway',OTEL_RESOURCE_ATTRIBUTES:'deployment.environment.name=development,host.name=sanctum-authority-mac,unapproved=FAKE_SECRET_DO_NOT_EXPORT'};
- const value=initializeObservability({env,serviceVersion:'1.1.0',gitCommit:'a'.repeat(40),start:selected=>{options=selected;},stop:async()=>{}});assert.equal(value.enabled,true);assert.equal(options.serviceName,'sanctum-gateway');assert.deepEqual(options.tracing.instrumentations,[]);assert.equal(options.profiling,false);assert.equal(options.logging,false);assert.equal(options.metrics.runtimeMetricsEnabled,false);
+ let options,stops=0;const env={SANCTUM_O11Y_ENABLED:'1',SPLUNK_REALM:'us0',SPLUNK_ACCESS_TOKEN:'private-value',OTEL_SERVICE_NAME:'sanctum-gateway',OTEL_RESOURCE_ATTRIBUTES:'deployment.environment.name=development,host.name=sanctum-authority-mac,unapproved=FAKE_SECRET_DO_NOT_EXPORT'};
+ const value=initializeObservability({env,serviceVersion:'1.1.0',gitCommit:'a'.repeat(40),start:selected=>{options=selected;},stop:async()=>{stops++;}});assert.equal(value.enabled,true);assert.equal(options.serviceName,'sanctum-gateway');assert.deepEqual(options.tracing.instrumentations,[]);assert.equal(options.profiling,false);assert.equal(options.logging,false);assert.equal(options.metrics.runtimeMetricsEnabled,false);
  const attributes=options.resource().attributes;assert.equal(attributes['host.name'],'sanctum-authority-mac');assert.equal(attributes['deployment.environment'],'development');assert.equal(attributes['deployment.environment.name'],'development');assert.equal(attributes['service.version'],'1.1.0');assert.equal(attributes.unapproved,undefined);assert.equal(JSON.stringify(attributes).includes('FAKE_SECRET_DO_NOT_EXPORT'),false);
+ await boundedShutdown(value,20);assert.equal(stops,1);
 });
 
 test('default service version comes from the dependency package anchor',()=>{

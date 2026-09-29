@@ -12,6 +12,7 @@ from unittest.mock import patch
 from sanctum_agents.git_control_plane import (
     GitControlError,
     GitControlPlane,
+    GitOperationTimeout,
     UnknownGitResult,
 )
 
@@ -331,7 +332,7 @@ class GitControlPlaneTests(unittest.TestCase):
             if phase == "after_commit":
                 from sanctum_agents import git_control_plane
 
-                raise git_control_plane._InjectedAmbiguity("synthetic lost reply")
+                raise git_control_plane.GitOperationTimeout("synthetic lost reply")
 
         broker = self.broker(fault_injector=fault)
         broker.prepare()
@@ -359,7 +360,7 @@ class GitControlPlaneTests(unittest.TestCase):
             if phase == "after_push":
                 from sanctum_agents import git_control_plane
 
-                raise git_control_plane._InjectedAmbiguity("synthetic lost reply")
+                raise git_control_plane.GitOperationTimeout("synthetic lost reply")
 
         broker = self.broker(fault_injector=fault)
         broker.prepare()
@@ -383,6 +384,20 @@ class GitControlPlaneTests(unittest.TestCase):
         broker.commit("Prepare changed push intent", ["docs.md"], "second-commit")
         with self.assertRaisesRegex(GitControlError, "different push request"):
             broker.push("stable-push-operation")
+
+    def test_push_base_check_timeout_is_a_broker_error(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("timeout before push\n")
+        broker.commit("Prepare timeout test", ["docs.md"], "timeout-commit")
+        with patch.object(
+            broker,
+            "_require_base_unchanged",
+            side_effect=GitOperationTimeout("Git operation timed out"),
+        ):
+            with self.assertRaises(GitControlError) as raised:
+                broker.push("timeout-push")
+        self.assertEqual("git_timeout", raised.exception.code)
 
     def test_push_detects_base_advancement_before_remote_mutation(self):
         broker = self.broker()
@@ -612,7 +627,7 @@ class GitControlPlaneTests(unittest.TestCase):
                 creates += 1
                 from sanctum_agents import git_control_plane
 
-                raise git_control_plane._InjectedAmbiguity("synthetic lost response")
+                raise git_control_plane.GitOperationTimeout("synthetic lost response")
             raise AssertionError(arguments)
 
         with patch.object(broker, "_gh", side_effect=ambiguous_create):

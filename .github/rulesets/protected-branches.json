@@ -58,6 +58,14 @@
             "integration_id": 15368
           },
           {
+            "context": "JavaScript lint",
+            "integration_id": 15368
+          },
+          {
+            "context": "Gate JavaScript / Node 22",
+            "integration_id": 15368
+          },
+          {
             "context": "Plugin build and manifests",
             "integration_id": 15368
           },
@@ -75,6 +83,10 @@
           },
           {
             "context": "Contracts / MCP containment",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Router regressions",
             "integration_id": 15368
           },
           {

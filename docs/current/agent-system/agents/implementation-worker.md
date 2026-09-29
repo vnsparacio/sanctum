@@ -69,12 +69,15 @@ Symphony starts a continuation attempt or the service restarts. This makes the
 limits span normal continuation attempts and service restarts rather than
 relying on Symphony's per-worker `max_turns` alone.
 
-The standard implementation envelope is one concurrent issue, six hours total
-elapsed time, 40 aggregate turns, 8,000,000 aggregate reported tokens, three
+The standard implementation envelope allows at most five concurrent issues in
+one Symphony service. Each issue has six hours total elapsed time, 40 aggregate
+turns, 8,000,000 aggregate reported tokens, three
 retries, 16 MiB of service output, and a 30-second state-API grace period. The
 deep envelope is eight hours, 60 aggregate turns, and 12,000,000 tokens with
 the same concurrency and retry bounds. Symphony separately owns a 60-minute
-turn timeout and 15-minute worker silence timeout. A violation terminates the
+turn timeout and 15-minute worker silence timeout. The service itself has a
+six-hour standard or eight-hour deep wall-clock limit, including idle time.
+A violation terminates the
 whole process group, leaves Linear state untouched, exits with code 75, and
 creates a private incident receipt containing the exact observed value and
 limit.
@@ -98,7 +101,7 @@ export LINEAR_API_KEY=... # set locally; never paste or commit it
 
 Pass `--worker-class deep` to both commands only for an issue carrying
 `agent-deep`. Standard is the default. Both classes share the same exclusive
-lock, so implementation concurrency remains one.
+lock, so standard and deep services cannot run together. One service may run up to five implementation workers.
 
 `SANCTUM_SYMPHONY_BIN` should point to the inspected external reference checkout
 or a reviewed signed standalone binary; no owner-home path is frozen into

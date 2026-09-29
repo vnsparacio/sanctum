@@ -1824,6 +1824,51 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             self.assertEqual("turns_budget", incident["violations"][0]["reason"])
             self.assertFalse(incident["linear_state_changed"])
 
+    def test_supervisor_stops_idle_service_at_total_wall_clock_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                state_port = probe.getsockname()[1]
+            binary = root / "fake-symphony"
+            binary.write_text("#!/bin/sh\nsleep 30\n")
+            binary.chmod(0o700)
+            raw = json.loads(CONFIG.read_text())
+            raw["roles"]["implementation"]["wall_clock_seconds"] = 1
+            raw["symphony"]["default_binary"] = str(binary)
+            raw["symphony"]["state_port"] = state_port
+            raw["symphony"]["poll_seconds"] = 1
+            config_path = root / "source/config/agents.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(json.dumps(raw))
+            config = load_config(config_path)
+            github_config = root / "github-config"
+            github_config.mkdir(mode=0o700)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\nexit 0\n")
+            gh.chmod(0o700)
+            prefix = root / "private-agents"
+            result = supervise(
+                config,
+                ROOT,
+                {
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "LINEAR_API_KEY": "synthetic-test-token",
+                    "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                    "SANCTUM_AGENT_PREFIX": str(prefix),
+                    "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                },
+            )
+            self.assertEqual(75, result)
+            incident = json.loads(
+                next((prefix / "incidents").glob("*.json")).read_text()
+            )
+            self.assertEqual(
+                "service_wall_clock_budget", incident["violations"][0]["reason"]
+            )
+
 
 class ReviewerTests(unittest.TestCase):
     def fixture(self) -> dict[str, object]:

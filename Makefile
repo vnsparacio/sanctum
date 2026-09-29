@@ -1,6 +1,6 @@
 PYTHON ?= .venv/bin/python
 PREFIX ?= $(CURDIR)/.local
-.PHONY: deps build ensure-build setup doctor up status logs start ready stop format format-check lint test test-gate test-gate-js test-gate-python test-reliability test-mcp test-plugins test-release test-agents down uninstall audit verify-source
+.PHONY: deps build ensure-build setup doctor up status logs start ready stop format format-check lint lint-js test test-gate test-gate-js test-gate-python test-reliability test-mcp test-router test-plugins test-release test-agents down uninstall audit verify-source
 
 deps:
 	npm ci --ignore-scripts
@@ -21,6 +21,8 @@ format-check:
 	$(PYTHON) -m black --check .
 lint:
 	$(PYTHON) -m ruff check .
+lint-js:
+	./node_modules/.bin/eslint gate reliability scripts
 test: ensure-build
 	$(PYTHON) -B scripts/test.py all
 test-gate:
@@ -33,6 +35,8 @@ test-reliability: ensure-build
 	$(PYTHON) -B scripts/test.py reliability
 test-mcp:
 	$(PYTHON) -B scripts/test.py mcp
+test-router:
+	$(PYTHON) -B scripts/test.py router
 test-plugins:
 	$(PYTHON) -B scripts/test.py plugins
 test-release: ensure-build
