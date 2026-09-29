@@ -243,6 +243,48 @@ class QwenSnapshot(unittest.TestCase):
                 self.refused_any(lambda: check({**body, **change}))
             self.assertEqual(check(body)["operation"], operation)
 
+    def test_qwen_run_route_requires_exact_task_goal_and_no_host_path(self):
+        body = {
+            "operation": "worktree_qwen_run",
+            "tier": "PRIVATE_LEAD",
+            "packet": {
+                "task_id": "a" * 32,
+                "profile": "synthetic",
+                "goal": "Fix MoodLog",
+            },
+            "state": {
+                "scope": "a" * 32,
+                "revision": 0,
+                "privacy_floor": "PERSONAL",
+                "high_stakes": False,
+            },
+            "nonce": os.urandom(32).hex(),
+            "expires": 200,
+            "spec_sha256": "f" * 64,
+            "scope": "a" * 32,
+            "approval": "private_lead_workmode",
+            "strong": False,
+        }
+
+        def check(value):
+            raw = canonical(value)
+            signed = {
+                "body": raw,
+                "mac": hmac.new(self.key, raw.encode(), hashlib.sha256).hexdigest(),
+            }
+            return authorize(
+                signed, self.settings, now=lambda: 100, settings_hash="f" * 64
+            )
+
+        for packet in (
+            {**body["packet"], "workspace": "/tmp/forged"},
+            {**body["packet"], "task_id": "b" * 32},
+            {**body["packet"], "goal": ""},
+            {**body["packet"], "goal": "x" * 32769},
+        ):
+            self.refused_any(lambda: check({**body, "packet": packet}))
+        self.assertEqual(check(body)["operation"], "worktree_qwen_run")
+
     def refused_any(self, fn):
         with self.assertRaises(Refused):
             fn()

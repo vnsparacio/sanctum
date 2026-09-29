@@ -62,18 +62,22 @@ export function headlineSourceCard(pack,view,question){
 }
 export const executorDeadlineSeconds=(body,settings)=>body.packet?.experiment
   ?Math.max(0,body.packet.experiment.deadline-Date.now()/1000-120)
+  :body.operation==='worktree_qwen_run'?2520
   :body.operation==='private_lead_propose'
     ?Math.min((settings.private_lead?.readiness_seconds??2700)+(settings.request_deadline_seconds??120),3000)
     :body.operation==='infer'&&body.tier==='PRIVATE_80B'?settings.request_deadline_seconds:ORDINARY_EXECUTOR_DEADLINE_SECONDS;
 
 export function createExecutor(base,settings,key){
   return (body,signal)=>new Promise(resolveResult=>{
-    let child,timer,killTimer,settled=false,output=Buffer.alloc(0);
+    let child,timer,killTimer,settled=false,aborting=false,output=Buffer.alloc(0);
     const finish=result=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);resolveResult(result);};
     const abort=()=>{
+      if(aborting)return;
+      aborting=true;
       // Terminate the worker first so it can unwind leases and reconcile. Its
       // subprocess group is force-stopped only if cleanup exceeds the grace.
-      if(child?.pid){try{child.kill('SIGTERM');}catch{};killTimer=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},20000);killTimer.unref();}
+      if(child?.pid){try{child.kill('SIGTERM');}catch{};killTimer=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},body.operation==='worktree_qwen_run'?120000:20000);killTimer.unref();}
+      if(body.operation==='worktree_qwen_run'&&child?.pid)return;
       finish({status:'UNAVAILABLE',reason:'cancelled'});
     };
     if(body.tier==='PRIVATE_80B'&&!['status','close','stop','sweep'].includes(body.operation))return finish({status:'UNAVAILABLE',reason:'private_80b_retired'});
@@ -87,7 +91,7 @@ export function createExecutor(base,settings,key){
       child=spawn(settings.python,['-B',resolve(base,'worker.py')],{stdio:['pipe','pipe','ignore'],detached:true,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});
       child.on('error',()=>finish({status:'UNAVAILABLE'}));child.stdin.on('error',abort);
       child.stdout.on('data',chunk=>{output=Buffer.concat([output,chunk]);if(output.length>100000)abort();});
-      child.on('close',()=>{clearTimeout(killTimer);try{finish(JSON.parse(output.toString('utf8')));}catch{finish({status:'UNAVAILABLE'});}});
+      child.on('close',()=>{clearTimeout(killTimer);if(aborting)return finish({status:'UNAVAILABLE',reason:'cancelled'});try{finish(JSON.parse(output.toString('utf8')));}catch{finish({status:'UNAVAILABLE'});}});
       child.stdin.end(envelope);
     }catch{finish({status:'UNAVAILABLE'});}
   });

@@ -29,6 +29,7 @@ FILES = (
     "src/common.py",
     "src/worktree_edit.py",
     "src/qwen_snapshot.py",
+    "src/qwen_runner.py",
     "src/task_evidence.py",
     "runtime/protected-test-driver.cjs",
     "runtime/protected-test-preload.cjs",
@@ -86,6 +87,7 @@ FILES = (
     "plugin/work-mode.mjs",
     "plugin/work-command.mjs",
     "plugin/work-stages.mjs",
+    "plugin/qwen-work-mode.mjs",
     "plugin/work-trace.mjs",
     "foundation/decision-note.mjs",
     "plugin/command-broker.mjs",
@@ -99,6 +101,10 @@ FILES = (
     "runtime/bootstrap-private-lead-vllm.sh",
     "runtime/work-runner.json",
     "runtime/work-runner.Dockerfile",
+    "runtime/qwen-headless-broker.mjs",
+    "runtime/qwen-code-image/Dockerfile",
+    "runtime/qwen-code-image/package.json",
+    "runtime/qwen-code-image/package-lock.json",
     "webui/bridge.mjs",
     "webui/pipe.py",
 )
@@ -256,6 +262,38 @@ def docker_details():
     return str(Path(docker).resolve()), host, tag, image
 
 
+def qwen_image_details(docker):
+    """Build the separately pinned coding-agent image for an opt-in profile."""
+    tag = "sanctum-qwen-code:0.24.6-workmode"
+    source = ROOT / "gate/runtime/qwen-code-image"
+    subprocess.run(
+        [
+            docker,
+            "build",
+            "--pull",
+            "--platform",
+            "linux/arm64",
+            "--tag",
+            tag,
+            "--file",
+            str(source / "Dockerfile"),
+            str(source),
+        ],
+        check=True,
+        timeout=1800,
+    )
+    image = subprocess.run(
+        [docker, "image", "inspect", "--format", "{{.Id}}", tag],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    ).stdout.strip()
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+        raise ValueError("Qwen runner image identity unavailable")
+    return tag, image
+
+
 def rendered_settings(prefix):
     data = (ROOT / "gate/SETTINGS.json").read_text()
     for old, new in {
@@ -361,7 +399,7 @@ def openclaw_config(prefix):
     return json.dumps(value, indent=2) + "\n"
 
 
-def work_profile(prefix, docker, host, tag, image):
+def work_profile(prefix, docker, host, tag, image, qwen_tag=None, qwen_image=None):
     qualification_spec = importlib.util.spec_from_file_location(
         "qualification_contract", ROOT / "gate/qualify_work_mode.py"
     )
@@ -385,6 +423,11 @@ def work_profile(prefix, docker, host, tag, image):
         "docker_host": host,
         "runner_image": tag,
         "runner_image_id": image,
+        **(
+            {"qwen_runner_image": qwen_tag, "qwen_runner_image_id": qwen_image}
+            if qwen_tag and qwen_image
+            else {}
+        ),
         "runner_user": f"{os.getuid()}:{os.getgid()}",
         "platform": "linux/arm64",
         "timeout_seconds": 120,
@@ -457,7 +500,20 @@ def preserve_registered_profiles(prefix, rendered):
         raise ValueError("Missing reviewed Work Mode profile")
     binding = {"repository", "staging_root", "task_protection", "stages"}
     budgets = {"max_iterations": 32, "max_model_calls": 32, "max_tokens": 200000}
-    ignored = binding | set(budgets)
+    ignored = (
+        binding
+        | set(budgets)
+        | {
+            "engine",
+            "qwen_runner_image",
+            "qwen_runner_image_id",
+            "qwen_model_calls",
+            "qwen_tool_calls",
+            "qwen_wall_seconds",
+            "qwen_outer_seconds",
+            "qwen_retries",
+        }
+    )
     for name, profile in previous.items():
         if name in current:
             continue
@@ -485,12 +541,17 @@ def preserve_registered_profiles(prefix, rendered):
             or repo.stat().st_mode & 0o077
         ):
             raise ValueError("Unsafe registered Work Mode binding")
+        compared = ignored | (
+            {"max_gpu_seconds", "max_cost_usd"}
+            if profile.get("engine") == "qwen_code"
+            else set()
+        )
         matches = [
             base
             for base, prior in previous.items()
             if base in current
-            and {k: v for k, v in prior.items() if k not in ignored}
-            == {k: v for k, v in profile.items() if k not in ignored}
+            and {k: v for k, v in prior.items() if k not in compared}
+            == {k: v for k, v in profile.items() if k not in compared}
         ]
         if not matches:
             raise ValueError("Registered Work Mode policy cannot be refreshed safely")
@@ -509,6 +570,26 @@ def preserve_registered_profiles(prefix, rendered):
                 refreshed[key] = value
         if "stages" in profile:
             refreshed["stages"] = stage_module.validate_stages(profile["stages"])
+        if "engine" in profile:
+            if (
+                profile["engine"] != "qwen_code"
+                or refreshed.get("reviewer") is False
+                or refreshed.get("stages")
+            ):
+                raise ValueError("Invalid registered Qwen engine")
+            refreshed["engine"] = "qwen_code"
+            qwen_limits = {
+                "qwen_model_calls": 48,
+                "qwen_tool_calls": 40,
+                "qwen_wall_seconds": 1200,
+                "qwen_outer_seconds": 2400,
+                "qwen_retries": 0,
+                "max_gpu_seconds": 2700,
+                "max_cost_usd": 10,
+            }
+            if any(profile.get(key) != value for key, value in qwen_limits.items()):
+                raise ValueError("Qwen budget drift")
+            refreshed.update(qwen_limits)
         current[name] = refreshed
     return json.dumps(new, indent=2) + "\n"
 
@@ -518,8 +599,9 @@ def apply(prefix):
     receipt = op.verify_install(prefix)
     safe(prefix)
     docker, host, tag, image = docker_details()
+    qwen_tag, qwen_image = qwen_image_details(docker)
     profiles = preserve_registered_profiles(
-        prefix, work_profile(prefix, docker, host, tag, image)
+        prefix, work_profile(prefix, docker, host, tag, image, qwen_tag, qwen_image)
     )
     record = prefix / "state/amendments" / ("work-mode-" + str(time.time_ns()))
     op.private(record)
@@ -567,6 +649,8 @@ def apply(prefix):
         "files": [name for name, _ in targets],
         "runner_image": tag,
         "runner_image_id": image,
+        "qwen_runner_image": qwen_tag,
+        "qwen_runner_image_id": qwen_image,
         "source_manifest_sha256": sha(ROOT / "SOURCE-MANIFEST.json"),
         "source_commit": subprocess.run(
             ["/usr/bin/git", "rev-parse", "HEAD"],

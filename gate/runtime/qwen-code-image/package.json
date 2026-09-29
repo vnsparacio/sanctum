@@ -1,0 +1,8 @@
+{
+  "name": "sanctum-qwen-code-runner",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@qwen-code/qwen-code": "0.24.6"
+  }
+}

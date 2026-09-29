@@ -166,6 +166,14 @@ in an owner-private registration proposal can be:
 ]}
 ```
 
+For the opt-in Qwen Code coding engine, use `"engine": "qwen_code"` in a new
+single-stage registration copied from the protected MoodLog profile. The
+supported amendment requires the pinned Qwen image and an enabled reviewer,
+then fixes 48 model requests, 40 tools, 20 minutes in Qwen, 40 minutes for the
+Mac task, 45 minutes of GPU lifecycle, $10 of estimated run cost, and zero
+retries. Keep the proposal and all task text outside Git. See the
+[Qwen Work Mode handoff](../development/WORK-MODE-QWEN-SNAPSHOT-HANDOFF.md).
+
 Use a base whose fixed `test` operation can run the intended suite. Every
 checkpoint uses all existing profile evaluators, protected acceptance checks
 and the configured reviewer. Required files accumulate across checkpoints and
