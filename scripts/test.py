@@ -82,6 +82,11 @@ def mcp(env: dict[str, str]) -> None:
     node_tests("mcp-integration", ("tests/guard.test.mjs",), env)
 
 
+def router(env: dict[str, str]) -> None:
+    for path in ("router/session_state_test.py", "router/shadow_bridge_test.py"):
+        run([sys.executable, "-B", path], ".", env)
+
+
 def plugins(env: dict[str, str]) -> None:
     for plugin in sorted((ROOT / "plugins").iterdir()):
         if list((plugin / "src").glob("*.test.ts")):
@@ -134,6 +139,7 @@ GROUPS: dict[str, Callable[[dict[str, str]], None]] = {
     "gate-python": gate_python,
     "reliability": reliability,
     "mcp": mcp,
+    "router": router,
     "plugins": plugins,
     "release": release,
     "agents": agents,

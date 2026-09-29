@@ -53,8 +53,11 @@ class UnknownGitResult(GitControlError):
     """A consequential operation could not be safely reconciled."""
 
 
-class _InjectedAmbiguity(RuntimeError):
-    pass
+class GitOperationTimeout(GitControlError):
+    """A bounded Git or GitHub call timed out with an uncertain result."""
+
+    def __init__(self, message: str):
+        super().__init__("git_timeout", message)
 
 
 @dataclass(frozen=True)
@@ -226,7 +229,7 @@ class GitControlPlane:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise _InjectedAmbiguity("Git operation timed out") from exc
+            raise GitOperationTimeout("Git operation timed out") from exc
         if check and result.returncode:
             raise GitControlError(
                 "git_operation_failed",
@@ -251,7 +254,7 @@ class GitControlPlane:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise _InjectedAmbiguity("GitHub operation timed out") from exc
+            raise GitOperationTimeout("GitHub operation timed out") from exc
         if check and result.returncode:
             raise GitControlError(
                 "github_operation_failed",
@@ -867,15 +870,15 @@ class GitControlPlane:
                     "staged paths exceeded the explicit commit selection",
                 )
             expected_tree = self._git("write-tree").stdout.strip()
-        except GitControlError:
-            self._restore_clean_index()
-            raise
-        except _InjectedAmbiguity as exc:
+        except GitOperationTimeout as exc:
             self._restore_clean_index()
             raise UnknownGitResult(
                 "staging_unknown",
                 "staging timed out and was restored without replay; operator review required",
             ) from exc
+        except GitControlError:
+            self._restore_clean_index()
+            raise
         receipt = {
             "schema_version": 1,
             "kind": "commit",
@@ -903,7 +906,7 @@ class GitControlPlane:
                 check=False,
             )
             self._fault("after_commit")
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
             return self._reconcile_commit(receipt_path, receipt)
         if result.returncode:
             if self._commit_matches(receipt):
@@ -1036,7 +1039,7 @@ class GitControlPlane:
                 credentialed=True,
             )
             self._fault("after_push")
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
             return self._reconcile_push(receipt_path, receipt, identity)
         if result.returncode:
             try:
@@ -1222,7 +1225,7 @@ class GitControlPlane:
                         "--body",
                         body,
                     )
-                except _InjectedAmbiguity:
+                except GitOperationTimeout:
                     reconciled = self._open_pull_request(identity)
                     if (
                         not reconciled
@@ -1286,7 +1289,7 @@ class GitControlPlane:
                     )
             else:
                 reconciled = self._open_pull_request(identity)
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
             creation_reconciled = True
             reconciled = self._open_pull_request(identity)
         if not reconciled:

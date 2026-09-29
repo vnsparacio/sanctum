@@ -64,6 +64,35 @@ jobs:
       - run: .venv/bin/pip install -r requirements-dev.txt
       - run: make lint
 
+  lint-js:
+    name: JavaScript lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: make lint-js
+
+  gate-node22:
+    name: Gate JavaScript / Node 22
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+      - run: npm ci --ignore-scripts
+      - run: python -B scripts/test.py gate-js
+
   build:
     name: Plugin build and manifests
     runs-on: ubuntu-latest
@@ -110,6 +139,8 @@ jobs:
             command: test-reliability
           - name: MCP containment
             command: test-mcp
+          - name: Router regressions
+            command: test-router
           - name: Owned plugins
             command: test-plugins
           - name: Release and portability

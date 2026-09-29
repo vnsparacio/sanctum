@@ -180,6 +180,35 @@ class Setup(unittest.TestCase):
         self.assertEqual(launcher.read_text(), old)
         op.verify_install(self.prefix)
 
+    def test_work_mode_rollback_rejects_record_traversal_and_target_escape(self):
+        records = self.prefix / "state/amendments"
+        records.mkdir(parents=True)
+        outside = self.prefix.parent / "outside"
+        outside.mkdir()
+        (outside / "transaction.json").write_text(
+            json.dumps({"schema": "sanctum-work-mode-amendment/v1", "before": {}})
+        )
+        with patch.object(work_mode, "safe"):
+            with self.assertRaisesRegex(ValueError, "belong to prefix"):
+                work_mode.rollback(
+                    self.prefix, records / ".." / ".." / ".." / "outside"
+                )
+            record = records / "synthetic"
+            record.mkdir()
+            (record / "transaction.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-amendment/v1",
+                        "before": {"../outside/victim": "absent"},
+                    }
+                )
+            )
+            victim = outside / "victim"
+            victim.write_text("keep\n")
+            with self.assertRaisesRegex(ValueError, "Unsafe rollback targets"):
+                work_mode.rollback(self.prefix, record)
+            self.assertEqual("keep\n", victim.read_text())
+
     def test_work_mode_upgrade_preserves_registered_profile_and_refreshes_runtime(self):
         op.setup(self.prefix)
         old = json.loads(
@@ -1554,6 +1583,14 @@ class Publication(unittest.TestCase):
         audit = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(audit)
         return audit
+
+    def test_source_audit_rejects_unlisted_files(self):
+        audit = self.audit_module()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "SOURCE-MANIFEST.json").write_text("{}\n")
+            (base / "unlisted.txt").write_text("new source\n")
+            self.assertIn(("unlisted.txt", "unlisted source"), audit.scan(base))
 
     def test_project_python_names_do_not_shadow_standard_library(self):
         excluded = {

@@ -130,12 +130,18 @@ def rollback(prefix, record):
     op.verify_install(prefix)
     if op.owns_process(op.process_record(prefix)):
         raise ValueError("Stop candidate gateway before rollback")
-    record = record.absolute()
-    if not record.is_relative_to((prefix / "state/amendments").absolute()):
+    record = record.resolve()
+    if not record.is_relative_to((prefix / "state/amendments").resolve()):
         raise ValueError("Rollback record must belong to prefix")
     transaction = json.loads((record / "transaction.json").read_text())
     if transaction.get("schema") != SCHEMA or not (record / "complete").is_file():
         raise ValueError("Wrong or incomplete rollback transaction")
+    if (
+        set(transaction["before"]) != set(transaction["after"])
+        or set(transaction["before"].values()) - {"present", "absent"}
+        or set(transaction["before"]) != {name for name, _ in targets(prefix)}
+    ):
+        raise ValueError("Unsafe rollback targets")
     for name, expected in transaction["after"].items():
         target = prefix / name
         if not target.is_file() or target.is_symlink() or sha(target) != expected:

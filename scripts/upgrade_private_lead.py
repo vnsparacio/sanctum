@@ -177,10 +177,14 @@ def apply(prefix):
 
 def rollback(prefix, record):
     safe(prefix)
-    record = record.absolute()
-    if not record.is_relative_to((prefix / "state/amendments").absolute()):
+    record = record.resolve()
+    if not record.is_relative_to((prefix / "state/amendments").resolve()):
         raise ValueError("Rollback record must belong to prefix")
     tx = json.loads((record / "transaction.json").read_text())
+    if set(tx["before"]) != set(
+        FILES + tuple(target for target, _ in EXTERNAL_FILES)
+    ) or set(tx["before"].values()) - {"present", "absent"}:
+        raise ValueError("Unsafe rollback targets")
     for name, state in tx["before"].items():
         target = prefix / "gate" / name
         if state == "present":

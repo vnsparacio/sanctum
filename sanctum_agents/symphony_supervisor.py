@@ -58,6 +58,7 @@ def classify_termination(reason: str, detail: str | None = None) -> TerminationC
         return TerminationClass.TOKEN_BUDGET
     if reason in {
         "wall_clock_budget",
+        "service_wall_clock_budget",
         "turns_budget",
         "stall_budget",
         "output_budget",
@@ -1070,6 +1071,8 @@ def supervise(
             checked["workflow"],
         ]
         launched_at = time.time()
+        service_started_at = time.monotonic()
+        service_wall_clock_seconds = checked["wall_clock_timeout_seconds"]
         process = subprocess.Popen(
             command,
             cwd=repository,
@@ -1101,7 +1104,18 @@ def supervise(
         try:
             while process.poll() is None:
                 time.sleep(config.symphony["poll_seconds"])
-                if output.stat().st_size > config.symphony["output_limit_bytes"]:
+                service_elapsed = time.monotonic() - service_started_at
+                if service_elapsed >= service_wall_clock_seconds:
+                    violations = [
+                        SymphonyViolation(
+                            "service",
+                            "service_wall_clock_budget",
+                            service_elapsed,
+                            service_wall_clock_seconds,
+                            TerminationClass.TIME_BUDGET.value,
+                        )
+                    ]
+                elif output.stat().st_size > config.symphony["output_limit_bytes"]:
                     violations = [
                         SymphonyViolation(
                             "service",

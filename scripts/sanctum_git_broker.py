@@ -210,6 +210,26 @@ def serve_mcp() -> int:
                             "isError": True,
                         },
                     )
+                except OSError:
+                    value = {
+                        "error": {
+                            "code": "broker_io_error",
+                            "message": "Git broker I/O failed; inspect the private broker log",
+                        }
+                    }
+                    response(
+                        identifier,
+                        {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": json.dumps(value, sort_keys=True),
+                                }
+                            ],
+                            "structuredContent": value,
+                            "isError": True,
+                        },
+                    )
             elif identifier is not None:
                 response(
                     identifier,
@@ -237,4 +257,16 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except GitControlError as exc:
         print(json.dumps({"error": {"code": exc.code, "message": str(exc)}}))
+        raise SystemExit(2) from None
+    except OSError:
+        print(
+            json.dumps(
+                {
+                    "error": {
+                        "code": "broker_io_error",
+                        "message": "Git broker I/O failed; inspect the private broker log",
+                    }
+                }
+            )
+        )
         raise SystemExit(2) from None

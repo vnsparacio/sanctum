@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def check(name, cond):
 def send(payload):
     payload["state_dir"] = str(state)
     p = subprocess.run(
-        ["python3", str(BRIDGE), "--log", str(log)],
+        [sys.executable, str(BRIDGE), "--log", str(log)],
         input=json.dumps(payload),
         text=True,
         capture_output=True,

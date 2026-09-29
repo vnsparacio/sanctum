@@ -671,12 +671,29 @@ def apply(prefix):
 
 def rollback(prefix, record):
     safe(prefix)
-    record = record.absolute()
-    if not record.is_relative_to((prefix / "state/amendments").absolute()):
+    record = record.resolve()
+    if not record.is_relative_to((prefix / "state/amendments").resolve()):
         raise ValueError("Rollback record must belong to prefix")
     tx = json.loads((record / "transaction.json").read_text())
     if tx.get("schema") != "sanctum-work-mode-amendment/v1":
         raise ValueError("Wrong rollback transaction")
+    expected = {
+        *("gate/" + name for name in FILES),
+        *("config/schemas/" + name for name in CONTENT_TELEMETRY_SCHEMA_FILES),
+        "config/openclaw.json",
+        "config/work-mode.json",
+    }
+    if set(tx["before"]) != expected:
+        raise ValueError("Unsafe rollback targets")
+    for name, state in tx["before"].items():
+        path = Path(name)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or state not in {"present", "absent"}
+            or not (prefix / name).resolve().is_relative_to(prefix.resolve())
+        ):
+            raise ValueError("Unsafe rollback target")
     for name, state in tx["before"].items():
         target = prefix / name
         if state == "present":

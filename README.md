@@ -17,8 +17,9 @@ Sanctum keeps credentials, tools, approvals and privacy policy on your machine w
 V1.3 development starts from the immutable V1.2.0 release on `v1.3-dev`.
 Linear project `Sanctum V1.3` is the work and decision record; implementation
 still requires the owner to set both `Ready for Agent` and `symphony`, runs at
-concurrency one, opens an unmerged PR to `v1.3-dev`, and stops at `Human
-Review`. Project membership and the `v1.3.0` milestone do not authorize work.
+up to five implementation workers in one Symphony service, opens an unmerged
+PR to `v1.3-dev`, and stops at `Human Review`. Project membership and the
+`v1.3.0` milestone do not authorize work.
 See the [V1.3 development bootstrap](docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md).
 
 The integration line also contains conversational WebUI consent, explicit
