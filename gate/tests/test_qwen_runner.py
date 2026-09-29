@@ -155,8 +155,12 @@ class QwenRunner(unittest.TestCase):
             child = type("Child", (), {"stdout": stream, "poll": lambda self: 0})()
             progress = {"modelCalls": 0, "inferenceSeconds": 0.0}
             result = qwen_runner._broker_loop(
-                child, io.StringIO(), "local-private-model", 38123,
-                time.monotonic() + 180, progress,
+                child,
+                io.StringIO(),
+                "local-private-model",
+                38123,
+                time.monotonic() + 180,
+                progress,
             )
         self.assertEqual(result["headlessExitCode"], 1)
         self.assertEqual(result["modelCalls"], 0)

@@ -432,7 +432,10 @@ def run(settings, record, profile, goal, lifecycle=None):
         child.wait(timeout=10)
         if child.returncode:
             raise Refused("qwen_broker_exit")
-        if metrics.get("headlessExitCode", 0) != 0 or metrics.get("headlessSignal") is not None:
+        if (
+            metrics.get("headlessExitCode", 0) != 0
+            or metrics.get("headlessSignal") is not None
+        ):
             raise Refused("qwen_headless_failed")
         outcome.update({"code": "QWEN_HEADLESS_COMPLETE"})
     except Refused as error:
