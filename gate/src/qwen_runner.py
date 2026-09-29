@@ -110,7 +110,13 @@ def _snapshot_files(root):
 
 def _settings(model):
     return {
-        "context": {"autoCompactThreshold": 0.6},
+        "context": {
+            "autoCompactThreshold": 0.6,
+            "clearContextOnIdle": {
+                "toolResultsNumToKeep": 1,
+                "toolResultsTotalCharsThreshold": 12000,
+            },
+        },
         "model": {"skipLoopDetection": True},
         "modelProviders": {
             "openai": [
@@ -182,7 +188,7 @@ def _model_reply(item, model, port, remaining):
     }
 
 
-def _broker_loop(child, trace, model, port, deadline):
+def _broker_loop(child, trace, model, port, deadline, progress):
     calls = 0
     inference = 0.0
     done = None
@@ -207,6 +213,7 @@ def _broker_loop(child, trace, model, port, deadline):
         calls += 1
         if calls > MAX_MODEL_CALLS:
             raise Refused("qwen_model_call_limit")
+        progress["modelCalls"] = calls
         remaining = min(
             240,
             MAX_INFERENCE_SECONDS - inference,
@@ -219,6 +226,7 @@ def _broker_loop(child, trace, model, port, deadline):
             reply = _model_reply(item, model, port, remaining)
         finally:
             inference += time.monotonic() - started
+            progress["inferenceSeconds"] = inference
         trace.write(canonical({"request": item, "reply": reply}) + "\n")
         trace.flush()
         child.stdin.write(canonical(reply) + "\n")
@@ -229,9 +237,12 @@ def _broker_loop(child, trace, model, port, deadline):
             if time.monotonic() >= deadline - CLEANUP_SECONDS
             else "qwen_broker_exit"
         )
-    if done.get("code") != 0 or done.get("signal") is not None:
-        raise Refused("qwen_headless_failed")
-    return {"modelCalls": calls, "inferenceSeconds": inference}
+    return {
+        "modelCalls": calls,
+        "inferenceSeconds": inference,
+        "headlessExitCode": done.get("code"),
+        "headlessSignal": done.get("signal"),
+    }
 
 
 def run(settings, record, profile, goal, lifecycle=None):
@@ -291,6 +302,7 @@ def run(settings, record, profile, goal, lifecycle=None):
         "taskId": record["workspace_id"],
         "code": "QWEN_NOT_STARTED",
     }
+    progress = {"modelCalls": 0, "inferenceSeconds": 0.0}
     _private_write(directory / "qwen-goal.txt", goal)
     previous_term = signal.getsignal(signal.SIGTERM)
 
@@ -366,6 +378,11 @@ def run(settings, record, profile, goal, lifecycle=None):
                     (BASE / "runtime/qwen-headless-broker.mjs").read_bytes(),
                     0o444,
                 ),
+                (
+                    "qwen-request-policy.mjs",
+                    (BASE / "runtime/qwen-request-policy.mjs").read_bytes(),
+                    0o444,
+                ),
                 ("prompt.txt", goal.encode(), 0o444),
                 ("settings.json", (canonical(_settings(model)) + "\n").encode(), 0o444),
             ],
@@ -410,16 +427,23 @@ def run(settings, record, profile, goal, lifecycle=None):
         )
         with (directory / "qwen-broker-events.jsonl").open("x") as trace:
             os.fchmod(trace.fileno(), 0o600)
-            metrics = _broker_loop(child, trace, model, port, deadline)
+            metrics = _broker_loop(child, trace, model, port, deadline, progress)
+        progress.update({k: metrics[k] for k in ("modelCalls", "inferenceSeconds")})
         child.wait(timeout=10)
         if child.returncode:
             raise Refused("qwen_broker_exit")
-        outcome.update({"code": "QWEN_HEADLESS_COMPLETE", **metrics})
+        if (
+            metrics.get("headlessExitCode", 0) != 0
+            or metrics.get("headlessSignal") is not None
+        ):
+            raise Refused("qwen_headless_failed")
+        outcome.update({"code": "QWEN_HEADLESS_COMPLETE"})
     except Refused as error:
         outcome["code"] = str(error)
     except Exception:
         outcome["code"] = "qwen_environment_failure"
     finally:
+        outcome.update(progress)
         stop.set()
         if heartbeat:
             heartbeat.join(timeout=1)

@@ -28,6 +28,7 @@ class PackageClosure(unittest.TestCase):
             "src/qwen_snapshot.py",
             "src/qwen_runner.py",
             "runtime/qwen-headless-broker.mjs",
+            "runtime/qwen-request-policy.mjs",
             "plugin/qwen-work-mode.mjs",
             "runtime/protected-test-driver.cjs",
             "runtime/protected-test-preload.cjs",
