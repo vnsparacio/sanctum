@@ -1,6 +1,6 @@
 # Qwen Code snapshot handoff for Work Mode
 
-Status: source integration implemented; a live Qwen Code `/work` run is not yet qualified. The isolated proof remains historical evidence, not a Work Mode completion receipt.
+Status: source integration implemented; the [first live Qwen Code `/work` attempt](../history/v1.3/WORK-MODE-QWEN-FIRST-LIVE-ATTEMPT.md) failed during context compaction before host import. The isolated proof remains historical evidence, not a Work Mode completion receipt.
 
 The [fourth isolated MoodLog proof](../history/v1.3/WORK-MODE-QWEN-CODE-FOURTH-ISOLATED-POC.md) established that Qwen Code 0.24.6 can make the required edits without a human editing mid-run. Its two paths were separate:
 

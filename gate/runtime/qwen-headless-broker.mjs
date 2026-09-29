@@ -3,6 +3,7 @@ import http from 'node:http';
 import {readFileSync,createWriteStream,appendFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import readline from 'node:readline';
+import {prepareQwenRequest} from './qwen-request-policy.mjs';
 
 const MAX_REQUEST=2*1024*1024,MAX_RESPONSE=16*1024*1024;
 const model=process.env.QWEN_MODEL;
@@ -33,8 +34,7 @@ const server=http.createServer((request,response)=>{
   if(route==='/v1/chat/completions'){
    appendFileSync('/evidence/original-requests.jsonl',body.toString('utf8')+'\n',{mode:0o600});
    let value;try{value=JSON.parse(body.toString('utf8'));}catch{response.writeHead(400);response.end();return;}
-   if(value.model!==model){response.writeHead(403);response.end();return;}
-   Object.assign(value,{max_tokens:4096,temperature:0.7,top_p:0.8,top_k:20,min_p:0,presence_penalty:1.5,repetition_penalty:1,chat_template_kwargs:{enable_thinking:false},stream_options:{include_usage:true}});
+   try{value=prepareQwenRequest(value,model);}catch{response.writeHead(403);response.end();return;}
    body=Buffer.from(JSON.stringify(value));
   }
   const id=next++;pending.set(id,response);

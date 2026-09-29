@@ -3,10 +3,12 @@
 import base64
 import io
 import json
+import os
 import signal
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -131,13 +133,41 @@ class QwenRunner(unittest.TestCase):
                 qwen_runner.run(self.settings, self.record, profile, "task")
             self.assertEqual(str(caught.exception), "qwen_profile_contract")
 
+    def test_small_context_prunes_old_tool_results_before_compaction(self):
+        settings = qwen_runner._settings("local-private-model")
+        self.assertEqual(settings["context"]["autoCompactThreshold"], 0.6)
+        self.assertEqual(
+            settings["context"]["clearContextOnIdle"],
+            {"toolResultsNumToKeep": 1, "toolResultsTotalCharsThreshold": 12000},
+        )
+        self.assertEqual(
+            settings["modelProviders"]["openai"][0]["generationConfig"][
+                "contextWindowSize"
+            ],
+            32768,
+        )
+
+    def test_nonzero_headless_exit_returns_usage_for_host_receipt(self):
+        reader, writer = os.pipe()
+        with os.fdopen(reader, "r") as stream:
+            os.write(writer, b'{"done":true,"code":1,"signal":null}\n')
+            os.close(writer)
+            child = type("Child", (), {"stdout": stream, "poll": lambda self: 0})()
+            progress = {"modelCalls": 0, "inferenceSeconds": 0.0}
+            result = qwen_runner._broker_loop(
+                child, io.StringIO(), "local-private-model", 38123,
+                time.monotonic() + 180, progress,
+            )
+        self.assertEqual(result["headlessExitCode"], 1)
+        self.assertEqual(result["modelCalls"], 0)
+
     def test_one_run_imports_once_and_releases_lease_even_on_failure(self):
         fake = FakeLifecycle()
         values = {
             "ok": True,
             "receipt": {"authorityResult": "ALLOW", "paths": ["app.js"]},
         }
-        for mode in ("success", "limit", "cancel"):
+        for mode in ("success", "headless", "limit", "cancel"):
             with self.subTest(mode=mode):
                 fake.calls.clear()
                 child = FakeChild()
@@ -179,7 +209,12 @@ class QwenRunner(unittest.TestCase):
                                 else None
                             )
                         ),
-                        return_value={"modelCalls": 37, "inferenceSeconds": 120},
+                        return_value={
+                            "modelCalls": 37,
+                            "inferenceSeconds": 120,
+                            "headlessExitCode": 1 if mode == "headless" else 0,
+                            "headlessSignal": None,
+                        },
                     ),
                 ):
                     result = qwen_runner.run(
@@ -194,11 +229,15 @@ class QwenRunner(unittest.TestCase):
                     result["code"],
                     {
                         "success": "OK",
+                        "headless": "qwen_headless_failed",
                         "limit": "qwen_model_call_limit",
                         "cancel": "qwen_owner_cancelled",
                     }[mode],
                 )
                 self.assertEqual(result["containerAbsent"], True)
+                if mode == "headless":
+                    self.assertEqual(result["modelCalls"], 37)
+                    self.assertEqual(result["inferenceSeconds"], 120)
                 self.assertIn(("release", self.record["workspace_id"]), fake.calls)
                 self.assertIn(("sweep",), fake.calls)
                 self.assertEqual(importer.call_count, 1 if mode == "success" else 0)

@@ -102,6 +102,7 @@ FILES = (
     "runtime/work-runner.json",
     "runtime/work-runner.Dockerfile",
     "runtime/qwen-headless-broker.mjs",
+    "runtime/qwen-request-policy.mjs",
     "runtime/qwen-code-image/Dockerfile",
     "runtime/qwen-code-image/package.json",
     "runtime/qwen-code-image/package-lock.json",
