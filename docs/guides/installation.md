@@ -130,7 +130,8 @@ make down PREFIX=/absolute/private/prefix
 make doctor PREFIX=/absolute/private/prefix
 ```
 
-The command builds and records the pinned non-root runner image, installs the
+The command builds and records the pinned non-root command runner and Qwen Code
+0.24.6 images, installs the
 Work Mode runtime closure, configures explicit OpenClaw agent ownership with
 `main` as the system/local-answer owner, and writes a private rollback record
 beneath `state/amendments/`. It leaves GPU autostart disabled. A refusal occurs
@@ -199,6 +200,14 @@ binary/vendor/generated content, fuzzy patching, generic shell arguments,
 networked runner commands, live host mounts, Docker-socket access or worker
 credentials. Protected files and project-specific task contracts can further
 reduce the mutable set.
+
+A separately registered profile can select `engine: "qwen_code"` for one
+headless coding run. Qwen's tools execute in a copied, networkless container;
+the Mac imports only an authorized final patch and still runs the fixed tests,
+protected acceptance, evaluator and reviewer. The existing profile stays on
+the proposal loop. See [Qwen Work Mode setup and limits](../development/WORK-MODE-QWEN-SNAPSHOT-HANDOFF.md)
+before registering or running this engine. Its first live `/work` qualification
+is pending; the prior unassisted MoodLog success was an isolated proof.
 
 ## Optional personal sources
 

@@ -8,6 +8,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
+import qwen_runner
 import qwen_snapshot
 import task_evidence
 import worktree_edit
@@ -193,6 +194,21 @@ def _execute(b, settings, remote=None, lifecycle=None):
                 qwen_snapshot.export(settings, record)
                 if op == "worktree_qwen_export"
                 else qwen_snapshot.import_output(settings, record)
+            ),
+        }
+    if op == "worktree_qwen_run":
+        p = b["packet"]
+        record = work_record(settings, scope)
+        if record["profile"] != p["profile"]:
+            raise Refused("worktree_profile_mismatch")
+        return {
+            "status": "OK",
+            "result": qwen_runner.run(
+                settings,
+                record,
+                work_profile(settings, p["profile"]),
+                p["goal"],
+                lifecycle=lifecycle,
             ),
         }
     if op == "worktree_command":

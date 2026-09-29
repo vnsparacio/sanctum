@@ -162,6 +162,11 @@ class Setup(unittest.TestCase):
                 "docker_details",
                 return_value=("docker", "host", "tag", "sha256:synthetic"),
             ),
+            patch.object(
+                work_mode,
+                "qwen_image_details",
+                return_value=("sanctum-qwen-code:test", "sha256:" + "a" * 64),
+            ),
         ):
             work_mode.apply(self.prefix)
             self.assertEqual(launcher.read_bytes(), (ROOT / name).read_bytes())
@@ -227,6 +232,61 @@ class Setup(unittest.TestCase):
         owner["disk_bytes"] = 1
         path.write_text(json.dumps(old))
         with self.assertRaisesRegex(ValueError, "cannot be refreshed safely"):
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+
+    def test_work_mode_upgrade_refreshes_qwen_image_and_preserves_fixed_budget(self):
+        op.setup(self.prefix)
+        old = json.loads(
+            work_mode.work_profile(
+                self.prefix,
+                "docker-old",
+                "host-old",
+                "tag-old",
+                "image-old",
+                "qwen-old",
+                "sha256:" + "a" * 64,
+            )
+        )
+        repo = op.private(self.prefix / "owner-qwen-repo")
+        staging = op.private(
+            self.prefix
+            / "state/gate/private-lead/work-mode/registered/moodqwen/staging"
+        )
+        old["profiles"]["moodqwen"] = {
+            **old["profiles"]["grade01"],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "engine": "qwen_code",
+            "qwen_model_calls": 48,
+            "qwen_tool_calls": 40,
+            "qwen_wall_seconds": 1200,
+            "qwen_outer_seconds": 2400,
+            "qwen_retries": 0,
+            "max_gpu_seconds": 2700,
+            "max_cost_usd": 10,
+        }
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(json.dumps(old))
+        path.chmod(0o600)
+        rendered = work_mode.work_profile(
+            self.prefix,
+            "docker-new",
+            "host-new",
+            "tag-new",
+            "image-new",
+            "qwen-new",
+            "sha256:" + "b" * 64,
+        )
+        updated = json.loads(
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+        )["profiles"]["moodqwen"]
+        self.assertEqual(updated["qwen_runner_image_id"], "sha256:" + "b" * 64)
+        self.assertEqual(updated["engine"], "qwen_code")
+        self.assertEqual(updated["max_gpu_seconds"], 2700)
+        self.assertEqual(updated["max_cost_usd"], 10)
+        old["profiles"]["moodqwen"]["max_cost_usd"] = 11
+        path.write_text(json.dumps(old))
+        with self.assertRaisesRegex(ValueError, "Qwen budget drift"):
             work_mode.preserve_registered_profiles(self.prefix, rendered)
 
     def test_doctor_detects_stale_imported_webui_functions(self):
@@ -970,6 +1030,52 @@ class WorkProfileAmendments(unittest.TestCase):
         mod.rollback(self.prefix, next((self.prefix / "state/amendments").iterdir()))
         op.verify_install(self.prefix)
         self.assertEqual((self.prefix / "config/work-mode.json").read_bytes(), before)
+
+    def test_qwen_registration_requires_reviewed_image_and_sets_fixed_limits(self):
+        mod, _, policy, proposal = self.fixture()
+        proposal["work_profile"]["engine"] = "qwen_code"
+        with self.assertRaises(ValueError):
+            mod.configure(self.prefix, proposal)
+        policy["qwen_runner_image_id"] = "sha256:" + "a" * 64
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": "sanctum-work-mode-profiles/v1",
+                    "profiles": {"reviewed": policy},
+                }
+            )
+        )
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["config/work-mode.json"] = op.sha(path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt))
+        mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        registered = json.loads(path.read_text())["profiles"]["unseen"]
+        self.assertEqual(registered["engine"], "qwen_code")
+        self.assertEqual(
+            {
+                key: registered[key]
+                for key in (
+                    "qwen_model_calls",
+                    "qwen_tool_calls",
+                    "qwen_wall_seconds",
+                    "qwen_outer_seconds",
+                    "qwen_retries",
+                    "max_gpu_seconds",
+                    "max_cost_usd",
+                )
+            },
+            {
+                "qwen_model_calls": 48,
+                "qwen_tool_calls": 40,
+                "qwen_wall_seconds": 1200,
+                "qwen_outer_seconds": 2400,
+                "qwen_retries": 0,
+                "max_gpu_seconds": 2700,
+                "max_cost_usd": 10,
+            },
+        )
 
     def test_stage_registration_validates_before_amending(self):
         mod, repo, policy, proposal = self.fixture()

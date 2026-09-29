@@ -1,5 +1,5 @@
 /* Authenticated owner-facing Work Mode integration. Authority stays on the Mac. */
-import {readFileSync,lstatSync} from 'node:fs';
+import {readFileSync,lstatSync,writeFileSync} from 'node:fs';
 import {createHash,createHmac,randomBytes} from 'node:crypto';
 import {resolve} from 'node:path';
 import {CONTRACT_VERSION,digest,egressMatches} from '../foundation/contracts.mjs';
@@ -14,6 +14,7 @@ import {bindWorkTask,unbindWorkTask} from './workspace-tools.mjs';
 import {stagePlan,runStages,runAndRecord,storageCode} from './work-stages.mjs';
 import {createWorkTrace} from './work-trace.mjs';
 import {createWorkLedger} from './work-ledger.mjs';
+import {runQwenWorkMode} from './qwen-work-mode.mjs';
 
 const HELP='Work Mode: /work start PROFILE -- GOAL; /work status; /work result TASK_ID; /work approve-result DECISION_ID; /work cancel; /work end. Work Mode is isolated, bounded, and PRIVATE_LEAD reasoning has no authority.';
 const SECRET=/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-or-v1-[A-Za-z0-9]{24,}|\bAKIA[0-9A-Z]{16}\b/;
@@ -100,6 +101,8 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
  async function start(session,profileName,goal){
    if(active>=Math.min(settings.work_mode.max_concurrent_tasks??1,1))return {text:'A Work Mode task is already active. No workspace or compute was started.'};
    const profile=profileConfig(profileName),task={id:id(),profile:profileName,goal,revision:0,phase:'STARTING',status:null,result:null,workspace:null,abort:new AbortController(),promise:null,pending:null};
+   if(profile.engine!==undefined&&profile.engine!=='qwen_code')throw Error('work_engine_unknown');
+   if(profile.engine==='qwen_code'&&(profile.stages||profile.reviewer===false||!profile.qwen_runner_image_id||Object.entries({qwen_model_calls:48,qwen_tool_calls:40,qwen_wall_seconds:1200,qwen_outer_seconds:2400,qwen_retries:0,max_gpu_seconds:2700,max_cost_usd:10}).some(([key,value])=>profile[key]!==value)))throw Error('qwen_workmode_config');
    const plan=stagePlan(goal,profile.stages);
    session.task=task;
    const manifest=currentCapabilityManifest();
@@ -134,8 +137,8 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
      if(name==='worktree_read'&&response.result?._observation){task.pendingRead={path:args.path,token:response.result._observation,text:response.result.text};delete response.result._observation;}
      return {ok:true,data:response.result,executionState:response.result?.executionState??'COMPLETED',verifier:'VERIFIED',truncated:false};
    });
-   task.telemetry={promptTokens:0,completionTokens:0,inferenceSeconds:0,estimatedCostUsd:0,modelCalls:0,usageIncompleteCalls:0,timingIncompleteCalls:0};
-   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,maxContextBytes:WORK_MODE_PACKET_BYTES,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onDecision:event=>task.trace.append({type:'DECISION',checkpoint:task.checkpoint??1,...event}),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.inferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;if(event.usage_complete!==true)task.telemetry.usageIncompleteCalls=(task.telemetry.usageIncompleteCalls??0)+1;if(event.elapsed_seconds===null)task.telemetry.timingIncompleteCalls=(task.telemetry.timingIncompleteCalls??0)+1;try{task.ledger.modelCall({...event,checkpoint:task.checkpoint??1,estimatedCostUsd:task.telemetry.estimatedCostUsd});}catch(error){task.storageFailure=storageCode(error?.code);throw error;}}});
+   task.telemetry={promptTokens:0,completionTokens:0,inferenceSeconds:0,reviewerInferenceSeconds:0,qwenCostUsd:0,estimatedCostUsd:0,modelCalls:0,usageIncompleteCalls:0,timingIncompleteCalls:0};
+   const reasoner=createPrivateLeadReasoner({execute:remote,profile:interfaceProfile,maxContextBytes:WORK_MODE_PACKET_BYTES,body:(operation,tier,packet,approval)=>signed(task,operation,packet,approval),onDecision:event=>task.trace.append({type:'DECISION',checkpoint:task.checkpoint??1,...event}),onTelemetry:event=>{task.telemetry.promptTokens+=event.prompt_tokens??0;task.telemetry.completionTokens+=event.completion_tokens??0;task.telemetry.inferenceSeconds+=event.elapsed_seconds??0;task.telemetry.reviewerInferenceSeconds+=event.elapsed_seconds??0;task.telemetry.estimatedCostUsd=task.telemetry.qwenCostUsd+task.telemetry.reviewerInferenceSeconds*(settings.private_lead.max_hourly_usd/3600);task.telemetry.modelCalls++;if(event.usage_complete!==true)task.telemetry.usageIncompleteCalls=(task.telemetry.usageIncompleteCalls??0)+1;if(event.elapsed_seconds===null)task.telemetry.timingIncompleteCalls=(task.telemetry.timingIncompleteCalls??0)+1;try{task.ledger.modelCall({...event,checkpoint:task.checkpoint??1,estimatedCostUsd:task.telemetry.estimatedCostUsd});}catch(error){task.storageFailure=storageCode(error?.code);throw error;}}});
    const verifyProtectedEvidence=async({signal}={})=>{
      const response=await call(task,'worktree_integrity',{task_id:task.id,profile:task.profile},signal);
      if(response?.status!=='OK')throw Error('protected_evidence_unavailable');
@@ -193,6 +196,14 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    const initialProtection=await verifyProtectedEvidence();
    if(initialProtection?.schema!=='sanctum-task-evidence/v1'||initialProtection.taskId!==task.id||initialProtection.integrity!=='PASS')throw Error('protected_evidence_unavailable');
    task.ledger.event('PROTECTED_EVIDENCE',{stage:'TASK_CREATED',integrity:initialProtection.integrity,snapshotDigest:initialProtection.snapshotDigest,contractDigest:initialProtection.contractDigest,candidateDigest:initialProtection.candidateDigest,acceptanceRequired:initialProtection.acceptanceRequired});
+   const qwenBaseline=async({signal})=>{
+     const ordinary=await call(task,'worktree_command',{task_id:task.id,operation:'test',profile:task.profile},signal);
+     if(ordinary?.status!=='OK')throw Error('qwen_baseline_unavailable');
+     writeFileSync(resolve(task.ledger.directory,'qwen-baseline-test.txt'),String(ordinary.result?.output??''),{flag:'wx',mode:0o600});
+     const protectedRun=initialProtection.acceptanceRequired?await call(task,'worktree_acceptance',{task_id:task.id,profile:task.profile},signal):null;
+     if(initialProtection.acceptanceRequired&&protectedRun?.status!=='OK')throw Error('qwen_baseline_unavailable');
+     return {ordinaryExecuted:ordinary.result?.executionState==='COMPLETED',ordinaryPassed:ordinary.result?.ok===true,ordinaryCode:ordinary.result?.code??'UNKNOWN',ordinaryOutputDigest:ordinary.result?.output_digest??null,protectedExecuted:initialProtection.acceptanceRequired?protectedRun?.result?.executed===true:true,protectedPassed:initialProtection.acceptanceRequired?protectedRun?.result?.passed===true:true,protectedRequired:initialProtection.acceptanceRequired};
+   };
    const observeRead=async({proposal,envelope})=>{
      const pending=task.pendingRead;task.pendingRead=null;
      if(!pending||pending.path!==proposal.arguments.path||envelope.data?.text!==pending.text)return false;
@@ -203,14 +214,18 @@ export function createWorkCommand({api,base,settings,key,remote,now=()=>Date.now
    active++;task.phase='RUNNING';
    const configured=profile.capabilities??['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command','source_first_research'];
    const names=selectWorkCapabilityNames(goal,configured,manifest);
+   const outerTimer=profile.engine==='qwen_code'?setTimeout(()=>task.abort.abort(),profile.qwen_outer_seconds*1000):null;
+   outerTimer?.unref?.();
    task.promise=(async()=>{try{
      task.result=await runAndRecord({
-       run:()=>runStages({plan,run:options=>work.run(options),options:{scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal},onStage:(stage,index)=>{task.stage=stage;task.checkpoint=index+1;},onCheckpoint:value=>task.ledger.event('CHECKPOINT',value)}),
+       run:()=>profile.engine==='qwen_code'
+         ?runQwenWorkMode({task,profile,call,baseline:qwenBaseline,evaluate:evaluator,reviewer,signal:task.abort.signal,now:()=>now()/1000})
+         :runStages({plan,run:options=>work.run(options),options:{scope:task.id,workspace:task.id,capabilities:names,maxIterations:profile.max_iterations??8,maxModelCalls:profile.max_model_calls??16,maxTaskSeconds:profile.max_task_seconds??900,requestId:task.id,signal:task.abort.signal},onStage:(stage,index)=>{task.stage=stage;task.checkpoint=index+1;},onCheckpoint:value=>task.ledger.event('CHECKPOINT',value)}),
        storageFailure:()=>task.storageFailure,
        finish:result=>{task.trace.close();return task.ledger.finish({status:result.status,reason:result.reason,providerCode:result.providerCode??null,metrics:result.metrics,checkpointsCompleted:result.checkpointsCompleted,persistenceWarning:result.persistenceWarning??null,originalStatus:result.originalStatus??null,originalReason:result.originalReason??null,decisionTrace:task.trace.status(),telemetry:task.telemetry});},
      });
      task.status=task.result.status;task.phase='TERMINAL';
-   }finally{task.trace?.close();active--;}})();
+   }finally{if(outerTimer)clearTimeout(outerTimer);task.trace?.close();active--;}})();
    return {text:`Work Mode task ${task.id} started in an isolated workspace. Use /work result ${task.id} or /work status. PRIVATE_LEAD has no authority; the host controls execution and completion.`};
  }
  const handler=async ctx=>{

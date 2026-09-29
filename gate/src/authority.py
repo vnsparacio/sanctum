@@ -30,6 +30,7 @@ OPERATIONS = {
     "worktree_patch",
     "worktree_qwen_export",
     "worktree_qwen_import",
+    "worktree_qwen_run",
     "worktree_command",
     "worktree_cleanup",
     "work_source_policy",
@@ -197,6 +198,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
             "worktree_patch": {"task_id", "patch"},
             "worktree_qwen_export": {"task_id", "profile"},
             "worktree_qwen_import": {"task_id", "profile"},
+            "worktree_qwen_run": {"task_id", "profile", "goal"},
             "worktree_command": {"task_id", "operation", "profile"},
             "worktree_cleanup": {"task_id", "profile"},
             "work_source_policy": {"task_id", "prompt", "source_need"},
@@ -235,6 +237,12 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
                 raise Refused(error)
         if b["operation"] == "worktree_patch" and (
             type(packet["patch"]) is not str or len(packet["patch"].encode()) > 48000
+        ):
+            raise Refused("workmode_packet_contract")
+        if b["operation"] == "worktree_qwen_run" and (
+            type(packet["goal"]) is not str
+            or not packet["goal"].strip()
+            or len(packet["goal"].encode()) > 32768
         ):
             raise Refused("workmode_packet_contract")
         if b["operation"] == "worktree_command" and packet["operation"] not in {

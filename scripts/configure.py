@@ -460,7 +460,7 @@ def configure(prefix, proposal):
             type(item) is not dict
             or not {"name", "copy_from", "repository"} <= set(item)
             or set(item)
-            - {"name", "copy_from", "repository", "task_protection", "stages"}
+            - {"name", "copy_from", "repository", "task_protection", "stages", "engine"}
         ):
             raise ValueError("Invalid Work Mode profile registration")
         name = item["name"]
@@ -557,6 +557,28 @@ def configure(prefix, proposal):
         if "stages" in item:
             profiles["profiles"][name]["stages"] = stage_module.validate_stages(
                 item["stages"]
+            )
+        if "engine" in item:
+            if (
+                item["engine"] != "qwen_code"
+                or profiles["profiles"][name].get("stages")
+                or profiles["profiles"][name].get("reviewer") is False
+                or not profiles["profiles"][name].get("qwen_runner_image_id")
+            ):
+                raise ValueError(
+                    "Qwen Code requires a reviewed single-stage profile and reviewer"
+                )
+            profiles["profiles"][name]["engine"] = "qwen_code"
+            profiles["profiles"][name].update(
+                {
+                    "qwen_model_calls": 48,
+                    "qwen_tool_calls": 40,
+                    "qwen_wall_seconds": 1200,
+                    "qwen_outer_seconds": 2400,
+                    "qwen_retries": 0,
+                    "max_gpu_seconds": 2700,
+                    "max_cost_usd": 10,
+                }
             )
         changes["config/work-mode.json"] = json.dumps(profiles, indent=2) + "\n"
     if "integrations" in proposal:
