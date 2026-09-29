@@ -485,7 +485,13 @@ def _rollback_patch(record, committed, expected_digest):
         return False
 
 
-def apply_patch(settings, record, patch, authorize=mutation_authority):
+def apply_patch(
+    settings,
+    record,
+    patch,
+    authorize=mutation_authority,
+    expected_candidate_digest=None,
+):
     """Apply one exact multi-file text patch with preflight and rollback."""
     try:
         entries = parse_patch(patch)
@@ -500,6 +506,11 @@ def apply_patch(settings, record, patch, authorize=mutation_authority):
             before = task_evidence.check(settings, record)
             if before["integrity"] != "PASS":
                 return fail("EDIT_PROTECTED_INPUT")
+            if (
+                expected_candidate_digest is not None
+                and before["candidateDigest"] != expected_candidate_digest
+            ):
+                return fail("EDIT_APPLY_RACE")
             initial_rows = task_evidence.inventory(record["root"])
             prepared = []
             total = 0
