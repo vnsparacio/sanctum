@@ -123,6 +123,111 @@ class QwenRunner(unittest.TestCase):
                 qwen_runner._model_reply(item, "allowed", 38123, 1)
             self.assertEqual(str(caught.exception), code)
 
+    def test_failed_model_compaction_gets_bounded_host_snapshot(self):
+        class Response:
+            status = 200
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return self.body
+
+        class Opener:
+            def __init__(self, body):
+                self.body = body
+
+            def open(self, _request, timeout):
+                self.timeout = timeout
+                return Response(self.body)
+
+        def stream(content, *, tool=False):
+            delta = {"content": content}
+            if tool:
+                delta["tool_calls"] = [{"index": 0, "function": {"name": "edit"}}]
+            chunk = {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": delta,
+                        "finish_reason": "tool_calls" if tool else "stop",
+                    }
+                ]
+            }
+            return ("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode()
+
+        system = qwen_runner.COMPACTION_PREFIX + " Produce a summary."
+        request = {
+            "model": "allowed",
+            "messages": [{"role": "system", "content": system}],
+            "stream": True,
+        }
+        item = {
+            "id": 7,
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "body": base64.b64encode(json.dumps(request).encode()).decode(),
+        }
+        unusable = stream("<analysis>Unfinished draft", tool=True)
+        with patch.object(
+            qwen_runner.urllib.request, "build_opener", return_value=Opener(unusable)
+        ):
+            reply = qwen_runner._model_reply(
+                item, "allowed", 38123, 10, "Fix <MoodLog> & run tests"
+            )
+        self.assertTrue(reply["local_compaction"])
+        self.assertEqual(base64.b64decode(reply["original_model_body"]), unusable)
+        replacement = base64.b64decode(reply["body"])
+        self.assertTrue(qwen_runner._valid_compaction_response(replacement))
+        self.assertIn(b"Fix &lt;MoodLog&gt; &amp; run tests", replacement)
+        self.assertNotIn(b'"tool_calls"', replacement)
+        self.assertLess(len(replacement), 16000)
+        self.assertFalse(
+            qwen_runner._valid_compaction_response(
+                stream("<analysis>draft <state_snapshot>hidden</state_snapshot>")
+            )
+        )
+
+        valid = stream(
+            "<state_snapshot><next_step>Run tests</next_step></state_snapshot>"
+        )
+        with patch.object(
+            qwen_runner.urllib.request, "build_opener", return_value=Opener(valid)
+        ):
+            reply = qwen_runner._model_reply(item, "allowed", 38123, 10, "Fix MoodLog")
+        self.assertNotIn("local_compaction", reply)
+        self.assertEqual(base64.b64decode(reply["body"]), valid)
+
+        malformed = b"data: {invalid}\n\n"
+        with patch.object(
+            qwen_runner.urllib.request, "build_opener", return_value=Opener(malformed)
+        ):
+            reply = qwen_runner._model_reply(item, "allowed", 38123, 10, "Fix MoodLog")
+        self.assertNotIn("local_compaction", reply)
+        self.assertEqual(base64.b64decode(reply["body"]), malformed)
+
+        ordinary = {
+            **item,
+            "body": base64.b64encode(
+                json.dumps(
+                    {**request, "messages": [{"role": "system", "content": "Coding"}]}
+                ).encode()
+            ).decode(),
+        }
+        with patch.object(
+            qwen_runner.urllib.request, "build_opener", return_value=Opener(unusable)
+        ):
+            reply = qwen_runner._model_reply(ordinary, "allowed", 38123, 10)
+        self.assertNotIn("local_compaction", reply)
+        self.assertEqual(base64.b64decode(reply["body"]), unusable)
+
     def test_profile_contract_refuses_without_export(self):
         for profile in (
             {**self.profile, "engine": "old"},

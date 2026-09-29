@@ -1,6 +1,7 @@
 """One bounded Qwen Code headless run inside the Mac-owned Work Mode task."""
 
 import base64
+import html
 import io
 import json
 import os
@@ -31,6 +32,10 @@ MAX_RUN_SECONDS = 2400
 CLEANUP_SECONDS = 120
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_RESPONSE = 16 * 1024 * 1024
+COMPACTION_PREFIX = (
+    "You are the component that summarizes a conversation when its context "
+    "window is about to overflow."
+)
 
 
 def _private_write(path, raw):
@@ -136,7 +141,108 @@ def _settings(model):
     }
 
 
-def _model_reply(item, model, port, remaining):
+def _compaction_summary(goal):
+    """Keep the owner goal while making no claim about unfinished coding work."""
+    if type(goal) is not str or not goal.strip():
+        raise Refused("qwen_compaction_goal")
+    excerpt = html.escape(goal[:4096])
+    if len(goal) > 4096:
+        excerpt += " [Read /poc/prompt.txt for the complete owner request.]"
+    return (
+        "<state_snapshot>\n"
+        f"<primary_request_and_intent>{excerpt}</primary_request_and_intent>\n"
+        "<key_technical_concepts>The owner goal is also in /poc/prompt.txt. "
+        "Sanctum will independently run fixed tests and protected acceptance."
+        "</key_technical_concepts>\n"
+        "<files_and_code_sections>The isolated workspace may contain edits. "
+        "Inspect the current files and diff before continuing."
+        "</files_and_code_sections>\n"
+        "<errors_and_fixes>No test result or fix is certified by this snapshot. "
+        "Run the local tests and address their actual failures."
+        "</errors_and_fixes>\n"
+        "<problem_solving>Continue coding in the isolated workspace. "
+        "Preserve tests and the owner constraints.</problem_solving>\n"
+        "<all_user_messages>The complete original request is in "
+        "/poc/prompt.txt.</all_user_messages>\n"
+        "<pending_tasks>Complete the owner goal and run its local tests."
+        "</pending_tasks>\n"
+        "<current_work>Unverified. Inspect the workspace and test output."
+        "</current_work>\n"
+        "<next_step>Read the current diff and failing tests, then continue the "
+        "smallest needed edits.</next_step>\n"
+        "</state_snapshot>"
+    )
+
+
+def _valid_compaction_response(raw):
+    """True for usable XML, false for a complete but unusable stream, else None."""
+    try:
+        text = raw.decode("utf-8")
+        parts = []
+        finish = None
+        done = False
+        tool_call = False
+        for line in text.splitlines():
+            if line == "data: [DONE]":
+                done = True
+                continue
+            if not line.startswith("data: "):
+                continue
+            event = json.loads(line[6:])
+            for choice in event.get("choices", []):
+                delta = choice.get("delta", {})
+                if delta.get("tool_calls"):
+                    tool_call = True
+                if type(delta.get("content")) is str:
+                    parts.append(delta["content"])
+                if choice.get("finish_reason") is not None:
+                    finish = choice["finish_reason"]
+        if not done or finish is None:
+            return None
+        summary = "".join(parts)
+        # Match the pinned Qwen Code 0.24.6 analysis stripping behavior. An
+        # unterminated block hides even a complete-looking XML tag after it.
+        summary = re.sub(r"<analysis>[\s\S]*?</analysis>\s*", "", summary)
+        summary = re.sub(r"<analysis>[\s\S]*$", "", summary)
+        return (
+            not tool_call
+            and finish == "stop"
+            and bool(re.search(r"<state_snapshot>[\s\S]*?</state_snapshot>", summary))
+        )
+    except (UnicodeError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def _local_compaction_reply(item_id, model, goal):
+    summary = _compaction_summary(goal)
+    event_id = f"sanctum-compaction-{item_id}"
+    base = {
+        "id": event_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+    }
+    chunks = [
+        {
+            **base,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": summary},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    ]
+    raw = (
+        "".join("data: " + canonical(chunk) + "\n\n" for chunk in chunks)
+        + "data: [DONE]\n\n"
+    )
+    return raw.encode()
+
+
+def _model_reply(item, model, port, remaining, goal=None):
     if set(item) != {"id", "method", "path", "body"} or type(item["id"]) is not int:
         raise Refused("qwen_broker_protocol")
     route, method = item["path"], item["method"]
@@ -148,6 +254,7 @@ def _model_reply(item, model, port, remaining):
         raise Refused("qwen_broker_protocol") from None
     if len(body) > MAX_REQUEST or (method == "GET" and body):
         raise Refused("qwen_broker_limit")
+    compaction = False
     if method == "POST":
         try:
             value = json.loads(body)
@@ -155,6 +262,15 @@ def _model_reply(item, model, port, remaining):
             raise Refused("qwen_broker_protocol") from None
         if type(value) is not dict or value.get("model") != model:
             raise Refused("qwen_model_identity")
+        messages = value.get("messages")
+        compaction = (
+            type(messages) is list
+            and bool(messages)
+            and type(messages[0]) is dict
+            and messages[0].get("role") == "system"
+            and type(messages[0].get("content")) is str
+            and messages[0]["content"].startswith(COMPACTION_PREFIX)
+        )
     request = urllib.request.Request(
         "http://127.0.0.1:" + str(port) + route,
         data=body if method == "POST" else None,
@@ -176,7 +292,17 @@ def _model_reply(item, model, port, remaining):
         raise Refused("qwen_model_transport") from None
     if len(raw) > MAX_RESPONSE:
         raise Refused("qwen_broker_limit")
-    return {
+    model_response = None
+    if (
+        compaction
+        and status == 200
+        and content_type.startswith("text/event-stream")
+        and _valid_compaction_response(raw) is False
+    ):
+        model_response = base64.b64encode(raw).decode()
+        raw = _local_compaction_reply(item["id"], model, goal)
+        content_type = "text/event-stream"
+    reply = {
         "id": item["id"],
         "status": status,
         "content_type": (
@@ -186,9 +312,14 @@ def _model_reply(item, model, port, remaining):
         ),
         "body": base64.b64encode(raw).decode(),
     }
+    if model_response is not None:
+        # Keep the unusable model answer in the private trace for diagnosis.
+        reply["original_model_body"] = model_response
+        reply["local_compaction"] = True
+    return reply
 
 
-def _broker_loop(child, trace, model, port, deadline, progress):
+def _broker_loop(child, trace, model, port, deadline, progress, goal=None):
     calls = 0
     inference = 0.0
     done = None
@@ -223,7 +354,7 @@ def _broker_loop(child, trace, model, port, deadline, progress):
             raise Refused("qwen_inference_limit")
         started = time.monotonic()
         try:
-            reply = _model_reply(item, model, port, remaining)
+            reply = _model_reply(item, model, port, remaining, goal)
         finally:
             inference += time.monotonic() - started
             progress["inferenceSeconds"] = inference
@@ -427,7 +558,7 @@ def run(settings, record, profile, goal, lifecycle=None):
         )
         with (directory / "qwen-broker-events.jsonl").open("x") as trace:
             os.fchmod(trace.fileno(), 0o600)
-            metrics = _broker_loop(child, trace, model, port, deadline, progress)
+            metrics = _broker_loop(child, trace, model, port, deadline, progress, goal)
         progress.update({k: metrics[k] for k in ("modelCalls", "inferenceSeconds")})
         child.wait(timeout=10)
         if child.returncode:
