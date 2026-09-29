@@ -82,6 +82,35 @@ class InteractiveQwenContracts(unittest.TestCase):
             hold.close()
             self.assertEqual(hold.process.returncode, 0)
 
+    def test_stuck_hold_is_killed_and_managed_stop_confirms_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            gate = prefix / "gate"
+            gate.mkdir()
+            (gate / "manage.py").write_text(
+                "import json,signal,sys,time\n"
+                "if 'hold' in sys.argv:\n"
+                " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                " print(json.dumps({'event':'READY'}),flush=True)\n"
+                " while True: time.sleep(0.01)\n"
+                "else:\n"
+                " print(json.dumps({'phase':'OFFLINE','leases':0,'active_requests':0}))\n"
+            )
+            hold = qwen.ModelHold(
+                prefix, sys.executable, "synthetic-private-model", 12345
+            )
+            previous = qwen.CLEANUP_WAIT_SECONDS
+            qwen.CLEANUP_WAIT_SECONDS = 0.2
+            try:
+                hold.ensure_ready()
+                hold.close()
+                self.assertNotEqual(hold.process.returncode, 0)
+            finally:
+                qwen.CLEANUP_WAIT_SECONDS = previous
+                if hold.process and hold.process.poll() is None:
+                    hold.process.kill()
+                    hold.process.wait(timeout=3)
+
     def test_provider_setup_preserves_other_models_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".qwen/settings.json"

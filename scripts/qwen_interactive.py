@@ -29,6 +29,7 @@ MAX_BODY = 2 * 1024 * 1024
 WINDOW_SECONDS = 45 * 60
 MAX_COMPUTE_USD = 5.0
 STARTUP_SECONDS = 12 * 60
+CLEANUP_WAIT_SECONDS = 120
 QWEN_VERSION = "0.24.6"
 
 
@@ -265,11 +266,42 @@ class ModelHold:
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
         try:
-            process.wait(timeout=120)
+            process.wait(timeout=CLEANUP_WAIT_SECONDS)
         except subprocess.TimeoutExpired:
-            raise ValueError(
-                "Private model cleanup is pending; independent janitor remains active"
+            # The hold can be blocked in provider readiness. Release its lock,
+            # then ask the installed Mac lifecycle to stop the exact release.
+            process.kill()
+            process.wait(timeout=10)
+            stopped = subprocess.run(
+                [
+                    self.python,
+                    "-B",
+                    str(self.prefix / "gate/manage.py"),
+                    "stop",
+                    "--release",
+                    "PRIVATE_LEAD",
+                ],
+                cwd=self.prefix,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
+            try:
+                status = json.loads(stopped.stdout)
+            except json.JSONDecodeError:
+                status = {}
+            if (
+                stopped.returncode
+                or status.get("phase") != "OFFLINE"
+                or status.get("leases") != 0
+                or status.get("active_requests") != 0
+            ):
+                raise ValueError(
+                    "Private model cleanup is pending; independent janitor remains active"
+                )
+            if process.stdout:
+                process.stdout.close()
+            return
         if process.stdout:
             process.stdout.close()
         if process.returncode:
@@ -424,7 +456,11 @@ def run(prefix: Path, args: list[str], *, cwd: Path | None = None) -> int:
     finally:
         if child is not None and child.poll() is None:
             child.terminate()
-            child.wait(timeout=10)
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
