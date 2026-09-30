@@ -1,10 +1,18 @@
 # Capabilities and limits
 
-The reference V1 includes local Qwen 4B agent work, private 80B reasoning, hosted 235B, bounded visual processing, frontier reasoning, read-only Messages/Gmail/Calendar, web retrieval, guarded browsing, create-only Markdown, File Steward and exact local utilities.
+The current integration line includes local Qwen 4B agent work, hosted 235B, bounded visual processing, frontier reasoning, read-only Messages/Gmail/Calendar, web retrieval, guarded browsing, create-only Markdown, File Steward and exact local utilities. The private 80B Assistant tier is permanently retired. A separately configured private Qwen lead is available only to explicit Work Mode and does not become an Assistant Mode tier.
 
 The package supplies those sources and boundaries. The default isolated configuration enables utilities; optional integrations require local configuration and separate acceptance. Feature completeness of the reference system is not proof of clean-install readiness of every integration.
 
 No messaging/email sending, calendar mutation, generic deletion, arbitrary shell or remote access to Mac tools is included. File move/rename/undo remain approval-gated. Bigger models can hallucinate and failed policy/long-context cases remain relevant.
+
+Work Mode operates in an isolated task worktree and exposes bounded read,
+mutation and profiled command capabilities. Mutation supports exact observed
+replacement, bounded UTF-8 file creation, deletion or movement, and one exact
+preflighted multi-file text patch. Path escape, symlink traversal, protected
+paths, existing create/move destinations, binary/vendor/generated content,
+fuzzy patching and partial multi-file commits are rejected. The runner receives
+no live host mount, network, Docker socket or inherited credentials.
 
 The capability manifest is a runtime projection, not an authority list: it separately records declaration, observed/pinned registration, captured-schema equality, configured exposure and implementation source. The build observes compiled Sanctum plugin registrations and rejects declaration or schema drift; pinned core/MCP/web adapters remain narrow reviewed exceptions. Runtime configuration can remove exposure but cannot create support for an unknown tool. Schema capture, plugin text or a model proposal never grants permission. A registered tool whose schema is missing is non-exposed and fails closed. The shared proposal/result contracts retain existing bounded repair, provenance, untrusted markers, result truncation and rollback behavior; they do not broaden any capability.
 

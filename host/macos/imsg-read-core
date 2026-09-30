@@ -69,6 +69,25 @@ case "$COMMAND" in
       --json
     ;;
 
+  history-window)
+    # Internal broker recovery for an exact message whose text lives in
+    # attributedBody. Return at most 12 local records for a narrow time window.
+    CHAT_ID="${2:-}"
+    START="${3:-}"
+    END="${4:-}"
+    [[ $# -eq 4 ]] || die "usage: ai-imsg-read history-window <chat-id> <start> <end>"
+    require_uint "$CHAT_ID"
+    [[ "$START" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] || die "invalid start time"
+    [[ "$END" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] || die "invalid end time"
+
+    exec "$IMSG" history \
+      --chat-id "$CHAT_ID" \
+      --start "$START" \
+      --end "$END" \
+      --limit 12 \
+      --json
+    ;;
+
   search)
     # Usage:
     #   ai-imsg-read search <query> [limit]
@@ -95,6 +114,6 @@ case "$COMMAND" in
     ;;
 
   *)
-    die "permitted commands: chats, history, search"
+    die "permitted commands: chats, history, history-window, search"
     ;;
 esac

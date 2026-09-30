@@ -7,8 +7,21 @@ import json
 import sys
 from pathlib import Path
 
+from .ao_correlation import (
+    BestEffortAOEmitter,
+    applied_receipts,
+    outcome_event,
+    pr_number_for_issue,
+    validation_receipts,
+)
 from .config import ConfigError, load_config, validate_model_catalog
-from .integrations import CodexCatalogClient, ExternalCallError, LinearGraphQLClient
+from .integrations import (
+    CodexCatalogClient,
+    ExternalCallError,
+    GitHubClient,
+    LinearGraphQLClient,
+    MissingAuth,
+)
 from .linear_integration import (
     LinearWriter,
     capture_qualified_metadata,
@@ -19,12 +32,11 @@ from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
 from .runtime import RunMode
 from .scheduler import load_schedule_plan
+from .symphony_recovery import run_with_recovery
 from .symphony_supervisor import (
     preflight as symphony_preflight,
 )
-from .symphony_supervisor import (
-    supervise as supervise_symphony,
-)
+from .symphony_supervisor import resume_from_incident
 from .triage import capture_live_snapshot, run_triage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,8 +49,24 @@ def parser() -> argparse.ArgumentParser:
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("validate-config")
     subcommands.add_parser("models-check")
-    subcommands.add_parser("symphony-preflight")
-    subcommands.add_parser("symphony-run")
+    preflight = subcommands.add_parser("symphony-preflight")
+    preflight.add_argument(
+        "--worker-class", choices=["standard", "deep"], default="standard"
+    )
+    symphony_run = subcommands.add_parser("symphony-run")
+    symphony_run.add_argument(
+        "--worker-class", choices=["standard", "deep"], default="standard"
+    )
+    resume = subcommands.add_parser("symphony-resume")
+    resume.add_argument("--incident", type=Path, required=True)
+    resume.add_argument("--issue", required=True)
+    ao_reconcile = subcommands.add_parser("symphony-ao-reconcile")
+    ao_reconcile.add_argument("--issue", required=True)
+    ao_reconcile.add_argument(
+        "--emit",
+        action="store_true",
+        help="send confirmed facts to the local collector",
+    )
     subcommands.add_parser("schedule-plan")
     subcommands.add_parser("linear-metadata-capture")
     linear_check = subcommands.add_parser("linear-metadata-check")
@@ -87,10 +115,82 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "symphony-preflight":
-            print(json.dumps(symphony_preflight(config, ROOT), sort_keys=True))
+            print(
+                json.dumps(
+                    symphony_preflight(config, ROOT, worker_class=args.worker_class),
+                    sort_keys=True,
+                )
+            )
             return 0
         if args.command == "symphony-run":
-            return supervise_symphony(config, ROOT)
+            return run_with_recovery(config, ROOT, worker_class=args.worker_class)
+        if args.command == "symphony-resume":
+            print(
+                json.dumps(
+                    resume_from_incident(config, args.incident, args.issue),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.command == "symphony-ao-reconcile":
+            state_root = config.runtime_prefix() / "state"
+            receipts = applied_receipts(state_root, args.issue)
+            linear_issue = None
+            try:
+                linear_issue = (
+                    LinearGraphQLClient()
+                    .query(
+                        "query($id: String!) { issue(id: $id) { id identifier state { name } } }",
+                        {"id": args.issue},
+                        timeout=3,
+                    )
+                    .get("issue")
+                )
+            except (ExternalCallError, MissingAuth):
+                pass
+            pull_request = None
+            number = pr_number_for_issue(receipts)
+            if number is not None:
+                try:
+                    pull_request = GitHubClient("vnsparacio/sanctum").run_json(
+                        [
+                            "pr",
+                            "view",
+                            str(number),
+                            "--json",
+                            "number,state,baseRefName,headRefName,headRefOid,statusCheckRollup",
+                        ],
+                        timeout=5,
+                    )
+                except (ExternalCallError, MissingAuth):
+                    pass
+            event = outcome_event(
+                args.issue,
+                receipts,
+                validations=validation_receipts(state_root, args.issue),
+                linear_issue=linear_issue,
+                pull_request=pull_request,
+            )
+            delivered = False
+            if event is not None and args.emit:
+                delivered = BestEffortAOEmitter(
+                    config.runtime_prefix()
+                    / "logs"
+                    / "implementation"
+                    / "ao-outcomes.jsonl"
+                ).emit(event)
+            print(
+                json.dumps(
+                    {
+                        "issue": args.issue,
+                        "facts": event.fields if event is not None else {},
+                        "emitted": bool(args.emit and event is not None),
+                        "collector_accepted": delivered,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.command == "schedule-plan":
             print(
                 json.dumps(

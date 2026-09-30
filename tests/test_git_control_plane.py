@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +13,7 @@ from unittest.mock import patch
 from sanctum_agents.git_control_plane import (
     GitControlError,
     GitControlPlane,
+    GitOperationTimeout,
     UnknownGitResult,
 )
 
@@ -25,7 +28,7 @@ class GitControlPlaneTests(unittest.TestCase):
         self.workspace = self.workspaces / "TTE-9"
         self.state = self.root / "private-state"
         self._run(["git", "init", "--bare", str(self.remote)], cwd=self.root)
-        self._run(["git", "init", "-b", "v1.2-dev", str(self.seed)], cwd=self.root)
+        self._run(["git", "init", "-b", "v1.3-dev", str(self.seed)], cwd=self.root)
         (self.seed / "README.md").write_text("accepted base\n")
         self._run(["git", "add", "README.md"], cwd=self.seed)
         self._run(
@@ -42,14 +45,14 @@ class GitControlPlaneTests(unittest.TestCase):
             cwd=self.seed,
         )
         self._run(["git", "remote", "add", "origin", str(self.remote)], cwd=self.seed)
-        self._run(["git", "push", "origin", "v1.2-dev"], cwd=self.seed)
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
         self.workspaces.mkdir()
         self._run(
             [
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 "--single-branch",
                 str(self.remote),
                 str(self.workspace),
@@ -78,14 +81,14 @@ class GitControlPlaneTests(unittest.TestCase):
     def test_authorized_bootstrap_uses_only_accepted_base(self):
         value = self.broker().prepare()
         self.assertEqual("symphony/tte-9", value["branch"])
-        self.assertEqual("origin/v1.2-dev", value["base"])
+        self.assertEqual("origin/v1.3-dev", value["base"])
         self.assertEqual(
             "symphony/tte-9",
             self._run(
                 ["git", "branch", "--show-current"], cwd=self.workspace
             ).stdout.strip(),
         )
-        with self.assertRaisesRegex(GitControlError, "only origin/v1.2-dev"):
+        with self.assertRaisesRegex(GitControlError, "only origin/v1.3-dev"):
             self.broker().prepare("main")
 
     def test_wrong_branch_and_remote_are_rejected(self):
@@ -103,7 +106,7 @@ class GitControlPlaneTests(unittest.TestCase):
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 str(self.remote),
                 str(replacement),
             ],
@@ -122,6 +125,99 @@ class GitControlPlaneTests(unittest.TestCase):
         with self.assertRaisesRegex(GitControlError, "reviewed repository remote"):
             self.broker().status()
 
+    def test_exact_legacy_lease_migrates_and_refreshes_untouched_branch(self):
+        broker = self.broker()
+        broker.prepare()
+        identity = broker.identity()
+        lease_path = broker._lease_path(identity)
+        legacy = json.loads(lease_path.read_text())
+        legacy["schema_version"] = 1
+        legacy.pop("base_head")
+        lease_path.write_text(json.dumps(legacy))
+
+        (self.seed / "README.md").write_text("advanced accepted base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+        expected = self._run(["git", "rev-parse", "HEAD"], cwd=self.seed).stdout.strip()
+
+        value = broker.prepare()
+
+        self.assertEqual(expected, value["head"])
+        migrated = json.loads(lease_path.read_text())
+        self.assertEqual(2, migrated["schema_version"])
+        self.assertEqual(expected, migrated["base_head"])
+
+    def test_fresh_workspace_hook_rebinds_only_static_stale_lease(self):
+        broker = self.broker()
+        identity = broker.identity()
+        base_head = broker._head()
+        stale = broker._lease_value(identity, base_head)
+        stale["workspace_inode"] += 1
+        path = broker._lease_path(identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(stale))
+
+        value = broker.prepare(fresh_workspace=True)
+
+        self.assertEqual("symphony/tte-9", value["branch"])
+        self.assertEqual(
+            broker._lease_value(identity, base_head), json.loads(path.read_text())
+        )
+
+    def test_fresh_workspace_hook_preserves_lease_when_receipts_exist(self):
+        broker = self.broker()
+        identity = broker.identity()
+        stale = broker._lease_value(identity, broker._head())
+        stale["git_dir_inode"] += 1
+        path = broker._lease_path(identity)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(stale))
+        operations = self.state / "operations" / identity.issue_identifier
+        operations.mkdir(parents=True)
+        (operations / "preserve.json").write_text("{}")
+
+        with self.assertRaisesRegex(GitControlError, "cannot safely replace"):
+            broker.prepare(fresh_workspace=True)
+
+    def test_advanced_base_preserves_workspace_with_operation_receipts(self):
+        broker = self.broker()
+        broker.prepare()
+        operations = self.state / "operations" / "TTE-9"
+        operations.mkdir(parents=True)
+        (operations / "preserve.json").write_text("{}")
+        (self.seed / "README.md").write_text("advanced accepted base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+
+        with self.assertRaisesRegex(GitControlError, "advanced"):
+            broker.prepare()
+
     def test_workspace_symlink_and_git_pointer_are_rejected(self):
         link = self.root / "TTE-10"
         link.symlink_to(self.workspace, target_is_directory=True)
@@ -133,7 +229,7 @@ class GitControlPlaneTests(unittest.TestCase):
                 "git",
                 "clone",
                 "--branch",
-                "v1.2-dev",
+                "v1.3-dev",
                 str(self.remote),
                 str(pointer_workspace),
             ],
@@ -167,6 +263,43 @@ class GitControlPlaneTests(unittest.TestCase):
             cwd=self.root,
         ).stdout.strip()
         self.assertEqual(committed["commit"], remote_head)
+
+    def test_commit_receipt_records_only_fresh_observed_ao_attempt(self):
+        broker = self.broker()
+        broker.prepare()
+        active = self.state.parent / "ao-correlation" / "active"
+        active.mkdir(parents=True)
+        binding = active / "TTE-9.json"
+        binding.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "issue_identifier": "TTE-9",
+                    "workspace_path": str(self.workspace.resolve()),
+                    "run_id": "implementation-20260930T020838Z-da1429c96768",
+                    "attempt_id": "a" * 24,
+                    "updated_at": time.time(),
+                }
+            )
+        )
+        (self.workspace / "docs.md").write_text("bounded change\n")
+        broker.commit("Record observed attempt", ["docs.md"], "with-ao-binding")
+        receipt = json.loads(
+            (
+                self.state / "operations" / "TTE-9" / "commit-with-ao-binding.json"
+            ).read_text()
+        )
+        self.assertEqual("a" * 24, receipt["ao_attempt_id"])
+
+        binding.unlink()
+        (self.workspace / "docs.md").write_text("next bounded change\n")
+        broker.commit("Commit without AO", ["docs.md"], "without-ao-binding")
+        receipt = json.loads(
+            (
+                self.state / "operations" / "TTE-9" / "commit-without-ao-binding.json"
+            ).read_text()
+        )
+        self.assertNotIn("ao_attempt_id", receipt)
 
     def test_rejected_directory_scope_leaves_index_clean(self):
         broker = self.broker()
@@ -237,7 +370,7 @@ class GitControlPlaneTests(unittest.TestCase):
             if phase == "after_commit":
                 from sanctum_agents import git_control_plane
 
-                raise git_control_plane._InjectedAmbiguity("synthetic lost reply")
+                raise git_control_plane.GitOperationTimeout("synthetic lost reply")
 
         broker = self.broker(fault_injector=fault)
         broker.prepare()
@@ -265,7 +398,7 @@ class GitControlPlaneTests(unittest.TestCase):
             if phase == "after_push":
                 from sanctum_agents import git_control_plane
 
-                raise git_control_plane._InjectedAmbiguity("synthetic lost reply")
+                raise git_control_plane.GitOperationTimeout("synthetic lost reply")
 
         broker = self.broker(fault_injector=fault)
         broker.prepare()
@@ -276,20 +409,100 @@ class GitControlPlaneTests(unittest.TestCase):
         replay = self.broker().push("push-unknown")
         self.assertEqual("already_applied", replay["status"])
 
+    def test_push_operation_id_is_bound_to_local_head(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("first push intent\n")
+        broker.commit("Prepare first push intent", ["docs.md"], "first-commit")
+        broker.push("stable-push-operation")
+        self.assertEqual(
+            "already_applied", broker.push("stable-push-operation")["status"]
+        )
+        (self.workspace / "docs.md").write_text("changed push intent\n")
+        broker.commit("Prepare changed push intent", ["docs.md"], "second-commit")
+        with self.assertRaisesRegex(GitControlError, "different push request"):
+            broker.push("stable-push-operation")
+
+    def test_push_base_check_timeout_is_a_broker_error(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("timeout before push\n")
+        broker.commit("Prepare timeout test", ["docs.md"], "timeout-commit")
+        with patch.object(
+            broker,
+            "_require_base_unchanged",
+            side_effect=GitOperationTimeout("Git operation timed out"),
+        ):
+            with self.assertRaises(GitControlError) as raised:
+                broker.push("timeout-push")
+        self.assertEqual("git_timeout", raised.exception.code)
+
+    def test_push_detects_base_advancement_before_remote_mutation(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("bounded branch change\n")
+        broker.commit("Prepare push from accepted base", ["docs.md"], "branch-commit")
+        (self.seed / "README.md").write_text("advanced base\n")
+        self._run(["git", "add", "README.md"], cwd=self.seed)
+        self._run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.invalid",
+                "commit",
+                "-m",
+                "Advance accepted base",
+            ],
+            cwd=self.seed,
+        )
+        self._run(["git", "push", "origin", "v1.3-dev"], cwd=self.seed)
+        with self.assertRaisesRegex(GitControlError, "advanced"):
+            broker.push("base-advanced-push")
+        remote_branch = subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(self.remote),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/symphony/tte-9",
+            ],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(0, remote_branch.returncode)
+
     def test_unreconciled_pending_push_is_unknown_and_not_replayed(self):
         broker = self.broker()
         broker.prepare()
+        identity = broker.identity()
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "push",
             "state": "pending",
             "operation_id": "lost-push",
             "issue_identifier": "TTE-9",
             "branch": "symphony/tte-9",
             "local_head": broker._head(),
+            "base_head": broker._require_lease(identity)["base_head"],
             "remote_head_before": None,
         }
-        identity = broker.identity()
+        receipt["request_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "branch": receipt["branch"],
+                    "local_head": receipt["local_head"],
+                    "base_head": receipt["base_head"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         path = broker._receipt_path(identity, "push", "lost-push")
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(receipt))
@@ -353,7 +566,7 @@ class GitControlPlaneTests(unittest.TestCase):
         response = {
             "number": 41,
             "url": "https://github.example/pr/41",
-            "baseRefName": "v1.2-dev",
+            "baseRefName": "v1.3-dev",
             "headRefName": "symphony/tte-9",
             "headRefOid": broker._head(),
             "headRepository": {"nameWithOwner": "vnsparacio/sanctum"},
@@ -374,13 +587,15 @@ class GitControlPlaneTests(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0, "", "")
 
         with patch.object(broker, "_gh", side_effect=fake_gh):
-            value = broker.ensure_pull_request(response["title"], response["body"])
+            value = broker.ensure_pull_request(
+                response["title"], response["body"], "pr-create"
+            )
         self.assertEqual("created", value["status"])
         lookup = next(call for call in calls if call[:2] == ("pr", "list"))
         self.assertEqual("symphony/tte-9", lookup[lookup.index("--head") + 1])
         create = next(call for call in calls if call[:2] == ("pr", "create"))
         self.assertIn("vnsparacio/sanctum", create)
-        self.assertIn("v1.2-dev", create)
+        self.assertIn("v1.3-dev", create)
         self.assertIn("symphony/tte-9", create)
         self.assertNotIn("merge", create)
         self.assertNotIn("--force", create)
@@ -393,7 +608,7 @@ class GitControlPlaneTests(unittest.TestCase):
             {
                 "number": 42,
                 "url": "https://github.example/pr/42",
-                "baseRefName": "v1.2-dev",
+                "baseRefName": "v1.3-dev",
                 "headRefName": "symphony/tte-9",
                 "headRefOid": broker._head(),
                 "headRepository": {"nameWithOwner": "attacker/sanctum"},
@@ -406,6 +621,63 @@ class GitControlPlaneTests(unittest.TestCase):
         completed = subprocess.CompletedProcess((), 0, json.dumps(response), "")
         with patch.object(broker, "_gh", return_value=completed):
             self.assertIsNone(broker._open_pull_request(identity))
+
+    def test_pull_request_creation_reconciles_once_and_operation_id_is_stable(self):
+        broker = self.broker()
+        broker.prepare()
+        (self.workspace / "docs.md").write_text("PR handoff\n")
+        broker.commit("Prepare pull request handoff", ["docs.md"], "pr-commit")
+        broker.push("pr-push")
+        github_config = self.root / "github-config"
+        github_config.mkdir(mode=0o700)
+        gh_dir = self.root / "bin"
+        gh_dir.mkdir()
+        gh = gh_dir / "gh"
+        gh.write_text("#!/bin/sh\nexit 1\n")
+        gh.chmod(0o700)
+        broker = self.broker(
+            credential_helper=str(gh), github_config_dir=str(github_config)
+        )
+        response = {
+            "number": 43,
+            "url": "https://github.example/pr/43",
+            "baseRefName": "v1.3-dev",
+            "headRefName": "symphony/tte-9",
+            "headRefOid": broker._head(),
+            "headRepository": {"nameWithOwner": "vnsparacio/sanctum"},
+            "headRepositoryOwner": {"login": "vnsparacio"},
+            "isDraft": False,
+            "title": "Complete bounded Git handoff",
+            "body": "Implements TTE-9 with bounded validation evidence.",
+        }
+        lookups = 0
+        creates = 0
+
+        def ambiguous_create(*arguments, **_values):
+            nonlocal lookups, creates
+            if arguments[:2] == ("pr", "list"):
+                lookups += 1
+                payload = [] if lookups == 1 else [response]
+                return subprocess.CompletedProcess(
+                    arguments, 0, json.dumps(payload), ""
+                )
+            if arguments[:2] == ("pr", "create"):
+                creates += 1
+                from sanctum_agents import git_control_plane
+
+                raise git_control_plane.GitOperationTimeout("synthetic lost response")
+            raise AssertionError(arguments)
+
+        with patch.object(broker, "_gh", side_effect=ambiguous_create):
+            first = broker.ensure_pull_request(
+                response["title"], response["body"], "stable-pr-operation"
+            )
+            second = broker.ensure_pull_request(
+                response["title"], response["body"], "stable-pr-operation"
+            )
+        self.assertEqual("created", first["status"])
+        self.assertEqual("already_applied", second["status"])
+        self.assertEqual(1, creates)
 
 
 if __name__ == "__main__":

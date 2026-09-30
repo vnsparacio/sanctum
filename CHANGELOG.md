@@ -1,3 +1,66 @@
+# Sanctum v1.3.0
+
+V1.3.0 extends the Mac-owned V1.2 authority model. Source publication does not
+install or migrate an owner's private runtime. The accepted development line
+contains the following reviewed changes, with the limits below.
+
+## Product and runtime
+
+- Add resumable `./sanctum setup` and supervised `start`, `ready`, `status`,
+  `logs`, and `stop` operations. Setup keeps credentials, OAuth, macOS privacy
+  grants, WebUI enrollment, model cache, and runtime state in the external
+  owner prefix; process identity and readiness checks refuse unknown listeners.
+- Separate ordinary Assistant Mode from explicit `/work`. Add bounded
+  conversational WebUI audit consent and a fresh local synthesis path for
+  tool-free answers. Tighten Source-First evidence, weather, news, comparison,
+  calendar, Messages, and local answer budgets after observed failures; missing
+  evidence is reported rather than filled by inference or an undisclosed
+  fallback.
+- Expand isolated Work Mode to reviewed project profiles, bounded text-file
+  create/delete/move, exact multi-file patches, protected evaluation, fixed
+  repository commands, host-owned Git and Linear evidence, optional validated
+  checkpoints, low-disk safeguards, and private decision notes with an offline
+  timeline. These additions retain exact path, content, budget, reviewer, and
+  Human Review gates.
+- Add an opt-in, pinned Qwen Code coding engine inside the Work Mode snapshot
+  boundary and separately support interactive Qwen Code with a demand-started
+  private Runpod model and managed VS Code GUI. The owner-gated TTE-90 fixture
+  qualified one small Qwen-to-PR lifecycle; isolated MoodLog proofs do not
+  establish a completed live Qwen Code Work Mode task.
+
+## Engineering and observability
+
+- Raise bounded Symphony concurrency to five implementation workers in one
+  service. Add startup, blocker, workspace-lease, recovery, validation-cache,
+  review, and CI safeguards. Each implementation still needs both owner-set
+  Linear gates and stops at Human Review; management agents cannot authorize
+  execution or merge.
+- Add protected-branch rules, review ownership, a PR evidence template,
+  release qualification checks, stronger secret scanning, and a
+  privacy-preserving Codex token baseline for development-cost analysis.
+- Add opt-in restricted interaction-content telemetry in a separate private
+  spool and immutable S3 delivery path, with bounded Splunk content search
+  assets. It remains distinct from metadata-only operational events and the
+  gateway APM/custom-metric slice; private content never enters operational
+  telemetry or authority decisions.
+- Qualify native Codex traces through a loopback collector into Splunk Agent
+  Observability (TTE-98), then host-owned Symphony attempt/session/outcome
+  correlation (TTE-99) and one live issue-to-PR reconciliation (TTE-100).
+  Telemetry is observational, content-free, and fail-open. Native model
+  identity exists on ancestor request spans, but the normalized LLM model
+  display remains empty until a separately reviewed trace-aware amendment.
+
+## Retained limits
+
+Full operation targets macOS on Apple Silicon; Ubuntu CI covers portable
+contracts only. Broad autonomous coding quality, a completed live Qwen Code
+MoodLog Work Mode run, full Linux operation, production cutover, automatic
+private-runtime migration, and Runpod/vLLM/GPU/host monitoring are not claimed.
+The owner retains authentication, disclosure, approval, egress, budgets,
+provider cleanup, merge, and Done authority. See the
+[V1.3 release-completion record](docs/history/v1.3/V1.3-RELEASE-COMPLETION.md)
+and [current limitations](docs/current/limitations.md).
+
 # Sanctum v1.2.0
 
 **COMPLETE WITH DOCUMENTED LIMITATIONS.** This backward-compatible release preserves the Mac-owned authority model while adding bounded agent management, stronger repository controls and an observational Splunk integration. It does not migrate or redeploy the private owner runtime.

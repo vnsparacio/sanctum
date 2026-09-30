@@ -1,11 +1,14 @@
 import importlib.util
 import json
 import os
+import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -13,6 +16,21 @@ spec = importlib.util.spec_from_file_location(
 )
 op = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(op)
+component_spec = importlib.util.spec_from_file_location(
+    "component_tools", ROOT / "scripts/component.py"
+)
+component = importlib.util.module_from_spec(component_spec)
+component_spec.loader.exec_module(component)
+work_mode_spec = importlib.util.spec_from_file_location(
+    "work_mode_tools", ROOT / "scripts/upgrade_work_mode.py"
+)
+work_mode = importlib.util.module_from_spec(work_mode_spec)
+work_mode_spec.loader.exec_module(work_mode)
+source_first_spec = importlib.util.spec_from_file_location(
+    "source_first_tools", ROOT / "scripts/upgrade_source_first.py"
+)
+source_first = importlib.util.module_from_spec(source_first_spec)
+source_first_spec.loader.exec_module(source_first)
 
 
 class Setup(unittest.TestCase):
@@ -31,6 +49,13 @@ class Setup(unittest.TestCase):
         self.assertEqual(cfg["tools"]["profile"], "minimal")
         self.assertIn("exec", cfg["tools"]["deny"])
         self.assertEqual(cfg["gateway"]["bind"], "loopback")
+        main = cfg["agents"]["entries"]["main"]
+        self.assertEqual(main["thinkingDefault"], "off")
+        self.assertFalse(main["params"]["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(
+            cfg["models"]["providers"]["mlx-local"]["models"][0]["contextWindow"],
+            24576,
+        )
         self.assertFalse(
             json.loads((self.prefix / "gate/SETTINGS.json").read_text())["gpu"][
                 "auto_start"
@@ -60,6 +85,278 @@ class Setup(unittest.TestCase):
         with self.assertRaises(ValueError):
             op.setup(self.prefix)
         self.assertEqual(p.read_text(), "{}")
+
+    def test_work_mode_amendment_updates_only_reviewed_local_model_context(self):
+        op.setup(self.prefix)
+        config_path = self.prefix / "config/openclaw.json"
+        config = json.loads(config_path.read_text())
+        local = config["models"]["providers"]["mlx-local"]["models"][0]
+        local["contextWindow"] = 16384
+        firecrawl = str(
+            self.prefix / "runtime/web/node_modules/@openclaw/firecrawl-plugin"
+        )
+        config["tools"]["web"] = {
+            "search": {"enabled": True, "provider": "parallel"},
+            "fetch": {"enabled": True, "provider": "firecrawl"},
+        }
+        config["plugins"]["load"]["paths"].append(firecrawl)
+        config["plugins"]["allow"].append("firecrawl")
+        config["plugins"]["entries"]["firecrawl"] = {"enabled": True}
+        config_path.write_text(json.dumps(config))
+        updated = json.loads(work_mode.openclaw_config(self.prefix))
+        self.assertEqual(
+            updated["models"]["providers"]["mlx-local"]["models"][0]["contextWindow"],
+            24576,
+        )
+        self.assertEqual(
+            updated["agents"]["defaults"]["model"],
+            config["agents"]["defaults"]["model"],
+        )
+        self.assertNotIn("provider", updated["tools"]["web"]["fetch"])
+        self.assertNotIn(firecrawl, updated["plugins"]["load"]["paths"])
+        self.assertNotIn("firecrawl", updated["plugins"]["allow"])
+        self.assertNotIn("firecrawl", updated["plugins"]["entries"])
+
+    def test_work_mode_amendment_exposes_patch_to_profiles_and_broker(self):
+        op.setup(self.prefix)
+        config = json.loads(work_mode.openclaw_config(self.prefix))
+        profiles = json.loads(
+            work_mode.work_profile(
+                self.prefix,
+                "/usr/local/bin/docker",
+                "unix:///var/run/docker.sock",
+                "runner:test",
+                "sha256:test",
+            )
+        )["profiles"]
+        for profile in profiles.values():
+            self.assertIn("worktree_patch", profile["capabilities"])
+        self.assertIn(
+            "worktree_patch",
+            config["agents"]["entries"]["workmode-broker"]["tools"]["allow"],
+        )
+        self.assertIn("worktree_patch", config["tools"]["alsoAllow"])
+        self.assertIn(
+            "worktree_patch", config["agents"]["entries"]["main"]["tools"]["deny"]
+        )
+
+    def test_work_mode_upgrade_installs_private_lead_launcher_and_rolls_back(self):
+        op.setup(self.prefix)
+        name = "gate/runtime/bootstrap-private-lead-vllm.sh"
+        launcher = self.prefix / name
+        old = "#!/bin/sh\nexit 31\n"
+        launcher.write_text(old)
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze[name.removeprefix("gate/")] = op.sha(launcher)
+        freeze_path.write_text(json.dumps(freeze))
+        receipt_path = self.prefix / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["files"][name] = op.sha(launcher)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        receipt_path.write_text(json.dumps(receipt))
+        with (
+            patch.object(work_mode, "safe"),
+            patch.object(
+                work_mode,
+                "docker_details",
+                return_value=("docker", "host", "tag", "sha256:synthetic"),
+            ),
+            patch.object(
+                work_mode,
+                "qwen_image_details",
+                return_value=("sanctum-qwen-code:test", "sha256:" + "a" * 64),
+            ),
+        ):
+            work_mode.apply(self.prefix)
+            self.assertEqual(launcher.read_bytes(), (ROOT / name).read_bytes())
+            op.verify_install(self.prefix)
+            installed_freeze = json.loads(freeze_path.read_text())
+            self.assertEqual(
+                installed_freeze[name.removeprefix("gate/")], op.sha(launcher)
+            )
+            record = next((self.prefix / "state/amendments").iterdir())
+            transaction = json.loads((record / "transaction.json").read_text())
+            if (ROOT / ".git").exists():
+                self.assertRegex(transaction["source_commit"], r"^[0-9a-f]{40}$")
+            else:
+                self.assertIsNone(transaction["source_commit"])
+            self.assertEqual(
+                transaction["source_manifest_sha256"],
+                op.sha(ROOT / "SOURCE-MANIFEST.json"),
+            )
+            work_mode.rollback(self.prefix, record)
+        self.assertEqual(launcher.read_text(), old)
+        op.verify_install(self.prefix)
+
+    def test_work_mode_rollback_rejects_record_traversal_and_target_escape(self):
+        records = self.prefix / "state/amendments"
+        records.mkdir(parents=True)
+        outside = self.prefix.parent / "outside"
+        outside.mkdir()
+        (outside / "transaction.json").write_text(
+            json.dumps({"schema": "sanctum-work-mode-amendment/v1", "before": {}})
+        )
+        with patch.object(work_mode, "safe"):
+            with self.assertRaisesRegex(ValueError, "belong to prefix"):
+                work_mode.rollback(
+                    self.prefix, records / ".." / ".." / ".." / "outside"
+                )
+            record = records / "synthetic"
+            record.mkdir()
+            (record / "transaction.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "sanctum-work-mode-amendment/v1",
+                        "before": {"../outside/victim": "absent"},
+                    }
+                )
+            )
+            victim = outside / "victim"
+            victim.write_text("keep\n")
+            with self.assertRaisesRegex(ValueError, "Unsafe rollback targets"):
+                work_mode.rollback(self.prefix, record)
+            self.assertEqual("keep\n", victim.read_text())
+
+    def test_work_mode_upgrade_preserves_registered_profile_and_refreshes_runtime(self):
+        op.setup(self.prefix)
+        old = json.loads(
+            work_mode.work_profile(
+                self.prefix, "docker-old", "host-old", "tag-old", "image-old"
+            )
+        )
+        repo = op.private(self.prefix / "owner-repo")
+        staging = op.private(
+            self.prefix
+            / "state/gate/private-lead/work-mode/registered/moodtest/staging"
+        )
+        owner = {
+            **old["profiles"]["grade01"],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "task_protection": old["profiles"]["sanctum"]["task_protection"],
+            "max_iterations": 32,
+            "max_model_calls": 32,
+            "max_tokens": 200000,
+        }
+        owner["stages"] = [
+            {
+                "name": "logic",
+                "goal": "Implement logic and tests",
+                "required_files": ["logic.js"],
+            },
+            {"name": "ui", "goal": "Connect UI", "required_files": ["index.html"]},
+        ]
+        old["profiles"]["moodtest"] = owner
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(json.dumps(old))
+        path.chmod(0o600)
+        rendered = work_mode.work_profile(
+            self.prefix, "docker-new", "host-new", "tag-new", "image-new"
+        )
+        result = json.loads(
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+        )
+        updated = result["profiles"]["moodtest"]
+        self.assertEqual(updated["repository"], str(repo))
+        self.assertEqual(updated["staging_root"], str(staging))
+        self.assertEqual(updated["task_protection"], owner["task_protection"])
+        self.assertEqual(updated["runner_image_id"], "image-new")
+        self.assertEqual(updated["docker_path"], "docker-new")
+        self.assertEqual(updated["max_iterations"], 32)
+        self.assertEqual(updated["max_model_calls"], 32)
+        self.assertEqual(updated["max_tokens"], 200000)
+        self.assertEqual(updated["stages"], owner["stages"])
+        owner["disk_bytes"] = 1
+        path.write_text(json.dumps(old))
+        with self.assertRaisesRegex(ValueError, "cannot be refreshed safely"):
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+
+    def test_work_mode_upgrade_refreshes_qwen_image_and_preserves_fixed_budget(self):
+        op.setup(self.prefix)
+        old = json.loads(
+            work_mode.work_profile(
+                self.prefix,
+                "docker-old",
+                "host-old",
+                "tag-old",
+                "image-old",
+                "qwen-old",
+                "sha256:" + "a" * 64,
+            )
+        )
+        repo = op.private(self.prefix / "owner-qwen-repo")
+        staging = op.private(
+            self.prefix
+            / "state/gate/private-lead/work-mode/registered/moodqwen/staging"
+        )
+        old["profiles"]["moodqwen"] = {
+            **old["profiles"]["grade01"],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "engine": "qwen_code",
+            "qwen_model_calls": 48,
+            "qwen_tool_calls": 40,
+            "qwen_wall_seconds": 1200,
+            "qwen_outer_seconds": 2400,
+            "qwen_retries": 0,
+            "max_gpu_seconds": 2700,
+            "max_cost_usd": 10,
+        }
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(json.dumps(old))
+        path.chmod(0o600)
+        rendered = work_mode.work_profile(
+            self.prefix,
+            "docker-new",
+            "host-new",
+            "tag-new",
+            "image-new",
+            "qwen-new",
+            "sha256:" + "b" * 64,
+        )
+        updated = json.loads(
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+        )["profiles"]["moodqwen"]
+        self.assertEqual(updated["qwen_runner_image_id"], "sha256:" + "b" * 64)
+        self.assertEqual(updated["engine"], "qwen_code")
+        self.assertEqual(updated["max_gpu_seconds"], 2700)
+        self.assertEqual(updated["max_cost_usd"], 10)
+        old["profiles"]["moodqwen"]["max_cost_usd"] = 11
+        path.write_text(json.dumps(old))
+        with self.assertRaisesRegex(ValueError, "Qwen budget drift"):
+            work_mode.preserve_registered_profiles(self.prefix, rendered)
+
+    def test_doctor_detects_stale_imported_webui_functions(self):
+        op.setup(self.prefix)
+        self.assertEqual(op.webui_function_sync(self.prefix), "not-enrolled")
+        database = self.prefix / "state/webui/webui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "create table function (id text primary key, content text, is_active boolean)"
+            )
+            connection.executemany(
+                "insert into function values (?, ?, ?)",
+                [
+                    (
+                        "sanctum_gate_guard",
+                        (self.prefix / "gate/webui/guard.py").read_text(),
+                        True,
+                    ),
+                    ("sanctum_gate_pipe", "stale pipe", True),
+                ],
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "stale:sanctum_gate_pipe")
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "update function set content = ? where id = ?",
+                (
+                    (self.prefix / "gate/webui/pipe.py").read_text(),
+                    "sanctum_gate_pipe",
+                ),
+            )
+        self.assertEqual(op.webui_function_sync(self.prefix), "pass")
 
     def test_nonempty_prefix_is_preserved(self):
         self.prefix.mkdir(mode=0o700)
@@ -105,6 +402,47 @@ class Setup(unittest.TestCase):
             self.assertNotIn("@GATE@", text)
             self.assertNotIn("@PYTHON@", text)
             self.assertNotIn("@SANCTUM_PACKAGE@", text)
+
+    def test_rendered_content_telemetry_resolves_pinned_ajv(self):
+        op.setup(self.prefix)
+        script = """import {pathToFileURL} from 'node:url';
+const root=process.argv[1];
+for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
+  await import(pathToFileURL(root+'/gate/content-telemetry/'+name));
+}
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script, str(self.prefix)],
+            cwd=self.prefix.parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_content_telemetry_runtime_amendment_is_reversible(self):
+        op.setup(self.prefix)
+        module_spec = importlib.util.spec_from_file_location(
+            "content_telemetry_upgrade",
+            ROOT / "scripts/upgrade_content_telemetry_runtime.py",
+        )
+        upgrade = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(upgrade)
+        before = (self.prefix / "receipt.json").read_bytes()
+        record = upgrade.apply(self.prefix)
+        self.assertTrue((record / "complete").is_file())
+        transaction = json.loads((record / "transaction.json").read_text())
+        if (ROOT / ".git").exists():
+            self.assertRegex(transaction["source_commit"], r"^[0-9a-f]{40}$")
+        else:
+            self.assertIsNone(transaction["source_commit"])
+        self.assertEqual(
+            transaction["source_manifest_sha256"],
+            op.sha(ROOT / "SOURCE-MANIFEST.json"),
+        )
+        op.verify_install(self.prefix)
+        upgrade.rollback(self.prefix, record)
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+        op.verify_install(self.prefix)
 
     def test_gateway_process_identity_is_exact_and_stale_records_fail(self):
         expected = {
@@ -181,6 +519,68 @@ class Setup(unittest.TestCase):
         self.assertIn("bootstrap.py mlx", result.stderr)
         self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
+    def test_broker_group_selects_enabled_integrations_and_local_brokers(self):
+        config = self.prefix / "config"
+        config.mkdir(parents=True)
+        (config / "messages.enabled").write_text("enabled\n")
+        (config / "gmail.enabled").write_text("disabled\n")
+        (config / "calendar.enabled").write_text("enabled\n")
+        self.assertEqual(
+            component.selected_brokers(self.prefix),
+            ["messages", "calendar", "markdown", "files"],
+        )
+
+    def test_broker_group_stops_peers_when_one_exits(self):
+        config = self.prefix / "config"
+        config.mkdir(parents=True)
+        children = []
+
+        class Child:
+            def __init__(self):
+                self.pid = 1000 + len(children)
+                self.code = None
+                self.terminated = False
+                self.signal = None
+                self.killed = False
+
+            def poll(self):
+                return self.code
+
+            def terminate(self):
+                self.terminated = True
+                self.code = -15
+
+            def send_signal(self, signum):
+                self.signal = signum
+                self.code = -signum
+
+            def wait(self, timeout=None):
+                return self.code
+
+            def kill(self):
+                self.killed = True
+                self.code = -9
+
+        def spawn(*_args, **_kwargs):
+            child = Child()
+            children.append(child)
+            return child
+
+        def advance(_seconds):
+            children[0].code = 7
+
+        with (
+            patch.object(component.subprocess, "Popen", side_effect=spawn) as popen,
+            patch.object(component.time, "sleep", side_effect=advance),
+            patch.object(component.signal, "signal", return_value=signal.SIG_DFL),
+        ):
+            result = component.run_brokers(self.prefix, "/reviewed/python", {})
+        self.assertEqual(result, 7)
+        self.assertEqual(popen.call_count, 2)
+        self.assertFalse(children[0].terminated)
+        self.assertFalse(children[1].terminated)
+        self.assertEqual(children[1].signal, signal.SIGINT)
+
     def test_bootstrap_preserves_existing_runtime(self):
         op.setup(self.prefix)
         runtime = self.prefix / "runtime/webui"
@@ -210,6 +610,215 @@ if __name__ == "__main__":
 
 class Amendments(unittest.TestCase):
     setUp = Setup.setUp
+
+    def test_private_lead_volume_amendment_is_offline_reversible_and_preserved(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_lead_volume", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        settings = json.loads(settings_path.read_text())
+        settings["private_lead"]["enabled"] = True
+        settings["private_lead"]["auto_start"] = False
+        settings["gpu"]["volume_id"] = "legacy-volume"
+        settings["private_lead"]["volume_id"] = "legacy-volume"
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze["SETTINGS.json"] = op.sha(settings_path)
+        freeze_path.write_text(json.dumps(freeze, indent=2) + "\n")
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["gate/SETTINGS.json"] = op.sha(settings_path)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "OFFLINE"}),
+        )
+        before = settings_path.read_bytes()
+        proposal = {"private_lead_gpu": {"volume_id": "confirmed-volume"}}
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        amended = json.loads(settings_path.read_text())
+        self.assertEqual(amended["private_lead"]["volume_id"], "confirmed-volume")
+        self.assertEqual(amended["gpu"]["volume_id"], "legacy-volume")
+        self.assertFalse(amended["private_lead"]["auto_start"])
+        # Reapplying the staged release must retain the receipt-verified lead
+        # binding, rather than copying the retired 80B resource reference.
+        rendered = __import__(
+            "scripts.upgrade_private_lead", fromlist=["rendered_settings"]
+        )
+        self.assertEqual(
+            json.loads(rendered.rendered_settings(self.prefix))["private_lead"][
+                "volume_id"
+            ],
+            "confirmed-volume",
+        )
+        volume_record = next((self.prefix / "state/amendments").iterdir())
+        pair = {"gpu": "NVIDIA B200", "max_hourly_usd": 7}
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            mod.configure(self.prefix, {"private_lead_gpu": pair})
+        op.verify_install(self.prefix)
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["gpu"], "NVIDIA B200"
+        )
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["max_hourly_usd"], 7
+        )
+        self.assertFalse(
+            json.loads(settings_path.read_text())["private_lead"]["auto_start"]
+        )
+        work_upgrade = __import__(
+            "scripts.upgrade_work_mode", fromlist=["rendered_settings"]
+        )
+        for upgrade in (rendered, work_upgrade):
+            preserved = json.loads(upgrade.rendered_settings(self.prefix))[
+                "private_lead"
+            ]
+            self.assertEqual(
+                (preserved["gpu"], preserved["max_hourly_usd"]), ("NVIDIA B200", 7)
+            )
+        gpu_record = next(
+            path
+            for path in (self.prefix / "state/amendments").iterdir()
+            if path != volume_record
+        )
+        mod.rollback(self.prefix, gpu_record)
+        op.verify_install(self.prefix)
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["gpu"],
+            "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+        )
+        mod.rollback(self.prefix, volume_record)
+        op.verify_install(self.prefix)
+        self.assertEqual(settings_path.read_bytes(), before)
+
+    def test_private_lead_volume_amendment_rejects_invalid_or_active_state(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_lead_volume_invalid", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "receipt.json").read_bytes()
+        for item in (
+            {},
+            {"volume_id": ""},
+            {"volume_id": "bad volume"},
+            {"volume_id": "v", "auto_start": True},
+            {"gpu": "NVIDIA B200", "max_hourly_usd": 3},
+            {"gpu": "NVIDIA H200", "max_hourly_usd": 7},
+        ):
+            with self.subTest(item=item), self.assertRaises(ValueError):
+                mod.configure(self.prefix, {"private_lead_gpu": item})
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "READY", "pod_id": "owned"}),
+        )
+        with patch("platform.system", return_value="Darwin"):
+            with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+                mod.configure(self.prefix, {"private_lead_gpu": {"volume_id": "v"}})
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+
+    def test_private_lead_ssh_binding_amendment_checks_matching_key_pair(self):
+        mod = __import__("scripts.configure", fromlist=["configure"])
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        settings = json.loads(settings_path.read_text())
+        settings["private_lead"]["enabled"] = True
+        settings["private_lead"]["auto_start"] = False
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        freeze = json.loads(freeze_path.read_text())
+        freeze["SETTINGS.json"] = op.sha(settings_path)
+        freeze_path.write_text(json.dumps(freeze, indent=2) + "\n")
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["gate/SETTINGS.json"] = op.sha(settings_path)
+        receipt["files"]["gate/FREEZE.json"] = op.sha(freeze_path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        op.write(
+            self.prefix / "state/gate/gpu.json",
+            json.dumps({"phase": "RETIRED", "retired_confirmed_at": 1}),
+        )
+        op.write(
+            self.prefix / "state/gate/private-lead/gpu.json",
+            json.dumps({"phase": "OFFLINE"}),
+        )
+        key = self.prefix / "config/test_ed25519"
+        subprocess.run(
+            ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+            check=True,
+        )
+        proposal = {"private_lead_gpu": {"ssh_private_key": str(key)}}
+        original = subprocess.run
+
+        def guarded(args, **kwargs):
+            if "launchctl" in str(args[0]):
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return original(args, **kwargs)
+
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch("subprocess.run", side_effect=guarded),
+        ):
+            mod.configure(self.prefix, proposal)
+        self.assertEqual(
+            json.loads(settings_path.read_text())["private_lead"]["ssh_private_key"],
+            str(key),
+        )
+        op.verify_install(self.prefix)
+        key.with_suffix(".pub").write_text("ssh-ed25519 invalid\n")
+        with self.assertRaisesRegex(ValueError, "mismatch"):
+            mod.configure(self.prefix, proposal)
+
+    def test_preallocation_recovery_accepts_only_exact_failure_shape(self):
+        recovery = __import__(
+            "scripts.recover_private_lead_preallocation", fromlist=["eligible"]
+        )
+        state = {
+            "phase": "DEGRADED",
+            "error": "allocation_unresolved",
+            "allocation_uncertain": True,
+            "pod_id": None,
+            "allocation_id": None,
+            "manual_stop": True,
+            "pod_name": "sanctum-private-lead-stage-test",
+        }
+        summary = {
+            "status": "ENVIRONMENT_FAILURE",
+            "reason": "PRIVATE_LEAD_UNAVAILABLE",
+            "metrics": {"modelCalls": 0},
+            "cleanup": {"workspaceCleaned": True},
+        }
+        self.assertTrue(recovery.eligible(state, summary, True))
+        self.assertFalse(recovery.eligible({**state, "pod_id": "owned"}, summary, True))
+        self.assertFalse(recovery.eligible(state, summary, False))
+        self.assertFalse(
+            recovery.eligible(state, {**summary, "status": "RUNNING"}, True)
+        )
 
     def test_bounded_amendment_and_rollback(self):
         spec = importlib.util.spec_from_file_location(
@@ -301,6 +910,75 @@ class Amendments(unittest.TestCase):
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 mod.configure(self.prefix, {"observability": value})
+        self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
+
+    def test_content_telemetry_policy_is_validated_reversible_and_frozen(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_content_telemetry", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        settings_path = self.prefix / "gate/SETTINGS.json"
+        freeze_path = self.prefix / "gate/FREEZE.json"
+        before = settings_path.read_bytes()
+        mod.configure(
+            self.prefix,
+            {
+                "content_telemetry": {
+                    "enabled": True,
+                    "retention_days": 30,
+                    "access_policy": "owner_only",
+                }
+            },
+        )
+        op.verify_install(self.prefix)
+        settings = json.loads(settings_path.read_text())
+        self.assertEqual(
+            settings["content_telemetry"],
+            {
+                "enabled": True,
+                "retention_days": 30,
+                "access_policy": "owner_only",
+            },
+        )
+        freeze = json.loads(freeze_path.read_text())
+        self.assertEqual(op.sha(settings_path), freeze["SETTINGS.json"])
+        log = next((self.prefix / "state/amendments").iterdir())
+        mod.rollback(self.prefix, log)
+        op.verify_install(self.prefix)
+        self.assertEqual(before, settings_path.read_bytes())
+
+    def test_content_telemetry_rejects_unsafe_or_incomplete_policy(self):
+        spec = importlib.util.spec_from_file_location(
+            "configure_content_telemetry_invalid", ROOT / "scripts/configure.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        op.setup(self.prefix)
+        before = (self.prefix / "receipt.json").read_bytes()
+        for value in (
+            {"enabled": True, "retention_days": None, "access_policy": "owner_only"},
+            {"enabled": True, "retention_days": 0, "access_policy": "owner_only"},
+            {
+                "enabled": True,
+                "retention_days": 30,
+                "access_policy": "everyone",
+            },
+            {
+                "enabled": "yes",
+                "retention_days": 30,
+                "access_policy": "owner_only",
+            },
+            {
+                "enabled": False,
+                "retention_days": None,
+                "access_policy": "owner_only",
+                "bucket": "not-allowed",
+            },
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                mod.configure(self.prefix, {"content_telemetry": value})
         self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)
 
 
@@ -399,6 +1077,86 @@ class WorkProfileAmendments(unittest.TestCase):
         mod.rollback(self.prefix, next((self.prefix / "state/amendments").iterdir()))
         op.verify_install(self.prefix)
         self.assertEqual((self.prefix / "config/work-mode.json").read_bytes(), before)
+
+    def test_qwen_registration_requires_reviewed_image_and_sets_fixed_limits(self):
+        mod, _, policy, proposal = self.fixture()
+        proposal["work_profile"]["engine"] = "qwen_code"
+        with self.assertRaises(ValueError):
+            mod.configure(self.prefix, proposal)
+        policy["qwen_runner_image_id"] = "sha256:" + "a" * 64
+        path = self.prefix / "config/work-mode.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": "sanctum-work-mode-profiles/v1",
+                    "profiles": {"reviewed": policy},
+                }
+            )
+        )
+        receipt = op.receipt(self.prefix)
+        receipt["files"]["config/work-mode.json"] = op.sha(path)
+        (self.prefix / "receipt.json").write_text(json.dumps(receipt))
+        mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        registered = json.loads(path.read_text())["profiles"]["unseen"]
+        self.assertEqual(registered["engine"], "qwen_code")
+        self.assertEqual(
+            {
+                key: registered[key]
+                for key in (
+                    "qwen_model_calls",
+                    "qwen_tool_calls",
+                    "qwen_wall_seconds",
+                    "qwen_outer_seconds",
+                    "qwen_retries",
+                    "max_gpu_seconds",
+                    "max_cost_usd",
+                )
+            },
+            {
+                "qwen_model_calls": 48,
+                "qwen_tool_calls": 40,
+                "qwen_wall_seconds": 1200,
+                "qwen_outer_seconds": 2400,
+                "qwen_retries": 0,
+                "max_gpu_seconds": 2700,
+                "max_cost_usd": 10,
+            },
+        )
+
+    def test_stage_registration_validates_before_amending(self):
+        mod, repo, policy, proposal = self.fixture()
+        stages = [
+            {
+                "name": "logic",
+                "goal": "Build tested logic",
+                "required_files": ["logic.js"],
+            },
+            {"name": "ui", "goal": "Wire UI", "required_files": ["index.html"]},
+        ]
+        before = (self.prefix / "config/work-mode.json").read_bytes()
+        for invalid in [
+            [],
+            [stages[0], stages[0]],
+            [{**stages[0], "max_model_calls": 99}, stages[1]],
+            [{**stages[0], "required_files": ["../secret"]}, stages[1]],
+        ]:
+            proposal["work_profile"]["stages"] = invalid
+            with self.assertRaises(ValueError):
+                mod.configure(self.prefix, proposal)
+            self.assertEqual(
+                (self.prefix / "config/work-mode.json").read_bytes(), before
+            )
+        proposal["work_profile"]["stages"] = stages
+        mod.configure(self.prefix, proposal)
+        op.verify_install(self.prefix)
+        profiles = json.loads((self.prefix / "config/work-mode.json").read_text())[
+            "profiles"
+        ]
+        self.assertEqual(profiles["unseen"]["stages"], stages)
+        self.assertEqual(
+            profiles["unseen"]["max_model_calls"], policy["max_model_calls"]
+        )
 
     def test_invalid_registration_leaves_receipt_and_profiles_untouched(self):
         mod, repo, policy, proposal = self.fixture()
@@ -835,6 +1593,23 @@ class WorkIntegrityAmendments(unittest.TestCase):
 
 
 class Publication(unittest.TestCase):
+    @staticmethod
+    def audit_module():
+        spec = importlib.util.spec_from_file_location(
+            "publication_audit", ROOT / "scripts/audit.py"
+        )
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        return audit
+
+    def test_source_audit_rejects_unlisted_files(self):
+        audit = self.audit_module()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "SOURCE-MANIFEST.json").write_text("{}\n")
+            (base / "unlisted.txt").write_text("new source\n")
+            self.assertIn(("unlisted.txt", "unlisted source"), audit.scan(base))
+
     def test_project_python_names_do_not_shadow_standard_library(self):
         excluded = {
             ".git",
@@ -872,11 +1647,7 @@ class Publication(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "Path")
 
     def test_finder_metadata_is_rejected(self):
-        spec = importlib.util.spec_from_file_location(
-            "publication_audit", ROOT / "scripts/audit.py"
-        )
-        audit = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(audit)
+        audit = self.audit_module()
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             (base / ".DS_Store").write_bytes(b"\x00\x80metadata")
@@ -885,11 +1656,7 @@ class Publication(unittest.TestCase):
             )
 
     def test_owner_home_paths_have_no_documentation_exceptions(self):
-        spec = importlib.util.spec_from_file_location(
-            "publication_audit", ROOT / "scripts/audit.py"
-        )
-        audit = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(audit)
+        audit = self.audit_module()
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             (base / "docs").mkdir()
@@ -899,6 +1666,45 @@ class Publication(unittest.TestCase):
             agents.write_text("/Users/" + "owner/Projects/sanctum")
             self.assertIn(("docs/history.md", "owner_home"), audit.scan(base))
             self.assertIn(("AGENTS.md", "owner_home"), audit.scan(base))
+
+    def test_common_secret_classes_are_rejected_without_echoing_values(self):
+        audit = self.audit_module()
+        samples = {
+            "linear.txt": "lin_" + "api_" + "A" * 32,
+            "github.txt": "github_" + "pat_" + "B" * 40,
+            "firecrawl.txt": "fc-" + "C" * 32,
+            "runpod.env.example": "RUNPOD_API_KEY=" + "D" * 32,
+            "pgp.txt": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for name, value in samples.items():
+                (base / name).write_text(value)
+            issues = audit.scan(base)
+        self.assertEqual(
+            issues,
+            [
+                ("firecrawl.txt", "provider_key"),
+                ("github.txt", "github_token"),
+                ("linear.txt", "linear_token"),
+                ("pgp.txt", "private_key"),
+                ("runpod.env.example", "credential_assignment"),
+            ],
+        )
+        rendered = repr(issues)
+        for value in samples.values():
+            self.assertNotIn(value, rendered)
+
+    def test_secret_placeholders_are_allowed(self):
+        audit = self.audit_module()
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            (base / "instructions.txt").write_text(
+                "export LINEAR_API_KEY=...\n"
+                "FIRECRAWL_API_KEY=fc-YOUR-API-KEY\n"
+                "SPLUNK_ACCESS_TOKEN=<token>\n"
+            )
+            self.assertEqual(audit.scan(base), [])
 
 
 class IntegrationAmendments(unittest.TestCase):
@@ -911,6 +1717,21 @@ class IntegrationAmendments(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
+
+    def test_web_uses_parallel_search_and_core_fetch(self):
+        op.setup(self.prefix)
+        plugin = self.prefix / "runtime/web/node_modules/@openclaw/parallel-plugin"
+        plugin.mkdir(parents=True)
+        (plugin / "package.json").write_text(
+            json.dumps({"name": "@openclaw/parallel-plugin", "version": "2026.8.1"})
+        )
+        self.module().configure(self.prefix, {"integrations": ["web"]})
+        cfg = json.loads((self.prefix / "config/openclaw.json").read_text())
+        self.assertEqual(cfg["tools"]["web"]["search"]["provider"], "parallel")
+        self.assertNotIn("provider", cfg["tools"]["web"]["fetch"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["entries"])
+        self.assertNotIn("firecrawl", cfg["plugins"]["allow"])
+        op.verify_install(self.prefix)
 
     def test_isolated_mcp_notes_and_tunnel_rollback(self):
         op.setup(self.prefix)
@@ -987,3 +1808,67 @@ class IntegrationAmendments(unittest.TestCase):
         changed = json.loads(json.dumps(base))
         changed["servers"][2]["snapshot"]["server"]["volumes"] = ["/:/mcp-input"]
         self.assertNotEqual(mod.signature(base), mod.signature(changed))
+
+
+class SourceFirstUpgradeSafety(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.prefix = Path(self.tmp.name) / "install"
+        (self.prefix / "state/gate").mkdir(parents=True)
+
+    def gpu(self, **changes):
+        value = {
+            "phase": "RETIRED",
+            "retired_confirmed_at": 1.0,
+            "pod_id": None,
+            "pod_name": None,
+            "allocation_uncertain": False,
+        }
+        value.update(changes)
+        (self.prefix / "state/gate/gpu.json").write_text(json.dumps(value))
+
+    def test_accepts_only_confirmed_retirement_or_offline_without_ownership(self):
+        self.gpu()
+        source_first.safe(self.prefix)
+        self.gpu(phase="OFFLINE", retired_confirmed_at=None)
+        source_first.safe(self.prefix)
+
+        for changes in (
+            {"phase": "RETIRED", "retired_confirmed_at": None},
+            {"phase": "RETIRED", "retired_confirmed_at": "unverified"},
+            {"phase": "RETIRED", "retired_confirmed_at": float("inf")},
+            {"phase": "READY"},
+            {"pod_id": "owned-pod"},
+            {"pod_name": "owned-pod"},
+            {"allocation_uncertain": True},
+        ):
+            with self.subTest(changes=changes):
+                self.gpu(**changes)
+                with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+                    source_first.safe(self.prefix)
+
+    def test_refuses_main_or_private_lead_leases_and_active_private_lead(self):
+        self.gpu()
+        for name in ("control.sqlite", "private-lead/control.sqlite"):
+            database = self.prefix / "state/gate" / name
+            database.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(database) as connection:
+                connection.execute("create table leases (scope text)")
+                connection.execute("insert into leases values ('active')")
+            with self.subTest(database=name):
+                with self.assertRaisesRegex(ValueError, "Close gate leases"):
+                    source_first.safe(self.prefix)
+            with sqlite3.connect(database) as connection:
+                connection.execute("delete from leases")
+
+        private_state = self.prefix / "state/gate/private-lead/gpu.json"
+        private_state.write_text(json.dumps({"phase": "READY"}))
+        with self.assertRaisesRegex(ValueError, "Unresolved GPU ownership"):
+            source_first.safe(self.prefix)
+
+    def test_refuses_running_gateway(self):
+        self.gpu()
+        with patch.object(source_first.op, "owns_process", return_value=True):
+            with self.assertRaisesRegex(ValueError, "Stop candidate gateway"):
+                source_first.safe(self.prefix)

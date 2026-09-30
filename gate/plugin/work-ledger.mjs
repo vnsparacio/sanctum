@@ -1,11 +1,11 @@
 /* Owner-only, payload-free, hash-chained Work Mode receipts. */
-import {appendFileSync,chmodSync,existsSync,lstatSync,mkdirSync,openSync,closeSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
-import {createHash,createHmac} from 'node:crypto';
+import {appendFileSync,chmodSync,existsSync,lstatSync,mkdirSync,openSync,closeSync,readFileSync,renameSync,unlinkSync,writeFileSync} from 'node:fs';
+import {createHash,createHmac,randomBytes} from 'node:crypto';
 import {join,resolve} from 'node:path';
 import {sanitizeProtocolDiagnostic} from '../foundation/protocol-diagnostics.mjs';
 import {canonical,digest} from '../foundation/contracts.mjs';
 
-const allowed=new Set(['EDIT','EDIT_RECOVERY','EDIT_RETRY_BLOCKED','PROTECTED_EVIDENCE','PROTOCOL_DIAGNOSTIC','TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','STOP','CLEANUP']);
+const allowed=new Set(['CHECKPOINT','EDIT','EDIT_RECOVERY','EDIT_RETRY_BLOCKED','PROTECTED_EVIDENCE','PROTOCOL_DIAGNOSTIC','TASK_CREATED','WORKSPACE_CREATED','PHASE','SEMANTIC_SURFACE','MODEL_CALL','PROPOSAL','AUTHORITY','EXECUTION','EGRESS','EVALUATOR','REVIEW_EGRESS','REVIEWER','QWEN_BASELINE','QWEN_RUN','QWEN_EVALUATION','QWEN_REVIEWER','QWEN_GPU_CLEANUP','STOP','CLEANUP']);
 const safeId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
 const safeLabel=value=>typeof value==='string'&&/^[A-Z][A-Z0-9_.:-]{0,79}$/.test(value);
 const safeDigest=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -15,12 +15,13 @@ function privateDir(path){
  if(lstatSync(parent).isSymbolicLink()||(lstatSync(parent).mode&0o077))throw Error('unsafe_work_ledger');
  return parent;
 }
-function atomic(path,value){const tmp=path+'.tmp';writeFileSync(tmp,value,{mode:0o600,flag:'wx'});chmodSync(tmp,0o600);renameSync(tmp,path);}
+function atomic(path,value){const tmp=path+'.'+randomBytes(8).toString('hex')+'.tmp';const fd=openSync(tmp,'wx',0o600);try{writeFileSync(fd,value);chmodSync(tmp,0o600);renameSync(tmp,path);}finally{closeSync(fd);try{unlinkSync(tmp);}catch(error){if(error.code!=='ENOENT')throw error;}}}
+const numericTelemetry=new Set(['prompt_tokens','completion_tokens','promptTokens','completionTokens','decode_tokens_per_second']);
 function clean(value){
  if(value===null||typeof value==='boolean'||typeof value==='number')return value;
  if(typeof value==='string')return value.length<=160&&/^[A-Za-z0-9_.:@/+ -]*$/.test(value)?value:digest({value});
  if(Array.isArray(value))return value.slice(0,32).map(clean);
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key])=>!/(?:^goal$|prompt|content|output|text|body|secret|token|path)/i.test(key)).map(([key,item])=>[key,clean(item)]));
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,64).filter(([key,item])=>numericTelemetry.has(key)?typeof item==='number'&&Number.isFinite(item)&&item>=0:!/(?:^goal$|prompt|content|^output$|outputText|text|body|secret|token|path|diagnostic)/i.test(key)).map(([key,item])=>[key,clean(item)]));
  return null;
 }
 export function sanitizeSemanticSurface(value){
@@ -54,14 +55,15 @@ export function createWorkLedger({root,taskId,key,metadata={},now=()=>Date.now()
  if(!safeId(taskId)||!Buffer.isBuffer(key)||key.length<32)throw Error('work_ledger_config');
  const directory=privateDir(join(root,taskId)),events=join(directory,'events.jsonl'),summary=join(directory,'summary.json');
  if(existsSync(events)||existsSync(summary))throw Error('work_ledger_exists');
- const fd=openSync(events,'wx',0o600);closeSync(fd);let previousDigest='0'.repeat(64),sequence=0;
+ const fd=openSync(events,'wx',0o600);closeSync(fd);let previousDigest='0'.repeat(64),sequence=0,broken=false;
  const goalHmac=createHmac('sha256',key).update(String(metadata.goal??'')).digest('hex');
  function event(kind,fields={}){
+   if(broken)throw Error('work_ledger_broken');
    if(!allowed.has(kind))throw Error('work_ledger_event');
    const sanitized=kind==='PROTECTED_EVIDENCE'?sanitizeProtectedEvidence(fields):kind==='PROTOCOL_DIAGNOSTIC'?{diagnostic:sanitizeProtocolDiagnostic(fields.diagnostic),schemaDigest:safeDigest(fields.schemaDigest)?fields.schemaDigest:null,semanticSchemaDigest:safeDigest(fields.semanticSchemaDigest)?fields.semanticSchemaDigest:null}:kind==='SEMANTIC_SURFACE'?sanitizeSemanticSurface(fields):clean(fields);
-   const base={schema:'sanctum-work-ledger/v1',taskId,sequence:sequence++,time:now(),kind,previousDigest,...sanitized};
+   const base={schema:'sanctum-work-ledger/v1',taskId,sequence,time:now(),kind,previousDigest,...sanitized,...(Number.isSafeInteger(fields.checkpoint)&&fields.checkpoint>=1&&fields.checkpoint<=3?{checkpoint:fields.checkpoint}:{})};
    const eventDigest=createHash('sha256').update(canonical(base)).digest('hex'),row={...base,eventDigest};
-   appendFileSync(events,canonical(row)+'\n',{encoding:'utf8',mode:0o600});previousDigest=eventDigest;return eventDigest;
+   try{appendFileSync(events,canonical(row)+'\n',{encoding:'utf8',mode:0o600});}catch(error){broken=true;throw error;}sequence++;previousDigest=eventDigest;return eventDigest;
  }
  event('TASK_CREATED',{goalHmac,profile:metadata.profile,reasonerRelease:metadata.reasonerRelease,manifestDigest:metadata.manifestDigest});
  let final={};

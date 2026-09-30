@@ -1,0 +1,6 @@
+# Content-bearing knowledge objects default to Splunk administrators only.
+# An owner may grant a separately reviewed restricted role in local.meta.
+[]
+access = read : [ admin ], write : [ admin ]
+export = none
+

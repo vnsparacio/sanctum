@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {privateLeadTelemetry} from '../plugin/private-lead.mjs';
 import assert from 'node:assert/strict';
 import {leadRun,reviewerRun,plan,valid,bad,tool,manifest,ordinary,scope,snapshot} from './fixtures/targeted-harness.mjs';
 import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
@@ -18,19 +19,35 @@ function ruleCheck(value){
 test('R1 initial and correction HTTP requests communicate the retained reason rule',async()=>{
  const run=await leadRun([plan(bad),plan(valid)]);
  assert.equal(run.result.status,'BLOCKED');assert.equal(run.result.reason,'MODEL_ESCALATION');assert.equal(run.attempts,2);assert.equal(run.effects,0);
- for(const sent of run.captures){const body=context(sent);ruleCheck(body.state.resultRequirements);assert.equal(body.task,'essential goal');assert.equal(body.capabilities.length,4);assert.ok(!JSON.stringify(body.state.resultRequirements).includes('INJECTED_PRIVATE'));}
+ for(const sent of run.captures){const body=context(sent);ruleCheck(body.state.resultRequirements);assert.equal(body.task,'essential goal');assert.equal(body.capabilities.length,5);assert.ok(!JSON.stringify(body.state.resultRequirements).includes('INJECTED_PRIVATE'));}
  ruleCheck(context(run.captures[1]).state.correction.resultRequirements);
  assert.equal(run.result.state.correction,undefined);
 });
 test('R1 guidance matches host acceptance on all applicable runtime surfaces',async()=>{
  const schema=workIntentSchema([],{terminalKinds:['ESCALATION']});assert.equal(schema.oneOf[0].properties.reason.pattern,pattern);
- for(const [prefix,capabilities] of [['ordinary',ordinary],['research',['worktree_list','worktree_read','source_first_research','worktree_command']]])for(const bytes of [0,1]){
+ for(const [prefix,capabilities] of [['ordinary',ordinary],['research',['worktree_list','worktree_read','worktree_edit','source_first_research','worktree_command']]])for(const bytes of [0,1]){
   const run=await leadRun([plan(valid)],{capabilities,bytes});ruleCheck(context(run.captures[0]).state.resultRequirements);
   assert.deepEqual(request(run.captures[0]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas[prefix+(bytes?'Eligible':'Ineligible')].request);
  }
- const post=await leadRun([plan(tool('worktree_edit',{path:'index.js',old_text:'old',new_text:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.testOnlyIneligible.request);
+ const post=await leadRun([plan(tool('worktree_edit',{operation:'replace',path:'index.js',old_text:'old',new_text:'synthetic'})),plan(valid)]);ruleCheck(context(post.captures[1]).state.resultRequirements);assert.deepEqual(request(post.captures[1]).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.ordinaryIneligible.request);
  for(const reason of ['A','A'.repeat(80),'A09_:-'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,true);
  for(const reason of ['','a','A'.repeat(81),'A ','A\n','A\r','A\u2028','A\u2029','雪'])assert.equal(validateWorkIntent({kind:'ESCALATION',reason},{terminalKinds:['ESCALATION']}).ok,false);
+});
+test('post-edit handoff permits multiple files before one required test while hiding FINAL',async()=>{
+ const run=await leadRun([
+  plan(tool('worktree_edit',{operation:'create',path:'app.js',new_text:'synthetic app'})),
+  plan(tool('worktree_edit',{operation:'create',path:'test.js',new_text:'synthetic test'})),
+  plan(tool('worktree_command',{operation:'test'})),
+ ]);
+ assert.equal(run.attempts,3);assert.equal(run.effects,3);assert.equal(run.result.reason,'FINAL_WITHOUT_PASSING_EVIDENCE');
+ for(const sent of run.captures.slice(1)){
+  const body=context(sent);assert.equal(body.state.decisionState,'TEST_REQUIRED');
+  assert.equal(body.state.completion.postPatchTestOutstanding,true);
+  assert.ok(body.capabilities.some(x=>x.name==='worktree_edit'));
+  assert.ok(!request(sent).state.workIntent.schema.oneOf.some(x=>x.properties?.kind?.const==='FINAL'));
+  assert.deepEqual(request(sent).state.workIntent,preflightCurrentWorkIntentSchemas().schemas.ordinaryIneligible.request);
+ }
+ assert.equal(run.rows.filter(x=>x.kind==='EVALUATOR').length,1);
 });
 test('R1 valid nonterminal result clears correction before a subsequent independent correction',async()=>{
  const run=await leadRun([plan(bad),plan(tool('worktree_read',{path:'index.js'})),plan(bad),plan(valid)]);
@@ -45,7 +62,7 @@ test('R1 guidance and active correction count toward the exact context boundary'
    reasoner:{async invoke(q){requests.push(q);return requests.length<=6?tool('worktree_read',{path:'index.js'}):correcting&&requests.length===7?bad:valid;}},
    authorize:(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:digest(p),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false}),
    egress:({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']}),
-   invoke:async()=>({ok:true,executionState:'COMPLETED',verifier:'VERIFIED',data:{text:'x'.repeat(9500+Math.floor(extra/6)+(++actions===6?extra%6:0))}}),evaluate:async()=>({passed:false})}).run({task:'essential goal',scope,capabilities:ordinary,maxIterations:16});
+   invoke:async()=>({ok:true,executionState:'COMPLETED',verifier:'VERIFIED',data:{text:'x'.repeat(9000+Math.floor(extra/6)+(++actions===6?extra%6:0))}}),evaluate:async()=>({passed:false})}).run({task:'essential goal',scope,capabilities:ordinary,maxIterations:16});
   return {result,requests};
  }
  for(const correcting of [false,true]){
@@ -81,6 +98,13 @@ test('R3 interrupted reads retain fixed facts and never retry or execute',async(
   const diagnostic=diagnostics(run.rows)[0]?.diagnostic;assert.equal(diagnostics(run.rows).length,1);assert.equal(diagnostic.stage,'STREAM');assert.equal(diagnostic.keyword,'completion');assert.equal(diagnostic.streamStatus,'INCOMPLETE');assert.equal(diagnostic.finishStatus,after===2?'stop':'UNKNOWN');
  }
 });
+test('a provider length finish reports the output ceiling without a retry or effect',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'length'}]})+'\n\ndata: [DONE]\n\n';
+ const run=await leadRun([{wire},plan(valid)]);
+ assert.equal(run.attempts,1);assert.equal(run.effects,0);
+ assert.equal(run.result.status,'BUDGET_EXHAUSTED');assert.equal(run.result.reason,'MODEL_OUTPUT_LIMIT');
+ assert.equal(diagnostics(run.rows)[0]?.diagnostic.finishStatus,'length');
+});
 test('R3 cancellation, HTTP decoding rejection, typed parser and unrelated errors stay distinct',async()=>{
  for(const [p,reason,stage] of [[{...plan(valid),interruptAfter:0,error:'cancelled'},'operation_cancelled',undefined],[{...plan(valid),interruptAfter:0,error:'unrelated'},'transport_unavailable',undefined],[{httpStatus:400},'structured_decoding_http_400',undefined],[{httpStatus:422},'structured_decoding_http_422',undefined],[{wire:'data: {bad\n\n'},'answer_incomplete','STREAM']]){
   const run=await leadRun([p,plan(valid)]);assert.equal(run.attempts,1);assert.equal(run.effects,0);assert.equal(run.responses[0].reason,reason);assert.equal(diagnostics(run.rows)[0]?.diagnostic.stage,stage);
@@ -102,4 +126,75 @@ test('R4 ACCEPT REJECT REVISE and separate verdict parser retain existing policy
   const run=await reviewerRun(plan({kind:'FINAL',text}));assert.ok(run.status.text.includes(outcome),run.status.text);assert.equal(run.attempts,calls);assert.equal(diagnostics(run.rows).length,0);
   assert.equal(run.captures.filter(x=>request(x).state.phase==='REVIEW').length,1);assert.ok(!JSON.stringify(run.captures[1]).includes(pattern));
  }
+});
+
+test('truncated usage crosses the real worker boundary once without exposing partial text',async()=>{
+ const usage={prompt_tokens:7000,completion_tokens:4096,INJECTED_PRIVATE_KEY:'INJECTED_PRIVATE_VALUE'};
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":"INJECTED_PRIVATE_BODY'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'length'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage})+'\n\ndata: [DONE]\n\n';
+ const run=await leadRun([{wire},plan(valid)]);
+ assert.equal(run.result.reason,'MODEL_OUTPUT_LIMIT');assert.equal(run.result.metrics.modelCalls,1);assert.equal(run.effects,0);assert.equal(run.attempts,1);
+ assert.equal(run.telemetry.length,1);const event=run.telemetry[0];
+ assert.equal(event.generationProfile,'QWEN35_INSTRUCT_V1');assert.equal(event.prompt_tokens,7000);assert.equal(event.completion_tokens,4096);assert.equal(event.usage_complete,true);assert.equal(event.finishStatus,'length');assert.equal(event.parseStatus,'BEFORE_PARSE');assert.ok(event.elapsed_seconds>=0);
+ assert.ok(!JSON.stringify(run.responses).includes('INJECTED_PRIVATE'));assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
+});
+test('malformed completed output and missing usage retain honest accounting',async()=>{
+ for(const input of [{text:'{"INJECTED_PRIVATE_KEY":'}, {...plan(valid),finish:'length'}]){
+  const run=await leadRun([input,plan(valid)]);
+  assert.equal(run.telemetry.length,run.attempts);assert.equal(run.result.metrics.modelCalls,run.attempts);
+  assert.equal(run.telemetry[0].usage_complete,false);assert.equal(run.telemetry[0].prompt_tokens,null);assert.equal(run.telemetry[0].completion_tokens,null);
+  assert.ok(run.telemetry[0].elapsed_seconds>=0);assert.ok(!JSON.stringify(run.telemetry).includes('INJECTED_PRIVATE'));
+ }
+});
+test('reviewer truncation records one failed reviewer attempt with usage',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:'length'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage:{prompt_tokens:12,completion_tokens:4096}})+'\n\ndata: [DONE]\n\n';
+ const run=await reviewerRun({wire});
+ assert.equal(run.summary.telemetry.modelCalls,2);assert.equal(run.summary.telemetry.usageIncompleteCalls,1);assert.equal(run.summary.telemetry.promptTokens,12);assert.equal(run.summary.telemetry.completionTokens,4096);assert.ok(run.summary.telemetry.inferenceSeconds>0);
+ const calls=run.rows.filter(x=>x.kind==='MODEL_CALL'&&x.role==='REVIEWER');assert.equal(calls.length,1);assert.equal(calls[0].completion_tokens,4096);assert.equal(calls[0].usage_complete,true);assert.ok(run.status.text.includes('REVIEWER_UNAVAILABLE'));
+});
+
+test('telemetry metadata uses fixed names and finite nonnegative numeric values',()=>{
+ for(const value of [true,-1,'8',Infinity,NaN,Number.MAX_SAFE_INTEGER+1]){
+  const event=privateLeadTelemetry({prompt_tokens:value,completion_tokens:3,elapsed_seconds:value,result_kind:'INJECTED_PRIVATE',INJECTED_PRIVATE:'secret',usage_complete:true});
+  assert.equal(event.prompt_tokens,null);assert.equal(event.elapsed_seconds,null);assert.equal(event.usage_complete,false);assert.ok(!JSON.stringify(event).includes('INJECTED_PRIVATE'));
+ }
+ assert.equal(privateLeadTelemetry({generationProfile:'INJECTED_PRIVATE'}).generationProfile,'UNKNOWN');
+ assert.equal(privateLeadTelemetry({prompt_tokens:1.5}).prompt_tokens,null);
+ assert.equal(privateLeadTelemetry({prompt_tokens:0,completion_tokens:0}).usage_complete,true);
+});
+
+test('failed-response usage stops the shared token budget before a correction call',async()=>{
+ const wire='data: '+JSON.stringify({choices:[{delta:{content:'{"kind":'},finish_reason:'stop'}]})+'\n\ndata: '+JSON.stringify({choices:[],usage:{prompt_tokens:1001,completion_tokens:8}})+'\n\ndata: [DONE]\n\n';
+ const run=await reviewerRun(plan(valid),{leadPlan:{wire},maxTokens:1000});
+ assert.equal(run.attempts,1);assert.equal(run.endpointDispatches,1);assert.ok(run.status.text.includes('TOKEN_BUDGET'),run.status.text);
+ assert.equal(run.summary.telemetry.modelCalls,1);assert.equal(run.summary.telemetry.promptTokens,1001);assert.equal(run.summary.telemetry.completionTokens,8);assert.equal(run.summary.telemetry.usageIncompleteCalls,0);
+});
+
+test('upstream sampling and focused workflow survive the signed production path',async()=>{
+ const run=await leadRun([plan(valid)]);
+ const sent=run.captures[0];
+ assert.deepEqual(Object.fromEntries(['temperature','top_p','top_k','min_p','presence_penalty','repetition_penalty'].map(key=>[key,sent[key]])),{temperature:0.7,top_p:0.8,top_k:20,min_p:0,presence_penalty:1.5,repetition_penalty:1});
+ assert.equal(sent.max_tokens,4096);assert.equal(sent.chat_template_kwargs.enable_thinking,false);assert.equal(run.attempts,1);assert.equal(run.effects,0);assert.equal(run.telemetry[0].generationProfile,'QWEN35_INSTRUCT_V1');
+ const prompt=request(sent).messages[0].content;
+ assert.match(prompt,/an import alone does not prove the package is installed/);assert.match(prompt,/diagnose the reported error/);assert.match(prompt,/only host-listed command operations/);assert.match(prompt,/do not emit a separate plan or essay/);
+ const reviewer=await reviewerRun(plan({kind:'FINAL',text:JSON.stringify({verdict:'ACCEPT',findings:[]})}));
+ assert.ok(reviewer.status.text.includes('COMPLETE'));assert.equal(reviewer.captures[1].temperature,0.7);
+ const calls=reviewer.rows.filter(row=>row.kind==='MODEL_CALL'&&row.generationProfile);assert.equal(calls.length,2);assert.ok(calls.every(row=>row.generationProfile==='QWEN35_INSTRUCT_V1'));
+});
+
+test('edit-length correction crosses signed worker requests and preserves payload-free receipts',async()=>{
+ const marker='INJECTED_PRIVATE_OVERSIZE';
+ const oversized=tool('worktree_edit',{operation:'replace',path:'index.js',old_text:marker.padEnd(1636,'x'),new_text:'new'});
+ const corrected=tool('worktree_edit',{operation:'replace',path:'index.js',old_text:'old',new_text:'new'});
+ const run=await leadRun([plan(oversized),plan(corrected),plan(valid)]);
+ assert.equal(run.attempts,3);assert.equal(run.effects,1);assert.equal(run.result.reason,'MODEL_ESCALATION');
+ const correction=context(run.captures[1]).state.correction;
+ assert.equal(correction.field,'old_text');assert.equal(correction.keyword,'maxLength');
+ assert.equal(correction.lengthLimit,512);assert.equal(correction.stringLength,1636);
+ assert.equal(correction.recovery.code,'EDIT_LENGTH_LIMIT');assert.equal(correction.recovery.maxLength,512);
+ assert.equal(correction.correctionsRemaining,1);assert.ok(!JSON.stringify(run.captures).includes(marker));
+ const d=diagnostics(run.rows)[0].diagnostic;
+ assert.equal(d.field,'old_text');assert.equal(d.lengthLimit,512);assert.equal(d.lengthUnit,'UTF-16 code units');
+ const rejected=run.rows.find(row=>row.kind==='PROPOSAL'&&row.outcome==='REJECTED');
+ assert.equal(rejected.keyword,'maxLength');assert.equal(rejected.field,'old_text');assert.equal(rejected.lengthLimit,512);
+ assert.ok(!JSON.stringify(run.rows).includes(marker));
 });

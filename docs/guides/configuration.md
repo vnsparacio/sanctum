@@ -2,20 +2,337 @@
 
 `gate/SETTINGS.json` is a reviewed template. Setup binds its Python, gate, state and config paths in a private prefix and computes a deployment-specific freeze. The unrendered template is not an executable production configuration. Source integrity is checked before rendering.
 
-The generated environment defines OpenClaw state/config, socket cache, contact mapping, file roots, gateway/MLX ports and the local auth database. It does not redefine the user's HOME. Model/provider IDs, price ceilings, disclosure expiry and safety policy retain their dated production values. These values are version pins, not current catalog/pricing promises.
+The generated environment defines OpenClaw state/config, socket cache, contact mapping, file roots, gateway/MLX ports and the local auth database. It does not redefine the user's HOME. Model/provider IDs, price ceilings, disclosure expiry and safety policy retain their dated production values. These values are version pins, not current catalog/pricing promises. The Gemini audit session grant is source-pinned to at most eight eligible calls or 15 minutes, whichever comes first; each call remains subject to the existing per-request and total network budgets. Changing these authority bounds or the configured audit destination requires a reviewed source release, not a private runtime amendment.
 
 `config/openclaw.json` contains a new gateway token and is mode 0600. Gate authority material, contacts, accounts and receipts remain local. OpenRouter credentials must belong in the isolated OpenClaw auth store; direct OpenAI retention authorization stays false. Keychain references and a dedicated SSH path are configured locally; do not copy production secret values into the source tree.
 
 The first candidate configuration is intentionally minimal: exact utilities are available, optional tool integrations need reviewed setup, GPU autostart is false, and contact aliases are empty. File root configuration accepts only the established scope names and absolute paths; model arguments cannot change those roots.
 
+Restricted interaction content telemetry remains disabled by default. The
+reviewed `content_telemetry` settings contain only `enabled`,
+`retention_days`, and `access_policy`; the local spool root is derived beneath
+the external private state directory at `telemetry/content`. It is separate
+from the metadata-only operational `ops/` spool and cannot be selected by a
+request, model response, or environment-provided destination. Enabling or
+changing collection policy requires an owner-reviewed stopped-gateway settings
+amendment and a new private source freeze.
+
+Create an owner-only proposal file outside source containing all three policy
+fields, then apply it with the ordinary validated amendment command. Enabling
+requires a concrete retention period; destination names and credentials do not
+belong in this proposal:
+
+```json
+{
+  "content_telemetry": {
+    "enabled": true,
+    "retention_days": 30,
+    "access_policy": "owner_only"
+  }
+}
+```
+
+```sh
+.venv/bin/python scripts/configure.py \
+  --prefix /absolute/private/prefix \
+  --proposal /absolute/private/content-telemetry-policy.json
+make doctor PREFIX=/absolute/private/prefix
+```
+
+Content delivery has a second, private configuration file based on
+`config/examples/content-telemetry-delivery.json`. Copy it beneath the external
+private prefix, keep it owner-owned mode `0600`, replace the bucket, region,
+AWS CLI and profile bindings locally, and enable it only after the IAM and
+prefix review in the content telemetry runbook. Never put AWS access keys,
+session tokens, account IDs, bucket names, or a rendered delivery file in Git.
+The profile must resolve through the owner's external AWS credential store.
+The content destination must not be `ops/`; the delivery validator rejects an
+operational prefix and unknown fields, including embedded credential fields.
+
 Changed config/settings invalidate integrity. The current setup refuses to overwrite them. Use `scripts/configure.py --proposal` for supported integration/contact/root/account/GPU reference changes, or the bounded `web_retrieval.max_results` amendment. It validates a narrow schema, requires a stopped gateway, writes a private rollback transaction before modification and explicitly updates only the affected hashes. Unsupported policy/provider changes require a separate reviewed release. Do not edit hashes merely to suppress a failure. Environment changes controlling authority paths are operator decisions and must be kept outside model/tool input.
 
-Project 3G installs Work Mode only through the stopped-gateway, reversible `scripts/upgrade_work_mode.py` amendment. The amendment verifies source and installed receipts, confirms both managed GPU releases are offline with no leases, confirms the independent janitor is loaded, builds and records the exact local runner image, and writes private work profiles outside Git. It enables PRIVATE_LEAD for explicit signed Work Mode proposals while leaving background GPU autostart disabled. The ordinary `/gate` Assistant path and its tool policy remain unchanged; a separate `workmode-broker` agent receives only the five Work Mode semantic capabilities plus the two internal Source-First adapters.
+For an installed PRIVATE_LEAD release whose persistent Runpod network volume has changed, confirm the intended volume and its model cache in the owner account first. While Sanctum is stopped, both managed GPUs are released, and all private leases are closed, use an owner-private proposal containing only `{"private_lead_gpu":{"volume_id":"<confirmed-volume-id>"}}` with `scripts/configure.py --prefix /absolute/private/prefix --proposal /absolute/private/proposal.json`. This changes only the PRIVATE_LEAD volume reference; it retains disabled autostart and writes a rollback record. Run `make doctor PREFIX=/absolute/private/prefix` and the provider's read-only preflight before starting a new Work Mode task. The retired 80B reference is not changed, and later staged PRIVATE_LEAD upgrades preserve the amended lead binding.
+
+An obsolete PRIVATE_LEAD SSH binding can be changed through the same stopped-gateway amendment using only `{"private_lead_gpu":{"ssh_private_key":"/absolute/owner-only/key"}}`. The corresponding `.pub` file must exist and match the unencrypted Ed25519 private key. The amendment validates both files, retains disabled autostart, and records a private rollback transaction. Confirm the public key is registered with the owner Runpod account before startup; never put key material in the proposal.
+
+When the default RTX PRO 6000 Blackwell Server Edition has no stock in the existing volume's datacenter, a reviewed optional B200 binding is available. Confirm current secure-cloud stock, price, account balance, and the existing volume location first. With Sanctum stopped, no active Work Mode lease or private-lead request, the managed GPU offline, and the janitor loaded, apply an owner-private proposal containing only `{"private_lead_gpu":{"gpu":"NVIDIA B200","max_hourly_usd":7}}` through `scripts/configure.py`. This is a ceiling of $7/hour, not a current-price guarantee; the provider preflight still requires the live price at or below the ceiling and enough balance for the configured maximum runtime. It retains the same network volume, model revision, cache path, and disabled autostart, and writes a rollback record. Run doctor and read-only provider preflight before retrying. The inverse reviewed pair is `{"private_lead_gpu":{"gpu":"NVIDIA RTX PRO 6000 Blackwell Server Edition","max_hourly_usd":3}}`. Never change only one member of the pair or move the volume to another datacenter to chase capacity. Supported private-lead and Work Mode upgrades preserve the B200 pair once amended.
+
+
+The PRIVATE_LEAD launcher admits exactly one RTX PRO 6000 Blackwell Server
+Edition with at least 90,000 MiB or B200 with at least 170,000 MiB. Unsupported
+identities, malformed inventory, multiple GPUs, insufficient memory and failed
+`nvidia-smi` queries stop before server launch. Older launchers rejected the
+reviewed B200 fallback with exit 31 even though the configuration amendment
+accepted it. Apply the current stopped-gateway Work Mode upgrade, which now
+includes this launcher, before using that fallback. Model/runtime pins, offline
+cache use and serving flags remain unchanged. Automated shell and amendment
+rollback tests cover this repair; successful live B200 inference remains to be
+qualified. Shorten an approved test window when the higher hourly price requires
+it to preserve the owner's compute cap.
+
+If a missing configured public key left a PRIVATE_LEAD state at `DEGRADED/allocation_unresolved` before any provider create call, preserve the Work Mode receipt and use `scripts/recover_private_lead_preallocation.py --prefix /absolute/private/prefix --task-id <terminal-task-id>` from the reviewed source release. This narrow recovery requires the exact installed pre-call adapter, stopped gateway, loaded janitor, empty leases, matching terminal task, missing configured public key, and two empty managed-pod provider listings. It writes private before-state and evidence before clearing the false allocation intent. It refuses any ambiguous state. Apply the SSH binding amendment afterward, run doctor, then update the installed Gate runtime through the stopped-gateway Work Mode amendment before retrying. Do not edit `gpu.json` by hand or delete a persistent volume.
+
+For a reviewed Source-First code update on an existing prefix, stop the managed
+stack and run `scripts/upgrade_source_first.py` with
+`--prefix /absolute/private/prefix --apply`. This narrow amendment backs up
+the installed gate files and receipt to a private rollback record. It accepts
+an offline GPU, or the main GPU's
+confirmed `RETIRED` state, only when no pod, uncertain allocation, or main or
+private-lead lease remains; any private-lead GPU must be offline. It does not
+change GPU settings, credentials, or provider resources. Run
+`make doctor PREFIX=/absolute/private/prefix` after applying it, then restart
+the stack and perform a fresh gate canary. Do not change GPU state to satisfy
+the check.
+
+For a fresh installation, the setup runner can apply that same private proposal
+after installing any required optional web runtime:
+
+```sh
+./sanctum setup --prefix /absolute/private/prefix \
+  --proposal /absolute/private/setup-proposal.json \
+  --authorize
+```
+
+The proposal never contains secrets. `--authorize` reads the Parallel key with
+terminal echo disabled and passes it over standard input to the isolated
+OpenClaw secret store. For configured Gmail and Calendar accounts it launches
+`gog` with `--readonly` and Gmail sending disabled. OAuth browser consent,
+Messages Full Disk Access and Open WebUI owner/function enrollment remain
+visible owner actions. Re-running with the same proposal digest skips the
+configuration amendment; changed proposals still pass through the stopped-
+gateway validator and private rollback record.
+
+The runner also checks, without printing secret data, whether exactly one
+OpenRouter API-key profile is present for optional hosted Qwen/frontier routes.
+It reports a checkpoint when absent; local-only operation does not require that
+credential. Provider authentication remains in the isolated OpenClaw auth
+store because it may not be copied into a proposal, command line or source.
+
+Project 3G installs Work Mode only through the stopped-gateway, reversible `scripts/upgrade_work_mode.py` amendment. The amendment verifies source and installed receipts, confirms both managed GPU releases are offline with no leases, confirms the independent janitor is loaded, builds and records the exact local runner image, and writes private work profiles outside Git. It installs the complete current Gate runtime closure, including content-telemetry validators and their schemas, so applying Work Mode cannot leave a newly imported Gate dependency absent. It enables PRIVATE_LEAD for explicit signed Work Mode proposals while leaving background GPU autostart disabled. OpenClaw ownership is explicit: `main` remains the system owner and receives ordinary Assistant/local-answer work, while a separate `workmode-broker` agent can use the six configured Work Mode semantic capabilities and the two internal Source-First adapters. Each Work Mode task exposes at most five of those six capabilities: ordinary coding gets `worktree_patch`, while explicit research gets `source_first_research` in that slot. The `main` agent pins thinking off both in OpenClaw and in MLX chat-template arguments. Its model catalog also pins a 4,096-token output limit that applies independently to every internal tool-selection and final-answer turn. Gate deliberately omits an outer OpenAI-compatible completion cap because OpenClaw treats that cap as a shared budget across the complete multi-turn agent request. A local answer remains bounded to four minutes, with a 270-second worker ceiling and longer WebUI transport ceilings so the transports cannot cancel MLX first. This per-agent setting does not change the Work Mode broker. The ordinary `/gate` Assistant path and its tool policy otherwise remain unchanged. After an amendment changes the rendered WebUI pipe or guard, replace the imported function in Open WebUI; its database does not automatically reload the on-disk file.
+
+PRIVATE_LEAD Work Mode proposals now use the accepted interface profile's 4,096-token output reserve per request. The separate owner-authorized diagnostic microprobe retains its 1,024-token ceiling. A response ending at the output ceiling stops the task as `BUDGET_EXHAUSTED / MODEL_OUTPUT_LIMIT` before any incomplete proposal can execute; it does not trigger a larger automatic retry. Apply the reviewed source through the stopped-gateway amendment before relying on this behavior in an installed runtime.
+
+Ordinary Work Mode implementer and reviewer proposals use the fixed
+`QWEN35_INSTRUCT_V1` sampling preset: temperature 0.7, top-p 0.8, top-k 20,
+min-p 0, presence penalty 1.5 and repetition penalty 1. Thinking stays off and
+the output ceiling stays 4,096 tokens. The host selects this preset; task input
+cannot override it. Receipts label the generation profile. Historical interface
+characterization scores do not qualify this new coding preset. The separate
+microprobe keeps its legacy sampling and 1,024-token reservation. See the
+[upstream recipe and bounded qualification plan](../development/WORK-MODE-UPSTREAM-RECIPES.md).
+
+On later Work Mode upgrades, the amendment retains owner-registered private profiles, their repository and staging bindings, their task-protection contracts, validated optional stages, and reviewed budget overrides. It refreshes runner bindings and other reviewed profile settings from the corresponding built-in profile. If a registration cannot be matched to a reviewed base or its private paths are unsafe, the amendment refuses before changing the installed runtime. Verify the registered profile is present after upgrade and run `make doctor PREFIX=/absolute/private/prefix` before restart.
+
+The local Qwen catalog now uses a 24,576-token context window while retaining its 4,096-token per-turn output limit. OpenClaw estimates input conservatively for loopback proxy endpoints; with the previous 16,384-token catalog window, a tool-heavy Gmail search/read exchange could reduce the final generation allowance to one token even though MLX had room to answer. This change does not alter weights, tools, routing, or fallback policy. Existing private Work Mode installations receive the reviewed catalog change through the stopped-gateway amendment, then require a gateway restart.
+
+## Work Mode storage and optional checkpoints
+
+New workspace admission and PRIVATE_LEAD lease acquisition/readiness require at
+least 2 GiB free on the relevant local filesystem. Running workspace operations,
+lease heartbeats and bootstrap lease checks require 512 MiB. Workspace admission
+checks both the private state filesystem and staging filesystem. These host
+floors are fixed, independent of model prompts and profile budgets. Low space
+stops work with `LOCAL_DISK_LOW`; actual ENOSPC/EDQUOT/SQLite FULL errors report
+`LOCAL_DISK_FULL`. A failed space query reports `LOCAL_STORAGE_UNAVAILABLE`.
+
+Admission allocates a private 4 MiB `cleanup-storage.reserve` in the lifecycle
+state directory. Under pressure, lease release or sweep validates and removes
+only that marked reserve before ordinary database/state writes. Concurrent
+reserve operations serialize. Cleanup retains all lease and provider ownership
+checks; it does not delete owner files, abandon leases or remove persistent
+volumes. This improves recovery but cannot guarantee cleanup if another process
+consumes the freed space. Keep the janitor running until provider absence and
+lease cleanup are confirmed. After recovery, new admission replenishes the
+reserve. Receipt failures preserve the original failed result and metrics in
+`/work status` and `/work result`; an otherwise complete task becomes
+`EVIDENCE_PERSISTENCE_FAILED` if its final receipt cannot be written. In-memory
+warnings do not survive a gateway restart.
+
+After applying the reviewed stopped-gateway Work Mode upgrade, register a new
+private profile through `scripts/configure.py` using `work_profile` with `name`,
+`copy_from`, `repository`, and optionally `stages`. Repository/staging setup and
+task-protection requirements remain unchanged. Stages contain exactly `name`,
+`goal` and `required_files`; two or three stages are supported. Each goal is at
+most 1,000 UTF-16 code units and each stage lists one to eight safe relative file
+paths. The assembled owner goal plus checkpoint prompt must fit 4,000 code units
+or admission refuses before workspace creation. For example, the optional field
+in an owner-private registration proposal can be:
+
+```json
+{"stages": [
+  {"name": "logic", "goal": "Implement mood entry validation and data operations with tests. Use a module format compatible with the eventual browser UI.", "required_files": ["logic.js", "logic.test.js"]},
+  {"name": "ui", "goal": "Connect the mood selector and note field to the tested logic. Test DOM identifiers, selection state and submission.", "required_files": ["index.html", "styles.css", "ui.js", "ui.test.js"]},
+  {"name": "persistence", "goal": "Add persistence and history, test reload behavior, and document usage and test commands.", "required_files": ["storage.test.js", "README.md"]}
+]}
+```
+
+For the opt-in Qwen Code coding engine, use `"engine": "qwen_code"` in a new
+single-stage registration copied from the protected MoodLog profile. The
+supported amendment requires the pinned Qwen image and an enabled reviewer,
+then fixes 48 model requests, 40 tools, 20 minutes in Qwen, 40 minutes for the
+Mac task, 45 minutes of GPU lifecycle, $10 of estimated run cost, and zero
+retries. Keep the proposal and all task text outside Git. See the
+[Qwen Work Mode handoff](../development/WORK-MODE-QWEN-SNAPSHOT-HANDOFF.md).
+
+Use a base whose fixed `test` operation can run the intended suite. Every
+checkpoint uses all existing profile evaluators, protected acceptance checks
+and the configured reviewer. Required files accumulate across checkpoints and
+must remain readable through the host workspace boundary. A checkpoint advances
+only after host-verified completion; failure stops the task. Checkpoint receipts
+retain identifiers/status/metrics, not goals or file contents.
+
+Stages reuse the task ID and isolated workspace while starting fresh model
+context for each checkpoint. Earlier source must be read through the existing
+egress-controlled tools. Iterations, implementation model calls and wall time
+share one aggregate budget; token, inference-time and cost counters remain
+shared too. As before, reviewer calls are separate from the implementation-call
+limit: a configured reviewer can make at most one call per checkpoint (at most
+three for staged work), within the same time/token/cost limits. Stage definitions
+cannot change tools, commands, protection, reviewer policy or budgets. No failed
+stage is automatically retried. Passing generated tests and a file checklist
+alone does not establish app correctness; retain an owner acceptance contract
+and perform the final browser check. The [guided MoodLog milestone](../history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md)
+records one accepted logic checkpoint and a browser-functional partial UI; full
+acceptance remains unqualified. The [continuation runbook](../development/WORK-MODE-MOODLOG-ACCEPTANCE.md)
+covers protected persistence checks, unavailable-package recovery, disclosed file
+reminders and the remaining browser acceptance requirements.
+
+## Private Work Mode explanations and timeline
+
+The current source requests an optional `decision_note` alongside each
+implementation action, final response or escalation. It has four short fields:
+`subgoal`, `evidence`, `expected_outcome` and `next_validation`, each limited to
+240 UTF-16 code units. This is a model-written explanation, not a transcript of
+hidden reasoning or proof of the computation that produced the action. Thinking
+remains disabled. The existing output-token, time, call and cost budgets include
+any note; no extra inference call is made to generate or repair explanations.
+
+The PRIVATE_LEAD adapter removes this field before ordinary action validation.
+Missing or malformed notes are labeled `MISSING` or `INVALID` and cannot grant
+permissions, change tool arguments, make completion eligible or trigger retries.
+The reviewer is asked for a short `summary` alongside each finding's severity,
+locator and check code. Readable findings are kept for owner inspection; the
+existing reviewer verdict and host acceptance gates still determine behavior.
+Notes and readable findings are not fed back as tool instructions.
+
+Each new task writes a separate owner-private `decision-trace.jsonl` beside its
+existing `events.jsonl` and `summary.json`. The explanatory stream allows only
+these bounded fields and host-assigned task, checkpoint, turn and role metadata.
+Recognized credential patterns are redacted. This does not guarantee removal of
+all sensitive text: explanations can refer to private task context, so treat
+the entire file and generated reports as private. Files are mode 0600, task
+directories are mode 0700, and each explanatory stream stops at 128 records or
+256 KiB. No raw prompt, source body, tool output or hidden-thinking transcript is
+intentionally collected through this path. Unknown fields are omitted.
+
+This optional explanatory stream is best-effort. Its absence, size cap or disk
+failure does not authorize or stop work. `/work status` reports its state, and
+the final receipt records state/count/bytes when receipt persistence succeeds.
+Existing receipt and storage guards remain in force. Explanations remain local;
+they are not sent to Splunk/APM or the conversational content-telemetry spool.
+They follow the task's retained private evidence lifecycle; this version adds
+no automatic retention deletion or new export destination.
+
+Numeric prompt/completion token counts and decode tokens per second are now
+explicitly retained in the ordinary receipt sanitizer; credential fields and
+non-numeric lookalikes remain excluded. Model-call metadata includes turn and
+role, and coordinator receipts include checkpoint correlation. Older receipts
+cannot recover token measurements or explanations that were never stored.
+
+Generate a standalone HTML timeline after a task has stopped:
+
+```sh
+node scripts/work_mode_timeline.mjs --task-dir /absolute/private/prefix/state/gate/private-lead/work-mode/tasks/TASK_ID
+```
+
+The command writes `timeline.html` inside that same private task directory. It
+checks the receipt hash chain, correlates explanation records by task/checkpoint/
+turn, escapes all displayed values, and uses no scripts, network requests or
+external assets. The page distinguishes model explanations from host outcomes.
+Chain verification establishes internal consistency, not authenticity against
+an attacker rewriting the entire file. Explanations are outside that chain.
+Corrupt, partial, oversized, foreign-task or unsafe-permission input refuses
+report generation; an existing report is not replaced on input failure. A task
+with valid receipts but no explanation file can still be viewed, with missing
+notes explicitly labeled. Open the generated file locally, not on a public web
+server.
+
+Apply this source through the complete stopped-gateway Work Mode upgrade and
+run doctor before using it in the private runtime. The optional note changes
+the implementation generation schema, so run the existing production-schema
+preflight before paid inference. Offline tests cover schema, containment,
+redaction, write failures and task integration; note usefulness and live decoder
+behavior still require a bounded live qualification. Historical accepted runs
+do not qualify this revised interface.
 
 ## Optional migration bindings
 
 The supported amendment schema also accepts `notes_dir`: an existing absolute directory outside source with no symlink components. The Markdown broker uses this owner binding; the default remains prefix-owned notes. GPU `local_port` may select a distinct nonprivileged loopback tunnel port; gateway, model and WebUI ports are rejected. Other GPU policy remains pinned.
 
-`integrations` may include `web` and `mcp`. For web, first run `.venv/bin/python scripts/bootstrap.py web --prefix /absolute/private/prefix`. This installs only the reviewed Parallel and Firecrawl 2026.8.1 packages with lockfile integrity and scripts disabled. Their archive identities match the legacy qualified installation. Enroll `PARALLEL_API_KEY` through the isolated OpenClaw secret store using masked input or standard input, never in a proposal or source. The generated provider configuration contains only a store reference. Search remains Parallel, bounded to one result by default; the stopped-gateway `web_retrieval.max_results` amendment may raise it no higher than six for Source-First ranking. Fetch remains Firecrawl, bounded to 6000 characters. These third-party packages are optional runtime dependencies, separate from the unchanged core runtime pins.
+`integrations` may include `web` and `mcp`. For web, first run `.venv/bin/python scripts/bootstrap.py web --prefix /absolute/private/prefix`. This installs the reviewed Parallel and Firecrawl 2026.8.1 packages with lockfile integrity and scripts disabled; Firecrawl is retained in the optional runtime payload for rollback compatibility but is not activated. Enroll `PARALLEL_API_KEY` through the isolated OpenClaw secret store using masked input or standard input, never in a proposal or source. The generated provider configuration contains only a store reference. Search uses Parallel and is bounded to six results per call; the stopped-gateway `web_retrieval.max_results` amendment may lower or restore that bound within one through six. Fetch uses OpenClaw's core guarded HTTP/readability path and remains bounded to 6000 characters. It does not silently switch to Firecrawl when a site rejects extraction. These third-party packages are optional runtime dependencies, separate from the unchanged core runtime pins.
+
+Public comparison/research prompts are reduced to their subject terms and source
+quality (for example, `scholarly`) rather than answer-format instructions.
+Source-First sends Parallel its provider-native public objective plus three
+bounded keyword variants for direct comparison, scholarly papers, and historical
+influence. Comparison research makes one additional bounded search for accessible
+article abstracts. Candidate titles or excerpts must identify the compared
+subjects and a relationship. Fetched comparison evidence must discuss both
+subjects and their relationship in the page body; a search title cannot supply
+missing evidence. Raw PDFs and blocked-page placeholders are rejected when the
+guarded fetch cannot extract readable content. A publisher is
+limited to two ranked candidates when other publishers exist, so an
+access-blocked index or a generic page about only one side is less likely to
+consume the evidence set. This does not bypass access controls, add a fetch
+provider, or treat search snippets as evidence. The final EvidencePack remains
+limited to six candidates, three accepted fetched pages, and 12,000 fetched
+characters. For historical comparisons, local synthesis may make one bounded
+repair attempt when its answer asserts exposure or influence absent from the
+fetched evidence; the final validator rejects that assertion if it persists.
+
+For current public requests, Source-First keeps a public `today` cue in its minimized search query. A single ZIP explicitly supplied for a non-private weather request is retained as the requested location; unrelated numeric identifiers and ZIPs in private context remain omitted. Current-day ZIP weather searches use a short location/forecast query so surrounding instructions cannot dilute retrieval. For that weather case, candidates must identify the ZIP, authoritative forecast pages are tried first, and fetched content must contain a concrete numeric weather condition before evidence is marked adequate. Search/fetch success or generic mentions of forecasting do not suffice: the Mac gate requires a grounded, delivered citation for `WEB_REQUIRED` requests and refuses an unsupported forecast.
+
+For an explicit calendar-date ZIP forecast, the gate accepts fetched evidence
+only from the matching daytime period of a National Weather Service forecast
+page; if that period cannot be isolated, it refuses to assert a forecast. The
+local answer validator also rejects numbers and sky conditions absent from
+the selected period. "Latest headline" requests start with two public
+date-focused searches (current UTC day and previous day), and may use one
+publisher-constrained search plus one exact-article-title search if those
+results lack corroborated fresh article evidence. They merge at most six
+ranked candidates and still fetch at most three pages. A publisher article
+whose title omits the publisher name can be selected by its matching hostname.
+They require a recent publication date labeled in fetched page content or
+corroborated by matching search metadata and the fetched publisher's dated
+*article* final URL. A bare dated archive path, a conflicting date, or an
+event date in article prose is not a verified publication date. These
+checks improve two observed failure modes but do not certify every sentence
+of an arbitrary web answer.
+
+If a latest-headline summary fails grounding, a fetched publisher title with
+a corroborated date may be shown as a source card. This card says it is a
+recent dated result found in the bounded search, not the globally newest
+headline or a verified model summary. It requires a delivered fetched page,
+fetched title, subject match and verified date; otherwise the gate shows
+labeled source excerpts. Rejected model prose is never presented as an answer.
+The Mac does not rewrite model-authored dates or use a correct source date to
+launder an otherwise unsupported summary.
+
+For a fetched source that supports only part of a request, the answer prompts require a cited answer for supported facts and an explicit statement that an omitted field is not stated. `GROUNDED` describes support for claims actually made, not completeness of requested fields; the response still records `EVIDENCE_GAP`. Neither local nor hosted reasoning may infer a precipitation probability or no-rain claim merely from sunny conditions. The citation and `WEB_REQUIRED` validation rules are unchanged.
+
+The gate's local-agent handoff narrows the per-turn OpenClaw tool surface for explicit Gmail, Messages, and Calendar requests to the requested source family. A second pre-tool guard blocks a wrong-family call, and no personal-source answer is delivered without a successful requested-family tool call. The Source-First evidence answer has no optional local tools. These restrictions do not grant new capabilities or replace owner permissions.
+
+For a plain owner request to list Calendar events **this week** or **next week**, the Mac gate uses the already configured read-only Calendar broker after classification. The window is Monday through Sunday in Mac local time. It reads every day without a free-text query and splits a time window when the provider's 20-row cap is reached, including when broker filtering makes the returned list shorter than that cap. It formats event names, dates, weekdays, and times directly from returned fields. If a bounded read cannot establish a complete list, it reports the gap instead of presenting a partial list as complete. The list covers events starting within the requested week in calendars visible to the configured Google account; other calendar questions continue through the local agent's existing tool boundary.
+
+Tool-free local answers now use a fresh request to the same pinned, already
+running MLX model. They carry no OpenClaw session history or tool schemas.
+Explicit personal-source, local-tool and retained-context requests still use
+the OpenClaw agent. The direct local route does not start another model server
+or authorize a provider fallback. It does not make the model's factual claims
+independently verified; see the
+[local answer reliability plan](../current/gate/local-answer-reliability-plan.md)
+for live probe limits and post-merge acceptance.
+
+Messages search accepts `from:+E164` (or a bare exact `+E164` number) for a bounded, read-only history of inbound messages from that sender across chats. It does not treat a participant in a group chat as the sender, infer a contact identity, scan message bodies for a phone number, or broaden a failed lookup. The default is ten messages and the maximum is twelve. Text is capped per message; missing or truncated text is identified rather than inferred. This path reads the local Messages database through the existing user-only broker and still requires the Mac's Messages permission. A reviewed source update to this broker and plugin requires a stopped-stack restart; it is not a private contact-mapping amendment.
 
 MCP amendments generate a unique profile identity per prefix and an exact three-tool transport. Run `.venv/bin/python scripts/mcp_gateway.py install --prefix /absolute/private/prefix` with Docker available. It imports only a missing candidate profile and refuses a changed existing profile. The transport verifies the profile before every start, uses the pinned container images, restricts mounts to the prefix input directory, disables container networking and call logging, and retains the Hugging Face per-call disclosure guard. It never reuses the legacy profile identity. No profile or container is started by configuration alone.

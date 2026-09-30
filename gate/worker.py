@@ -8,17 +8,23 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
+import qwen_runner
+import qwen_snapshot
 import task_evidence
 import worktree_edit
 from authority import authorize
 from backends import LocalMultimodalBackend, Remote
 from command_runner import run as run_command
 from common import (
+    STORAGE_RUN_BYTES,
+    STORAGE_START_BYTES,
     Refused,
     atomic,
     canonical,
     load_settings,
     private_dir,
+    storage_error,
+    storage_headroom,
     strict_json,
     verify_release,
 )
@@ -27,10 +33,9 @@ from experiment import installed_identity
 from experiment_lifecycle import DiagnosticLifecycle
 from lifecycle import Private80BLifecycle, PrivateLeadLifecycle
 from media import expand, load
-from protocol_stream import safe_diagnostic
+from protocol_stream import safe_diagnostic, safe_telemetry
 from source_policy import minimize_query
 from workspace import (
-    apply_patch,
     cleanup_worktree,
     create_worktree,
     inspect_worktree,
@@ -66,11 +71,29 @@ def work_profile(settings, name):
 
 
 def execute(b, settings, remote=None, lifecycle=None):
+    # Check both the evidence filesystem and the actual workspace filesystem.
+    # Lifecycle status and cleanup remain available when admission is refused.
+    operation = b["operation"]
+    if operation.startswith("worktree_") and operation != "worktree_cleanup":
+        storage_headroom(
+            settings["state_directory"],
+            (
+                STORAGE_START_BYTES
+                if operation == "worktree_create"
+                else STORAGE_RUN_BYTES
+            ),
+        )
+        if operation == "worktree_create":
+            storage_headroom(
+                work_profile(settings, b["packet"]["profile"])["staging_root"],
+                STORAGE_START_BYTES,
+            )
+        else:
+            storage_headroom(work_record(settings, b["scope"])["root"])
     # Reads/editor manage this same lock internally; serialize all other host
     # workspace routes, including internal patch and cleanup, against mutation.
     if b["operation"] in {
         "worktree_list",
-        "worktree_patch",
         "worktree_command",
         "worktree_integrity",
         "worktree_acceptance",
@@ -156,20 +179,38 @@ def _execute(b, settings, remote=None, lifecycle=None):
     if op == "worktree_patch":
         p = b["packet"]
         record = work_record(settings, scope)
-        assessment = task_evidence.patch_assessment(settings, record, p["patch"])
-        if assessment != "PASS":
-            return {
-                "status": "OK",
-                "result": {
-                    "ok": False,
-                    "code": assessment,
-                    "executionState": "NOT_STARTED",
-                },
-            }
-        result = apply_patch(record["root"], p["patch"])
-        if task_evidence.check(settings, record)["integrity"] != "PASS":
-            raise Refused("protected_input_modified")
-        return {"status": "OK", "result": result}
+        return {
+            "status": "OK",
+            "result": worktree_edit.apply_patch(settings, record, p["patch"]),
+        }
+    if op in ("worktree_qwen_export", "worktree_qwen_import"):
+        p = b["packet"]
+        record = work_record(settings, scope)
+        if record["profile"] != p["profile"]:
+            raise Refused("worktree_profile_mismatch")
+        return {
+            "status": "OK",
+            "result": (
+                qwen_snapshot.export(settings, record)
+                if op == "worktree_qwen_export"
+                else qwen_snapshot.import_output(settings, record)
+            ),
+        }
+    if op == "worktree_qwen_run":
+        p = b["packet"]
+        record = work_record(settings, scope)
+        if record["profile"] != p["profile"]:
+            raise Refused("worktree_profile_mismatch")
+        return {
+            "status": "OK",
+            "result": qwen_runner.run(
+                settings,
+                record,
+                work_profile(settings, p["profile"]),
+                p["goal"],
+                lifecycle=lifecycle,
+            ),
+        }
     if op == "worktree_command":
         p = b["packet"]
         record = work_record(settings, scope)
@@ -313,10 +354,12 @@ if __name__ == "__main__":
         safe = (
             str(e)
             if type(e) is Refused and str(e).replace("_", "").isalnum()
-            else "operation_unavailable"
+            else storage_error(e) or "operation_unavailable"
         )
         result = {"status": "UNAVAILABLE", "reason": safe}
         if type(e) is Refused and hasattr(e, "diagnostic"):
             result["diagnostic"] = safe_diagnostic(e.diagnostic)
+        if type(e) is Refused and hasattr(e, "telemetry"):
+            result["telemetry"] = safe_telemetry(e.telemetry)
         print(canonical(result))
         sys.exit(1)

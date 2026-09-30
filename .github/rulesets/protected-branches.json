@@ -1,0 +1,113 @@
+{
+  "name": "Protect main and v1.3-dev",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/main",
+        "refs/heads/v1.3-dev"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "allowed_merge_methods": [
+          "merge",
+          "squash",
+          "rebase"
+        ],
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "Documentation impact",
+            "integration_id": 15368
+          },
+          {
+            "context": "Python format",
+            "integration_id": 15368
+          },
+          {
+            "context": "Python lint",
+            "integration_id": 15368
+          },
+          {
+            "context": "JavaScript lint",
+            "integration_id": 15368
+          },
+          {
+            "context": "Gate JavaScript / Node 22",
+            "integration_id": 15368
+          },
+          {
+            "context": "Plugin build and manifests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Gate JavaScript",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Gate Python",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Reliability",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / MCP containment",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Router regressions",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Owned plugins",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Release and portability",
+            "integration_id": 15368
+          },
+          {
+            "context": "Contracts / Agent management",
+            "integration_id": 15368
+          },
+          {
+            "context": "Publication, source integrity, and compose",
+            "integration_id": 15368
+          }
+        ],
+        "strict_required_status_checks_policy": false
+      }
+    }
+  ]
+}

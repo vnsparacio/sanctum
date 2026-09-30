@@ -108,3 +108,53 @@ class Workspace(unittest.TestCase):
         self.assertEqual(rejected["code"], "WORKSPACE_PATCH_REJECTED")
         self.assertIn("patch", rejected["diagnostic"].lower())
         self.assertTrue(cleanup_worktree(str(self.repo), result)["cleaned"])
+
+    def test_fixed_diff_describes_complete_current_worktree(self):
+        (self.repo / "b.txt").write_text("remove me\n")
+        subprocess.run(["/usr/bin/git", "add", "b.txt"], cwd=self.repo, check=True)
+        subprocess.run(
+            [
+                "/usr/bin/git",
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "second fixture",
+            ],
+            cwd=self.repo,
+            check=True,
+        )
+        result = create_worktree(str(self.repo), str(self.stage), "task-complete")
+        root = Path(result["root"])
+
+        (root / "a.txt").write_text("first edit\n")
+        (root / "created.txt").write_text("first created value\n")
+        (root / "empty.txt").write_text("")
+        (root / "b.txt").unlink()
+
+        first = inspect_worktree(root, "diff")
+        self.assertIn("first edit", first["output"])
+        self.assertIn("created.txt", first["output"])
+        self.assertIn("empty.txt", first["output"])
+        self.assertIn("deleted file mode", first["output"])
+
+        # A later edit must replace prior evidence with the current worktree.
+        (root / "created.txt").write_text("latest created value\n")
+        (root / "a.txt").write_text("synthetic\n")
+        second = inspect_worktree(root, "diff")
+        self.assertIn("latest created value", second["output"])
+        self.assertNotIn("first created value", second["output"])
+        self.assertNotIn("first edit", second["output"])
+        self.assertNotIn("a/a.txt", second["output"])
+        self.assertNotEqual(first["output_digest"], second["output_digest"])
+
+        # Removing the created file must also remove its stale edit evidence.
+        (root / "created.txt").unlink()
+        third = inspect_worktree(root, "diff")
+        self.assertNotIn("created.txt", third["output"])
+        self.assertNotIn("latest created value", third["output"])
+        self.assertIn("empty.txt", third["output"])
+        self.assertIn("b/b.txt", third["output"])
+        self.assertTrue(cleanup_worktree(str(self.repo), result)["cleaned"])

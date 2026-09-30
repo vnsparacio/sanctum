@@ -195,6 +195,8 @@ class Runpod:
         return rows
 
     def preflight(self):
+        if self.inference_release:
+            self.public_key()
         volumes = self.call("network-volume", "list")
         v = next((x for x in volumes if x.get("id") == self.gpu["volume_id"]), None)
         if (
@@ -227,15 +229,32 @@ class Runpod:
         )
         return {"available": available, "hourly_usd": price}
 
+    def public_key(self):
+        key = Path(self.gpu["ssh_private_key"])
+        pub = Path(str(key) + ".pub")
+        if (
+            not key.is_absolute()
+            or key.is_symlink()
+            or pub.is_symlink()
+            or not key.is_file()
+            or not pub.is_file()
+            or key.stat().st_mode & 0o077
+        ):
+            raise Refused("ssh_key_missing")
+        try:
+            fields = pub.read_text().split()
+        except OSError:
+            raise Refused("ssh_key_missing") from None
+        if len(fields) < 2 or fields[0] != "ssh-ed25519":
+            raise Refused("ssh_key_missing")
+        return " ".join(fields[:2])
+
     def create(self, name):
         if not self.inference_release or not name.startswith(
             self.settings["private_lead"]["pod_prefix"]
         ):
             raise Refused("private_80b_retired")
-        key = Path(self.gpu["ssh_private_key"] + ".pub")
-        public = key.read_text().strip()
-        if not public.startswith("ssh-ed25519 "):
-            raise Refused("ssh_public_key_missing")
+        public = self.public_key()
         return self.call(
             "pod",
             "create",

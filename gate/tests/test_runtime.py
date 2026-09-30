@@ -17,6 +17,7 @@ import install
 import manage
 from authority import authorize
 from backends import (
+    ANSWER_SYSTEM,
     Private80BBackend,
     PrivateLeadBackend,
     Remote,
@@ -28,7 +29,7 @@ from common import Refused, canonical, database, strict_json
 from dispatch import assess
 from lifecycle import PrivateLeadLifecycle
 from media import expand, load, prepare
-from runpod import capacity_rejected
+from runpod import Runpod, capacity_rejected
 from schema import validate
 
 
@@ -216,6 +217,43 @@ class Authority(Temp):
         with self.assertRaises(sqlite3.IntegrityError):
             self.auth(b)
 
+    def test_session_audit_approval_accepts_only_current_prompt_text_packet(self):
+        b = self.body()
+        b.update(
+            operation="classify",
+            tier="GEMINI_AUDIT",
+            packet=packet(),
+            approval="session_audit_prompt",
+        )
+        self.auth(b)
+        for field, value in (
+            ("disclosed", {"history": [{"role": "user", "content": "old"}]}),
+            (
+                "attachment_summary",
+                {"count": 1, "visual_count": 0, "document_count": 1, "video_count": 0},
+            ),
+        ):
+            changed = self.body()
+            changed.update(
+                operation="classify",
+                tier="GEMINI_AUDIT",
+                packet=packet(),
+                approval="session_audit_prompt",
+            )
+            changed["packet"][field] = value
+            with self.assertRaisesRegex(Refused, "session_audit_grant_scope"):
+                self.auth(changed)
+
+        changed = self.body()
+        changed.update(
+            operation="classify",
+            tier="HOSTED_235B",
+            packet=packet(),
+            approval="session_audit_prompt",
+        )
+        with self.assertRaisesRegex(Refused, "classification_approval"):
+            self.auth(changed)
+
     def test_disabled_80b_refuses_both_inference_approval_classes(self):
         self.s["gpu"]["enabled"] = False
         for approval in ("session_private_prompt", "exact_disclosure"):
@@ -289,6 +327,28 @@ class Authority(Temp):
             bad[key] = value
             with self.assertRaises(Refused):
                 self.auth(bad)
+
+    def test_private_lead_work_packet_has_separate_bounded_context(self):
+        from authority import WORK_MODE_PACKET_BYTES
+
+        b = self.body()
+        b.update(
+            operation="private_lead_propose",
+            tier="PRIVATE_LEAD",
+            approval="private_lead_workmode",
+            packet={"request": {"system": "synthetic", "request": {}}},
+        )
+        self.assertEqual(self.s["max_context_bytes"], 32768)
+        payload = b["packet"]["request"]
+        payload["system"] = (
+            "s" * (WORK_MODE_PACKET_BYTES - len(canonical(payload).encode()))
+            + payload["system"]
+        )
+        self.assertEqual(len(canonical(payload).encode()), WORK_MODE_PACKET_BYTES)
+        self.auth(b)
+        payload["system"] += "s"
+        with self.assertRaisesRegex(Refused, "private_lead_proposal_limit"):
+            self.auth(b)
 
 
 class Transport(Temp):
@@ -497,6 +557,12 @@ class Transport(Temp):
         with self.assertRaises(Refused):
             answer_result('{"answer":"run this","escalation":"NONE","execute":true}')
 
+    def test_answer_prompt_distinguishes_missing_fields_from_unsupported_claims(self):
+        self.assertIn(
+            "Grounding describes support for claims actually made", ANSWER_SYSTEM
+        )
+        self.assertIn("Never guess an omitted value", ANSWER_SYSTEM)
+
     def test_grounded_answer_schema_is_selected_for_profiled_evidence(self):
         sent = []
         grounded = {
@@ -525,6 +591,27 @@ class Transport(Temp):
             ],
             ["GROUNDED_FINAL"],
         )
+        reason_items = sent[0]["response_format"]["json_schema"]["schema"][
+            "properties"
+        ]["missingReasons"]["items"]
+        self.assertIn("EVIDENCE_GAP", reason_items["enum"])
+
+    def test_grounded_answer_rejects_fields_that_the_gate_would_reject(self):
+        grounded = {
+            "kind": "GROUNDED_FINAL",
+            "text": "documented",
+            "grounding": "GROUNDED",
+            "citations": [{"sourceId": "s1", "url": "https://example.test"}],
+            "inferences": [],
+            "missingReasons": [],
+            "escalation": "NONE",
+        }
+        for field, value in (
+            ("missingReasons", ["The source did not mention wind."]),
+            ("inferences", ["x" * 513]),
+        ):
+            with self.subTest(field=field), self.assertRaises(Refused):
+                answer_result(json.dumps({**grounded, field: value}), grounded=True)
 
 
 class FakeProvider:
@@ -631,6 +718,25 @@ class Lifecycle(Temp):
         self.assertEqual(len(attempts), 2)
         self.assertEqual(self.p.created, 1)
         self.assertEqual(self.lc.status()["phase"], "READY")
+
+    def test_missing_key_before_create_does_not_leave_uncertain_allocation(self):
+        def create(_name):
+            raise Refused("ssh_key_missing")
+
+        self.p.create = create
+        with self.assertRaisesRegex(Refused, "ssh_key_missing"):
+            self.lc.infer("a", {})
+        state = self.lc.state()
+        self.assertEqual(state["phase"], "OFFLINE")
+        self.assertIsNone(state["pod_name"])
+        self.assertFalse(state["allocation_uncertain"])
+        self.assertEqual(self.p.created, 0)
+
+    def test_private_lead_preflight_checks_local_key_before_provider_call(self):
+        provider = Runpod(self.s, self.s["private_lead"])
+        provider.call = lambda *_args: self.fail("provider called with missing key")
+        with self.assertRaisesRegex(Refused, "ssh_key_missing"):
+            provider.preflight()
 
     def test_capacity_rejection_is_bounded_and_cancellable(self):
         self.s["private_lead"]["capacity_wait_seconds"] = 20
@@ -849,8 +955,8 @@ class Janitor(Temp):
         ineligible = result["schemas"]["ordinaryIneligible"]
         self.assertTrue(result["ok"])
         self.assertEqual(eligible["dialect"], "vllm-0.20.1-outlines")
-        self.assertEqual(eligible["branches"], 6)
-        self.assertEqual(ineligible["branches"], 5)
+        self.assertEqual(eligible["branches"], 7)
+        self.assertEqual(ineligible["branches"], 6)
         self.assertNotEqual(eligible["schemaDigest"], ineligible["schemaDigest"])
 
     def test_default_sweep_attempts_both_releases_without_one_masking_the_other(self):

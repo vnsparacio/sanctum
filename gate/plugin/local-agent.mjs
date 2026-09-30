@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
 import {createReasonerAdapter} from '../foundation/contracts.mjs';
+import {beginLocalToolRun,endLocalToolRun,localSessionKey,localToolFamily} from './local-tool-boundary.mjs';
 
-export function buildLocalRequest(body, config, localModel) {
+export function buildLocalRequest(body, config, localModel, maxAnswerTokens) {
   if(body.operation!=='answer_local' || body.approval!=='local_only')throw Error('wrong_operation');
+  if(!Number.isInteger(maxAnswerTokens) || maxAnswerTokens<1 || maxAnswerTokens>4096)throw Error('invalid_answer_token_limit');
   const req=body.request, state=body.state;
   const port=Number(process.env.VINCEAI_GATEWAY_PORT ?? 18789);
   const mlxPort=Number(process.env.VINCEAI_MLX_PORT ?? 8080);
@@ -16,29 +17,57 @@ export function buildLocalRequest(body, config, localModel) {
   const model=config.agents?.defaults?.model;
   const primary=typeof model==='string'?model:model?.primary;
   if(primary!==expected || (model?.fallbacks?.length??0)!==0 || (config.agents?.list?.length??0)!==0)throw Error('unreviewed_agent_model');
+  const main=config.agents?.entries?.main;
+  if(main?.thinkingDefault!=='off'
+      || main?.params?.chat_template_kwargs?.enable_thinking!==false)throw Error('unreviewed_local_answer_budget');
   const provider=config.models?.providers?.['mlx-local'];
-  if(provider?.baseUrl!==`http://127.0.0.1:${mlxPort}/v1`)throw Error('local_provider_changed');
+  const providerModel=provider?.models?.find(item=>item?.id===localModel);
+  if(provider?.baseUrl!==`http://127.0.0.1:${mlxPort}/v1`
+      || providerModel?.contextWindow!==24576
+      || providerModel?.maxTokens!==maxAnswerTokens)throw Error('local_provider_changed');
   const gateway=config.gateway;
   if(gateway?.bind!=='loopback' || gateway.port!==port || gateway.auth?.mode!=='token'
       || typeof gateway.auth.token!=='string' || !gateway.auth.token
       || gateway.http?.endpoints?.chatCompletions?.enabled!==true)throw Error('gateway_contract_changed');
   // A gate scope gets its own ordinary-agent session. Tool history stays here on
   // the Mac. Send only the new user message; OpenClaw supplies its agent context.
-  const sessionKey='agent:main:mac-gate-local-'+createHash('sha256').update(req.scope).digest('hex');
+  const sessionKey=localSessionKey(req.scope,localToolFamily(latest.content));
   return {url:`http://127.0.0.1:${port}/v1/chat/completions`,
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+gateway.auth.token,
-      'x-openclaw-model':expected,'x-openclaw-session-key':sessionKey},
-    payload:{model:'openclaw/default',messages:[{role:'user',content:latest.content}],
-      stream:false,max_completion_tokens:1024}};
+      'x-openclaw-agent-id':'main','x-openclaw-model':expected,
+      'x-openclaw-session-key':sessionKey},
+    payload:{model:'openclaw/main',messages:[{role:'user',content:latest.content}],
+      stream:false}};
 }
 
-export function createLocalAgent({getConfig,localModel,fetchImpl=fetch,timeoutMs=120000}) {
+// Leave the worker and WebUI transports enough time to report this bounded
+// deadline instead of racing the native request during a long local prefill.
+export const LOCAL_AGENT_TIMEOUT_MS=240000;
+
+const WEEKDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const LABELED_DATE=new RegExp(`\\b(${WEEKDAYS.join('|')}),?\\s+(${MONTHS.join('|')})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`,'gi');
+
+// A weekday is a deterministic property of the stated calendar date. Correct
+// this narrow self-contradiction without asking a 4B model to recalculate it.
+export function normalizeWeekdayLabels(text){
+  return text.replace(LABELED_DATE,(match,_weekday,month,day,year)=>{
+    const index=MONTHS.findIndex(x=>x.toLowerCase()===month.toLowerCase());
+    const instant=new Date(Date.UTC(Number(year),index,Number(day)));
+    if(instant.getUTCFullYear()!==Number(year)||instant.getUTCMonth()!==index||instant.getUTCDate()!==Number(day))return match;
+    return match.replace(/^\w+/,WEEKDAYS[instant.getUTCDay()]);
+  });
+}
+
+export function createLocalAgent({getConfig,localModel,maxAnswerTokens,fetchImpl=fetch,timeoutMs=LOCAL_AGENT_TIMEOUT_MS}) {
   return async(body,signal)=>{
-    let abort, timer;
+    let abort, timer, sessionKey=null;
     const controller=new AbortController();
     try {
       if(signal.aborted)return {status:'UNAVAILABLE'};
-      const request=buildLocalRequest(body,getConfig(),localModel);
+      const request=buildLocalRequest(body,getConfig(),localModel,maxAnswerTokens);
+      sessionKey=request.headers['x-openclaw-session-key'];
+      beginLocalToolRun(sessionKey,request.payload.messages[0].content);
       abort=()=>controller.abort();signal.addEventListener('abort',abort,{once:true});
       timer=setTimeout(abort,timeoutMs);
       const response=await fetchImpl(request.url,{method:'POST',headers:request.headers,
@@ -51,9 +80,12 @@ export function createLocalAgent({getConfig,localModel,fetchImpl=fetch,timeoutMs
         || choices[0].finish_reason!=='stop' || choices[0].message?.tool_calls)throw Error('unfinished_agent_turn');
       const text=choices[0].message?.content;
       if(typeof text!=='string' || !text.trim() || Buffer.byteLength(text)>32768 || controller.signal.aborted)throw Error('invalid_answer');
-      return {status:'OK',text};
+      if(!endLocalToolRun(sessionKey)){sessionKey=null;return {status:'UNAVAILABLE',reason:'local_source_unavailable'};}
+      sessionKey=null;
+      const family=localToolFamily(request.payload.messages[0].content);
+      return {status:'OK',text:family&&family!=='evidence'?normalizeWeekdayLabels(text):text};
     }catch{return {status:'UNAVAILABLE'};}
-    finally{clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
+    finally{if(sessionKey)endLocalToolRun(sessionKey);clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
   };
 }
 

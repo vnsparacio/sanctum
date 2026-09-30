@@ -14,6 +14,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+stage_spec = importlib.util.spec_from_file_location(
+    "work_stages", ROOT / "scripts/work_stages.py"
+)
+stage_module = importlib.util.module_from_spec(stage_spec)
+stage_spec.loader.exec_module(stage_module)
 s = importlib.util.spec_from_file_location(
     "release_operator", ROOT / "scripts/release_operator.py"
 )
@@ -66,6 +71,15 @@ INTEGRITY_FILES = (
     "runtime/protected-test-driver.cjs",
     "runtime/protected-test-preload.cjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
+    "plugin/work-trace.mjs",
+    "content-telemetry/redaction.mjs",
+    "foundation/decision-note.mjs",
+    "foundation/work-intent.mjs",
+    "foundation/decision-surface.mjs",
+    "plugin/private-lead.mjs",
+    "src/backends.py",
+    "src/common.py",
     "plugin/work-mode.mjs",
     "plugin/work-ledger.mjs",
     "qualify_work_mode.py",
@@ -78,6 +92,15 @@ EDIT_FILES = (
     "plugin/workspace-tools.mjs",
     "plugin/work-mode.mjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
+    "plugin/work-trace.mjs",
+    "content-telemetry/redaction.mjs",
+    "foundation/decision-note.mjs",
+    "foundation/work-intent.mjs",
+    "foundation/decision-surface.mjs",
+    "plugin/private-lead.mjs",
+    "src/backends.py",
+    "src/common.py",
     "plugin/work-ledger.mjs",
     "foundation/manifest.mjs",
     "preflight-work-intent.mjs",
@@ -207,6 +230,7 @@ def configure(prefix, proposal):
         "file_roots",
         "accounts",
         "gpu",
+        "private_lead_gpu",
         "notes_dir",
         "web_retrieval",
         "work_profile",
@@ -215,6 +239,7 @@ def configure(prefix, proposal):
         "work_integrity",
         "work_editing",
         "observability",
+        "content_telemetry",
     }:
         raise ValueError("Unknown configuration field")
     changes = {}
@@ -265,6 +290,41 @@ def configure(prefix, proposal):
         else:
             raise ValueError("Observability enabled must be boolean")
         changes["config/environment.json"] = json.dumps(env, indent=2) + "\n"
+    if "content_telemetry" in proposal:
+        if set(proposal) != {"content_telemetry"}:
+            raise ValueError(
+                "Content telemetry amendment cannot combine configuration changes"
+            )
+        item = proposal["content_telemetry"]
+        if type(item) is not dict or set(item) != {
+            "enabled",
+            "retention_days",
+            "access_policy",
+        }:
+            raise ValueError("Invalid content telemetry amendment")
+        enabled = item["enabled"]
+        retention_days = item["retention_days"]
+        access_policy = item["access_policy"]
+        if type(enabled) is not bool:
+            raise ValueError("Content telemetry enabled must be boolean")
+        if retention_days is not None and (
+            type(retention_days) is not int or not 1 <= retention_days <= 3650
+        ):
+            raise ValueError("Invalid content telemetry retention policy")
+        if enabled and retention_days is None:
+            raise ValueError(
+                "Enabled content telemetry requires an explicit retention policy"
+            )
+        if access_policy not in ("owner_only", "owner_authorized_reviewers"):
+            raise ValueError("Invalid content telemetry access policy")
+        settings = json.loads((prefix / "gate/SETTINGS.json").read_text())
+        settings["content_telemetry"] = item
+        changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
+        freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
+        freeze["SETTINGS.json"] = hashlib.sha256(
+            changes["gate/SETTINGS.json"].encode()
+        ).hexdigest()
+        changes["gate/FREEZE.json"] = json.dumps(freeze, indent=2) + "\n"
     if "work_editing" in proposal:
         if set(proposal) != {"work_editing"}:
             raise ValueError("Editing amendment cannot combine configuration changes")
@@ -399,7 +459,8 @@ def configure(prefix, proposal):
         if (
             type(item) is not dict
             or not {"name", "copy_from", "repository"} <= set(item)
-            or set(item) - {"name", "copy_from", "repository", "task_protection"}
+            or set(item)
+            - {"name", "copy_from", "repository", "task_protection", "stages", "engine"}
         ):
             raise ValueError("Invalid Work Mode profile registration")
         name = item["name"]
@@ -493,6 +554,32 @@ def configure(prefix, proposal):
             profiles["profiles"][name][
                 "task_protection"
             ] = protection_module().validate_contract(item["task_protection"])
+        if "stages" in item:
+            profiles["profiles"][name]["stages"] = stage_module.validate_stages(
+                item["stages"]
+            )
+        if "engine" in item:
+            if (
+                item["engine"] != "qwen_code"
+                or profiles["profiles"][name].get("stages")
+                or profiles["profiles"][name].get("reviewer") is False
+                or not profiles["profiles"][name].get("qwen_runner_image_id")
+            ):
+                raise ValueError(
+                    "Qwen Code requires a reviewed single-stage profile and reviewer"
+                )
+            profiles["profiles"][name]["engine"] = "qwen_code"
+            profiles["profiles"][name].update(
+                {
+                    "qwen_model_calls": 48,
+                    "qwen_tool_calls": 40,
+                    "qwen_wall_seconds": 1200,
+                    "qwen_outer_seconds": 2400,
+                    "qwen_retries": 0,
+                    "max_gpu_seconds": 2700,
+                    "max_cost_usd": 10,
+                }
+            )
         changes["config/work-mode.json"] = json.dumps(profiles, indent=2) + "\n"
     if "integrations" in proposal:
         items = proposal["integrations"]
@@ -508,7 +595,7 @@ def configure(prefix, proposal):
         ] + [tool for n in sorted(set(items)) for tool in TOOLS[n]]
         if "web" in items:
             base = prefix / "runtime/web/node_modules/@openclaw"
-            for name in ("parallel", "firecrawl"):
+            for name in ("parallel",):
                 plugin = base / (name + "-plugin")
                 package = json.loads((plugin / "package.json").read_text())
                 if (
@@ -523,6 +610,14 @@ def configure(prefix, proposal):
                 if name not in cfg["plugins"]["allow"]:
                     cfg["plugins"]["allow"].append(name)
                 cfg["plugins"]["entries"][name] = {"enabled": True}
+            firecrawl = str(base / "firecrawl-plugin")
+            cfg["plugins"]["load"]["paths"] = [
+                path for path in cfg["plugins"]["load"]["paths"] if path != firecrawl
+            ]
+            cfg["plugins"]["allow"] = [
+                name for name in cfg["plugins"]["allow"] if name != "firecrawl"
+            ]
+            cfg["plugins"]["entries"].pop("firecrawl", None)
             cfg["plugins"]["entries"]["parallel"]["config"] = {
                 "webSearch": {
                     "apiKey": {
@@ -536,7 +631,6 @@ def configure(prefix, proposal):
                 "search": {"enabled": True, "provider": "parallel", "maxResults": 6},
                 "fetch": {
                     "enabled": True,
-                    "provider": "firecrawl",
                     "maxChars": 6000,
                     "maxCharsCap": 6000,
                 },
@@ -594,7 +688,7 @@ def configure(prefix, proposal):
                 "Enable the reviewed web integration before changing its retrieval bound"
             )
         base = prefix / "runtime/web/node_modules/@openclaw"
-        for name in ("parallel", "firecrawl"):
+        for name in ("parallel",):
             plugin = base / (name + "-plugin")
             if plugin.is_symlink() or not plugin.exists():
                 raise ValueError("Bootstrap the pinned optional web runtime first")
@@ -655,6 +749,84 @@ def configure(prefix, proposal):
             ):
                 raise ValueError("Invalid account identifier")
             changes[f"config/{name}-read/account"] = value + "\n"
+    if "private_lead_gpu" in proposal:
+        item = proposal["private_lead_gpu"]
+        if (
+            set(proposal) != {"private_lead_gpu"}
+            or type(item) is not dict
+            or set(item)
+            not in ({"volume_id"}, {"ssh_private_key"}, {"gpu", "max_hourly_usd"})
+        ):
+            raise ValueError("Invalid private-lead GPU amendment")
+        if "volume_id" in item:
+            if type(item["volume_id"]) is not str or not re.fullmatch(
+                r"[A-Za-z0-9_-]{1,128}", item["volume_id"]
+            ):
+                raise ValueError("Invalid private-lead GPU volume amendment")
+        elif "ssh_private_key" in item:
+            key = (
+                Path(item["ssh_private_key"])
+                if type(item["ssh_private_key"]) is str
+                else Path(".")
+            )
+            pub = Path(str(key) + ".pub")
+            if (
+                not key.is_absolute()
+                or key.is_symlink()
+                or pub.is_symlink()
+                or not key.is_file()
+                or not pub.is_file()
+                or key.stat().st_mode & 0o077
+            ):
+                raise ValueError("Owner-only private-lead SSH key pair required")
+            try:
+                derived = subprocess.run(
+                    ["/usr/bin/ssh-keygen", "-y", "-P", "", "-f", str(key)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ).stdout.split()[:2]
+                published = pub.read_text().split()[:2]
+            except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                raise ValueError("Private-lead SSH key pair invalid") from None
+            if len(derived) != 2 or derived != published or derived[0] != "ssh-ed25519":
+                raise ValueError("Private-lead SSH key pair mismatch")
+        elif (item["gpu"], item["max_hourly_usd"]) not in (
+            ("NVIDIA RTX PRO 6000 Blackwell Server Edition", 3),
+            ("NVIDIA B200", 7),
+        ):
+            raise ValueError(
+                "Private-lead GPU and hourly ceiling must match a reviewed pair"
+            )
+        spec = importlib.util.spec_from_file_location(
+            "private_lead_volume_safe", ROOT / "scripts/upgrade_work_mode.py"
+        )
+        upgrade = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(upgrade)
+        upgrade.safe(prefix)
+        settings = json.loads((prefix / "gate/SETTINGS.json").read_text())
+        lead = settings.get("private_lead", {})
+        if (
+            lead.get("logical_profile") != "PRIVATE_LEAD"
+            or not lead.get("enabled")
+            or lead.get("auto_start")
+        ):
+            raise ValueError("Private lead must be installed with autostart disabled")
+        if "gpu" in item and (lead.get("gpu"), lead.get("max_hourly_usd")) not in (
+            ("NVIDIA RTX PRO 6000 Blackwell Server Edition", 3),
+            ("NVIDIA B200", 7),
+        ):
+            raise ValueError(
+                "Installed private-lead GPU binding is not a reviewed pair"
+            )
+        lead.update(item)
+        changes["gate/SETTINGS.json"] = json.dumps(settings, indent=2) + "\n"
+        freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
+        freeze["SETTINGS.json"] = hashlib.sha256(
+            changes["gate/SETTINGS.json"].encode()
+        ).hexdigest()
+        changes["gate/FREEZE.json"] = json.dumps(freeze, indent=2) + "\n"
     if "gpu" in proposal:
         gpu = proposal["gpu"]
         allowed = {

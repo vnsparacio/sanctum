@@ -47,6 +47,10 @@ class SourcePolicyTests(unittest.TestCase):
         d = decide(packet("What is the current API pricing?"), validate(audit()))
         self.assertEqual((d.need, d.query_mode), ("WEB_REQUIRED", "PUBLIC_GENERALIZED"))
 
+    def test_latest_local_mail_is_not_sent_to_public_source_first(self):
+        d = decide(packet("What is my latest email?"), validate(audit()))
+        self.assertEqual((d.need, d.query_mode), ("NONE", "NONE"))
+
     def test_required_needs_external_reason(self):
         with self.assertRaises(Exception):
             validate(audit("WEB_REQUIRED", ["TRANSFORMATION_ONLY"]))
@@ -63,6 +67,41 @@ class SourcePolicyTests(unittest.TestCase):
     def test_private_only_query_needs_approval(self):
         d = minimize_query("My wife said secret 123456789 is broken")
         self.assertEqual(d.mode, "EXACT_APPROVAL_REQUIRED")
+
+    def test_public_weather_query_keeps_explicit_location_and_today(self):
+        exact = minimize_query("What's the weather like in 94114 today?")
+        self.assertEqual(exact.mode, "PUBLIC_GENERALIZED")
+        self.assertIn("94114", exact.query)
+        self.assertIn("today", exact.query)
+        d = minimize_query(
+            "What is the weather forecast for ZIP 94114 in San Francisco today, "
+            "September 24, 2026? Use current public evidence, preferably "
+            "weather.gov, and report conditions, temperature, precipitation "
+            "chance, and wind."
+        )
+        self.assertEqual(d.mode, "PUBLIC_GENERALIZED")
+        self.assertEqual(d.query, "94114 weather forecast today")
+
+    def test_research_query_keeps_subject_and_comparison_not_prompt_scaffolding(self):
+        d = minimize_query(
+            "Search public scholarly sources comparing Zen Buddhism and Friedrich "
+            "Nietzsche. Distinguish documented historical influence from later "
+            "philosophical comparison, summarize the main similarities and differences, "
+            "and cite only sources that directly discuss both."
+        )
+        self.assertEqual(
+            d.query,
+            "scholarly zen buddhism friedrich nietzsche historical influence philosophical "
+            "comparison similarities differences",
+        )
+
+    def test_zip_is_not_sent_for_private_or_non_weather_context(self):
+        for prompt in [
+            "What is the weather at my home in 94114 today?",
+            "Look up current rules for ZIP 94114",
+            "Compare weather in 94114 and 10001 today",
+        ]:
+            self.assertNotIn("94114", minimize_query(prompt).query)
 
     def test_personal_source_terms_and_codenames_never_enter_public_query(self):
         for prompt in [

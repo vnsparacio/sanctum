@@ -101,7 +101,16 @@ def rendered_settings(prefix):
     d["private_lead"]["auto_start"] = False
     for key in keys:
         d["gpu"][key] = accepted[key]
-        d["private_lead"][key] = accepted[key]
+        # An installed private lead may have a separately amended persistent
+        # volume. Preserve that receipt-verified binding on later upgrades.
+        d["private_lead"][key] = (
+            installed["private_lead"][key]
+            if installed.get("private_lead", {}).get("enabled")
+            else accepted[key]
+        )
+    lead = installed.get("private_lead", {})
+    if (lead.get("gpu"), lead.get("max_hourly_usd")) == ("NVIDIA B200", 7):
+        d["private_lead"]["gpu"] = lead["gpu"]
     return json.dumps(d, indent=2) + "\n"
 
 
@@ -168,10 +177,14 @@ def apply(prefix):
 
 def rollback(prefix, record):
     safe(prefix)
-    record = record.absolute()
-    if not record.is_relative_to((prefix / "state/amendments").absolute()):
+    record = record.resolve()
+    if not record.is_relative_to((prefix / "state/amendments").resolve()):
         raise ValueError("Rollback record must belong to prefix")
     tx = json.loads((record / "transaction.json").read_text())
+    if set(tx["before"]) != set(
+        FILES + tuple(target for target, _ in EXTERNAL_FILES)
+    ) or set(tx["before"].values()) - {"present", "absent"}:
+        raise ValueError("Unsafe rollback targets")
     for name, state in tx["before"].items():
         target = prefix / "gate" / name
         if state == "present":

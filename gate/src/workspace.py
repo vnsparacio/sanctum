@@ -343,9 +343,55 @@ def inspect_worktree(root, operation):
     if operation == "status":
         output = _run(GIT + ["status", "--porcelain=v1", "--untracked-files=all"], root)
     elif operation == "diff":
-        output = _run(
-            GIT + ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--"], root
-        )
+        try:
+            tracked = subprocess.run(
+                GIT + ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--"],
+                cwd=root,
+                env=GIT_ENV,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            ).stdout
+            listed = subprocess.run(
+                GIT + ["ls-files", "--others", "--exclude-standard", "-z", "--"],
+                cwd=root,
+                env=GIT_ENV,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            ).stdout
+            additions = []
+            for raw_name in sorted(name for name in listed.split(b"\0") if name):
+                relative = raw_name.decode("utf-8")
+                path = resolve_entry(root, relative)
+                info = os.lstat(path)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise Refused("workspace_link")
+                rendered = subprocess.run(
+                    GIT
+                    + [
+                        "diff",
+                        "--no-index",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "--binary",
+                        "--",
+                        "/dev/null",
+                        relative,
+                    ],
+                    cwd=root,
+                    env=GIT_ENV,
+                    capture_output=True,
+                    timeout=30,
+                )
+                if rendered.returncode != 1 or not rendered.stdout:
+                    raise Refused("workspace_git_unavailable")
+                additions.append(rendered.stdout)
+            output = (tracked + b"".join(additions)).decode("utf-8").rstrip("\n")
+        except Refused:
+            raise
+        except Exception:
+            raise Refused("workspace_git_unavailable") from None
     else:
         raise Refused("workspace_inspection_operation")
     raw = output.encode()

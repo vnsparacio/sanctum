@@ -13,10 +13,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 GATE_NODE_TESTS = (
     "tests/core.test.mjs",
+    "tests/content-telemetry-contract.test.mjs",
+    "tests/content-telemetry-spool.test.mjs",
+    "tests/content-telemetry-delivery.test.mjs",
+    "tests/quality-benchmark.test.mjs",
     "tests/observability.test.mjs",
     "tests/local-agent.test.mjs",
+    "tests/local-synthesis.test.mjs",
+    "tests/local-context-budget.test.mjs",
     "tests/source-retrieval.test.mjs",
+    "tests/work-mode-app-server.test.mjs",
     "tests/work-mode.test.mjs",
+    "tests/moodlog-acceptance.test.mjs",
+    "tests/work-stages.test.mjs",
+    "tests/work-trace.test.mjs",
     "tests/worktree-edit.test.mjs",
     "tests/task-evidence.test.mjs",
     "tests/protocol-repair.test.mjs",
@@ -72,6 +82,11 @@ def mcp(env: dict[str, str]) -> None:
     node_tests("mcp-integration", ("tests/guard.test.mjs",), env)
 
 
+def router(env: dict[str, str]) -> None:
+    for path in ("router/session_state_test.py", "router/shadow_bridge_test.py"):
+        run([sys.executable, "-B", path], ".", env)
+
+
 def plugins(env: dict[str, str]) -> None:
     for plugin in sorted((ROOT / "plugins").iterdir()):
         if list((plugin / "src").glob("*.test.ts")):
@@ -83,7 +98,20 @@ def plugins(env: dict[str, str]) -> None:
 
 
 def release(env: dict[str, str]) -> None:
-    run([sys.executable, "-B", "-m", "unittest", "tests.test_release"], ".", env)
+    run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "unittest",
+            "tests.test_release",
+            "tests.test_calendar_read_broker",
+            "tests.test_lifecycle",
+            "tests.test_documentation_impact",
+        ],
+        ".",
+        env,
+    )
 
 
 def agents(env: dict[str, str]) -> None:
@@ -94,8 +122,12 @@ def agents(env: dict[str, str]) -> None:
             "-m",
             "unittest",
             "tests.test_agent_system",
+            "tests.test_codex_token_baseline",
             "tests.test_git_control_plane",
             "tests.test_rework_workflow",
+            "tests.test_work_bridge",
+            "tests.test_work_commands",
+            "tests.test_work_review",
         ],
         ".",
         env,
@@ -107,6 +139,7 @@ GROUPS: dict[str, Callable[[dict[str, str]], None]] = {
     "gate-python": gate_python,
     "reliability": reliability,
     "mcp": mcp,
+    "router": router,
     "plugins": plugins,
     "release": release,
     "agents": agents,

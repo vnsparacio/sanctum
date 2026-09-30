@@ -83,8 +83,13 @@ def validate_issue_mutation(role: Role | str, mutation: dict[str, Any]) -> None:
     if selected_role in {Role.REPO_STEWARD, Role.PRODUCT_SCOUT, Role.TRIAGE}:
         if state and state.strip().lower() == "ready for agent":
             raise AuthorityError("management agents may not authorize implementation")
-        if "symphony" in normalized_labels:
-            raise AuthorityError("management agents may not add the symphony label")
+        forbidden_execution_labels = {
+            "symphony",
+            "agent-standard",
+            "agent-deep",
+        }
+        if normalized_labels & forbidden_execution_labels:
+            raise AuthorityError("management agents may not add execution labels")
     if selected_role in {Role.REPO_STEWARD, Role.PRODUCT_SCOUT}:
         if state and state.strip().lower() != "triage":
             raise AuthorityError("finding agents may write only to Triage")

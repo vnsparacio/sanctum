@@ -14,17 +14,19 @@ import {digest} from './foundation/contracts.mjs';
 export const SURFACES=Object.freeze(['ordinaryIneligible','ordinaryEligible','researchIneligible','researchEligible','testOnlyIneligible','reviewer']);
 const examples={
  worktree_list:{path:'.',max_entries:10},worktree_read:{path:'index.js',max_chars:100},
- worktree_edit:{path:'index.js',old_text:'old\n',new_text:'new\n'},
+ worktree_edit:{operation:'replace',path:'index.js',old_text:'old\n',new_text:'new\n'},
+ worktree_patch:{patch:'--- a/index.js\n+++ b/index.js\n@@ -1 +1 @@\n-old\n+new\n'},
  worktree_command:{operation:'test'},source_first_research:{source_need:'WEB_REQUIRED'},
 };
 function representative(branch){
  const kind=branch.properties.kind.const;
- if(kind==='FINAL')return {kind,text:'Synthetic result'};
- if(kind==='ESCALATION')return {kind,reason:'SYNTHETIC_UNAVAILABLE'};
+ const explanation=branch.properties.decision_note?{decision_note:Object.fromEntries(Object.keys(branch.properties.decision_note.properties).map(key=>[key,'Synthetic bounded explanation.']))}:{};
+ if(kind==='FINAL')return {kind,text:'Synthetic result',...explanation};
+ if(kind==='ESCALATION')return {kind,reason:'SYNTHETIC_UNAVAILABLE',...explanation};
  const capability=branch.properties.capability.const;
  const args=structuredClone(examples[capability]);
  // Fill only the real semantic arguments. Every example is checked below.
- return {kind,capability,arguments:args};
+ return {kind,capability,arguments:args,...explanation};
 }
 export function hostSemanticReadiness(schema,representatives){
  const accepts=value=>schema.oneOf.filter(branch=>argumentsMatchSchema(value,branch)).length===1;
@@ -63,19 +65,19 @@ export function readinessArtifact(){
  const surfaces=Object.fromEntries(SURFACES.map(name=>{
   const row=preflight.schemas[name],objects=row.request.schema.oneOf.map(branch=>name==='reviewer'?{kind:'FINAL',text:JSON.stringify({verdict:'ACCEPT',findings:[]})}:representative(branch));
   if(objects.some((value,i)=>!argumentsMatchSchema(value,row.request.schema.oneOf[i])))throw Error('readiness_representative_invalid');
-  const semantic=decisionSurface({manifest,names:row.capabilities,reviewer:name==='reviewer',testOnly:name==='testOnlyIneligible',terminalKinds:row.request.schema.oneOf.map(b=>b.properties.kind.const).filter(k=>k!=='TOOL_PROPOSAL')}).authoritativeSchema;
+  const semantic=decisionSurface({manifest,names:row.capabilities,limit:row.capabilities.length,reviewer:name==='reviewer',testOnly:name==='testOnlyIneligible',terminalKinds:row.request.schema.oneOf.map(b=>b.properties.kind.const).filter(k=>k!=='TOOL_PROPOSAL')}).authoritativeSchema;
   const hostSemanticValidation=hostSemanticReadiness(semantic,objects);
   return [name,{...row,semanticSchema:semantic,representatives:objects,hostSemanticValidation}];
  }));
 
  const profile=JSON.parse(readFileSync(new URL('./runtime/private-lead-interface-profile.json',import.meta.url)));
  const messages={};
- function request(label,{observations=[],correction=null,testOnly=false}={}){
-  const selected=testOnly?['worktree_command']:['worktree_list','worktree_read','worktree_edit','worktree_command'];
-  const artifact=decisionSurface({manifest,names:selected,testOnly,terminalKinds:['ESCALATION']});
+ function request(label,{observations=[],correction=null,postPatch=false}={}){
+  const selected=['worktree_list','worktree_read','worktree_edit','worktree_patch','worktree_command'];
+  const artifact=decisionSurface({manifest,names:selected,limit:5,terminalKinds:['ESCALATION']});
   if(correction)correction={...correction,resultRequirements:artifact.resultRequirements,diagnostic:null,schemaVersion:artifact.request.version,schemaDigest:artifact.request.schemaDigest,allowedCapabilities:artifact.capabilities,allowedTerminalKinds:['ESCALATION']};
-  const state={task:'Synthetic offline inspection task.',phase:'PLAN',iteration:testOnly||correction?1:observations.length,tests:{passed:null,required:testOnly},observations,correction,workspaceGeneration:testOnly?1:0};
-  const value=buildWorkRequest({requestId:'synthetic',scope:'a'.repeat(32),state,decisionState:testOnly?'TEST_REQUIRED':'WORK_REQUIRED',decisionArtifact:artifact,phaseVisible:artifact.specs,eligibility:{eligible:false,reason:testOnly?'POST_PATCH_TEST_REQUIRED':'NO_COMPLETABLE_DIFF'},completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,captured:{digest:'b'.repeat(64)},manifest,terminalKinds:['ESCALATION']});
+  const state={task:'Synthetic offline inspection task.',phase:'PLAN',iteration:postPatch||correction?1:observations.length,tests:{passed:null,required:postPatch},observations,correction,workspaceGeneration:postPatch?1:0};
+  const value=buildWorkRequest({requestId:'synthetic',scope:'a'.repeat(32),state,decisionState:postPatch?'TEST_REQUIRED':'WORK_REQUIRED',decisionArtifact:artifact,phaseVisible:artifact.specs,eligibility:{eligible:false,reason:postPatch?'POST_PATCH_TEST_REQUIRED':'NO_COMPLETABLE_DIFF'},completionPolicy:MUTABLE_WORKTREE_COMPLETION_POLICY,captured:{digest:'b'.repeat(64)},manifest,terminalKinds:['ESCALATION']});
   messages[label]={system:profileSystem(profile),request:value};return value;
  }
  request('ordinaryInitial');
@@ -85,7 +87,7 @@ export function readinessArtifact(){
  let low=0,high=64000;
  while(low<high){const n=Math.ceil((low+high)/2);try{request('nearCharacterLimit',{observations:[{provenance:'MAC_CAPABILITY',data:'x'.repeat(n)}]});low=n;}catch(e){if(e.message!=='model_context_limit')throw e;high=n-1;}}
  request('nearCharacterLimit',{observations:[{provenance:'MAC_CAPABILITY',data:'x'.repeat(low)}]});
- request('postPatchTestOnly',{testOnly:true});
+ request('postPatchContinue',{postPatch:true});
  messages.reviewer={system:profileSystem(profile),request:buildReviewerRequest({task:{id:'a'.repeat(32)},requestId:'synthetic-review',reviewGoal:'Synthetic offline review.',state:{iteration:0,tests:{passed:true,required:false},observations:[]},claim:'Synthetic completion.',reviewEvidence:{checks:[],diffStable:true,diffDigest:'b'.repeat(64),workspaceDiff:'Synthetic diff.'},manifest})};
  return {schema:'sanctum-runtime-readiness/v1',surfaces,messages,profile:{model:profile.model,revision:profile.revision,modelWindow:profile.context.model_window_tokens,reservedOutput:profile.context.reserved_output_tokens},hostValidation:'SOURCE_DIALECT_AND_HOST_ONLY',exactCompiler:'NOT_RUN',liveEndpoint:'NOT_RUN',tokenMeasurement:'NOT_RUN'};
 }

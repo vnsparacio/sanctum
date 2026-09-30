@@ -8,13 +8,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .implementation import LifecycleError, implementation_backend_dispatch
+
 
 class ConfigError(ValueError):
     """Configuration is missing, malformed, or unsafe."""
 
 
-_ROLES = {"repo_steward", "product_scout", "triage", "implementation", "reviewer"}
+_ROLES = {
+    "repo_steward",
+    "product_scout",
+    "triage",
+    "implementation",
+    "implementation_deep",
+    "reviewer",
+}
 _REASONING = {"low", "medium", "high", "xhigh", "max", "ultra"}
+_WORK_MODE_PROFILE_FIELDS = {
+    "relative_path",
+    "project_id",
+    "repository",
+    "integration_branch",
+    "validation_operations",
+}
 
 
 @dataclass(frozen=True)
@@ -144,28 +160,73 @@ def load_config(path: str | Path) -> AgentConfig:
     gate = raw["project"].get("implementation_gate")
     if gate != {"status": "Ready for Agent", "label": "symphony"}:
         raise ConfigError("implementation gate must remain Ready for Agent + symphony")
+    if raw["project"].get("worker_routing") != {
+        "standard_label": "agent-standard",
+        "deep_label": "agent-deep",
+    }:
+        raise ConfigError("worker routing must remain agent-standard/agent-deep")
     if raw["project"].get("human_review_status") != "Human Review":
         raise ConfigError("human_review_status must remain Human Review")
-    if raw["project"].get("integration_branch") != "v1.2-dev":
-        raise ConfigError("integration_branch must remain v1.2-dev")
-    if raw["symphony"].get("max_concurrency") != 1:
-        raise ConfigError("initial Symphony concurrency must remain 1")
+    if raw["project"].get("integration_branch") != "v1.3-dev":
+        raise ConfigError("integration_branch must remain v1.3-dev")
+    concurrency = _positive(raw["symphony"], "max_concurrency")
+    if concurrency > 5:
+        raise ConfigError("Symphony concurrency may not exceed 5")
     symphony = raw["symphony"]
     if symphony.get("engineering_preview_acknowledged") is not True:
         raise ConfigError(
             "Symphony engineering preview must be explicitly acknowledged"
         )
-    for key in ("binary_env", "default_binary", "workflow"):
+    for key in (
+        "binary_env",
+        "default_binary",
+        "workflow",
+        "deep_workflow",
+        "work_mode_workflow",
+        "work_mode_deep_workflow",
+        "work_mode_app_server_env",
+    ):
         if not isinstance(symphony.get(key), str) or not symphony[key]:
             raise ConfigError(f"symphony.{key} must be non-empty")
+    if symphony["work_mode_app_server_env"] != "SANCTUM_WORK_MODE_APP_SERVER":
+        raise ConfigError("Work Mode app-server environment binding is invalid")
+    work_mode_profile = symphony.get("work_mode_profile")
+    if (
+        not isinstance(work_mode_profile, dict)
+        or set(work_mode_profile) != _WORK_MODE_PROFILE_FIELDS
+        or work_mode_profile.get("project_id") != "v13-qualification"
+        or work_mode_profile.get("repository")
+        != "vnsparacio/sanctum-work-mode-qualification"
+        or work_mode_profile.get("integration_branch") != "main"
+        or work_mode_profile.get("validation_operations") != ["build", "lint", "test"]
+    ):
+        raise ConfigError("reviewed Work Mode qualification profile is invalid")
+    relative_profile = Path(str(work_mode_profile.get("relative_path", "")))
+    if (
+        relative_profile.is_absolute()
+        or not relative_profile.parts
+        or ".." in relative_profile.parts
+        or relative_profile.suffix != ".json"
+    ):
+        raise ConfigError("Work Mode profile path must be a safe relative JSON path")
+    try:
+        implementation_backend_dispatch(symphony, "standard")
+        implementation_backend_dispatch(symphony, "deep")
+    except LifecycleError as exc:
+        raise ConfigError(str(exc)) from exc
     for key in (
         "shutdown_grace_seconds",
         "state_port",
         "poll_seconds",
         "state_timeout_seconds",
+        "state_startup_grace_seconds",
+        "state_stall_grace_seconds",
         "output_limit_bytes",
     ):
         _positive(symphony, key)
+    warning_ratio = symphony.get("budget_warning_ratio")
+    if type(warning_ratio) not in {int, float} or not 0 < warning_ratio < 1:
+        raise ConfigError("symphony.budget_warning_ratio must be between zero and one")
     runtime = raw["runtime"]
     if not isinstance(runtime.get("prefix_env"), str) or not runtime["prefix_env"]:
         raise ConfigError("runtime.prefix_env must be non-empty")

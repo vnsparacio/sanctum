@@ -3,10 +3,11 @@ tracker:
   kind: linear
   provider:
     api_key: $LINEAR_API_KEY
-    project_slug: "sanctum-v12-6fe3a63e0c69"
+    project_slug: "sanctum-v13-aafdb6e2bb76"
 
   required_labels:
     - symphony
+    - agent-standard
 
   active_states:
     - Ready for Agent
@@ -26,15 +27,15 @@ workspace:
 
 hooks:
   after_create: |
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.2-dev" https://github.com/vnsparacio/sanctum.git .
-    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.3-dev" https://github.com/vnsparacio/sanctum.git .
+    "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare --fresh-workspace
   before_run: |
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
   timeout_ms: 120000
 
 agent:
-  max_concurrent_agents: 1
-  max_turns: 8
+  max_concurrent_agents: 5
+  max_turns: 20
   max_retry_backoff_ms: 120000
 
 codex:
@@ -60,12 +61,25 @@ codex:
     -c 'mcp_servers.sanctum_git.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_GIT_CREDENTIAL_HELPER","SANCTUM_GIT_GH_CONFIG_DIR"]'
     -c 'mcp_servers.sanctum_git.enabled_tools=["git_workspace_status","git_commit_issue_changes","git_push_issue_branch","git_reconcile_operation","github_ensure_issue_pull_request"]'
     -c 'mcp_servers.sanctum_git.default_tools_approval_mode="approve"'
+    -c "mcp_servers.sanctum_validation.command=\"$SANCTUM_VALIDATION_RUNNER_PYTHON\""
+    -c "mcp_servers.sanctum_validation.args=[\"$SANCTUM_VALIDATION_RUNNER_SCRIPT\",\"mcp\"]"
+    -c 'mcp_servers.sanctum_validation.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_VALIDATION_STATE"]'
+    -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]'
+    -c 'mcp_servers.sanctum_validation.default_tools_approval_mode="approve"'
+    -c 'otel.environment="sanctum-codex-dev"'
+    -c 'otel.log_user_prompt=false'
+    -c 'otel.exporter="none"'
+    -c 'otel.metrics_exporter="none"'
+    -c 'otel.trace_exporter={ otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "binary" } }'
     app-server
   approval_policy: never
   thread_sandbox: workspace-write
-  turn_timeout_ms: 600000
-  stall_timeout_ms: 300000
+  turn_timeout_ms: 3600000
+  stall_timeout_ms: 900000
   turn_permission_profile: sanctum-workspace
+
+observability:
+  dashboard_enabled: false
 ---
 
 You are the implementation worker for Sanctum Linear issue
@@ -79,6 +93,10 @@ Current state:
 
 Labels:
 {{ issue.labels }}
+
+Worker class: standard (`agent-standard`). `agent-standard` and `agent-deep`
+are mutually exclusive routing labels; stop and record an owner-action blocker
+if both or neither is present.
 
 Issue URL:
 {{ issue.url }}
@@ -104,7 +122,7 @@ Do not implement adjacent improvements simply because you discover them.
 Never:
 - merge a pull request;
 - commit directly to `main`;
-- commit directly to `v1.2-dev`;
+- commit directly to `v1.3-dev`;
 - move an issue to Done;
 - add unrelated refactors or cleanup;
 - weaken security, privacy, authority, validation, or egress controls;
@@ -112,6 +130,24 @@ Never:
 
 Meaningful adjacent work should be recorded as follow-up work in Linear rather
 than silently expanding scope.
+
+# Failure classification and escalation
+
+Classify a stop as exactly one of `MODEL_REASONING`, `ENVIRONMENT`, `SANDBOX`,
+`VALIDATION`, `GIT_CONTROL_PLANE`, `NETWORK_PROVIDER`, `TOKEN_BUDGET`,
+`TIME_BUDGET`, `OWNER_ACTION_REQUIRED`, or `UNKNOWN`. Record only safe metadata
+in the workpad: issue/workspace identity, attempt, worker class, model,
+reasoning effort, turns, elapsed time, validation receipt, and Git operation
+state. Do not copy prompts, source bodies, credentials, or private file
+contents into diagnostics.
+
+Infrastructure, validation, Git, network, token, and time failures do not
+justify a deeper model. Preserve the workspace and durable checkpoints, use
+the deterministic recovery path, and resume. Only repeated
+`MODEL_REASONING` failures justify requesting deep-worker escalation. The
+worker may record that request but may not add/remove `agent-standard` or
+`agent-deep`; the owner must select exactly one routing label. A deep worker
+has larger reasoning/budget limits but exactly the same authority.
 
 # Required tools
 
@@ -287,7 +323,7 @@ evidence in the old workpad: the feedback IDs, classification, why continued
 work was unsafe, old branch/PR, and validation history. Then close the
 obsolete PR only when appropriate, archive/remove the prior active workpad as
 the existing tracker convention permits, create a fresh issue branch from the
-accepted `origin/v1.2-dev` base, create a fresh workpad, and document what is
+accepted `origin/v1.3-dev` base, create a fresh workpad, and document what is
 different in the new approach. Restart implementation without erasing the
 old evidence. A stale/closed/merged PR must use this fresh-start behavior.
 
@@ -328,7 +364,7 @@ Agent` and the `symphony` label through the established control plane.
 
 The integration base branch is:
 
-`v1.2-dev`
+`v1.3-dev`
 
 Before modifying files:
 
@@ -342,7 +378,7 @@ Before modifying files:
    `git status --short`
 
 7. Confirm `git_workspace_status` reports the deterministic issue branch that
-   the host prepared from accepted `origin/v1.2-dev`.
+   the host prepared from accepted `origin/v1.3-dev`.
 
 8. Never ask shell Git to mutate metadata. The host hook owns base fetch and
    issue-branch bootstrap; the Git control plane owns commit and push.
@@ -405,6 +441,14 @@ another tool.
 Select the smallest validation profile that covers the changed risk, and record
 the selection in the workpad:
 
+Before running a full profile, inspect the changed source files against
+`SOURCE-MANIFEST.json`. For each intentional source change, review the exact
+diff and update only its corresponding manifest entry; add a new entry only for
+an intended publication file. Record the reason and changed entries in the
+workpad. Never regenerate the whole manifest or refresh a hash to conceal
+unexplained drift. Run `make verify-source` before expensive validation; if it
+fails, resolve the source discrepancy before trying a profile.
+
 - `docs-config`: documentation or declarative configuration only; run focused
   format/schema/reference checks, `git diff --check`, the source-freeze check
   when applicable, and `make audit`.
@@ -438,6 +482,19 @@ Before committing:
 
 If required validation fails, the task is not complete.
 
+If a required command is deterministically blocked by the managed sandbox,
+call `run_validation_profile` with this issue identifier and the selected
+bounded profile. The host runner executes only the reviewed command list in
+the current leased issue workspace and returns a structured receipt. It is not
+an arbitrary shell escape. Record the receipt identity and results in the
+workpad. Do not delegate a source failure, retry an unchanged failing profile,
+or ask the owner to run an approved profile manually.
+
+The host code profiles first check whether their own environment can inspect a
+process with `/bin/ps`, then verify source integrity before long builds/tests.
+If the preflight fails, record the receipt and stop with an environment
+blocker; do not retry the unchanged profile or report the task as validated.
+
 Record the exact commands and outcomes in the Linear workpad.
 
 # Commit
@@ -449,7 +506,7 @@ When the implementation and validation are complete:
    summary line, and a stable operation ID recorded in the workpad.
 3. Confirm the returned commit and clean/expected workspace state.
 
-Do not commit to `main` or `v1.2-dev`.
+Do not commit to `main` or `v1.3-dev`.
 
 # Push and pull request
 
@@ -458,12 +515,13 @@ After a valid commit exists:
 1. Call `git_push_issue_branch` with a stable operation ID recorded in the
    workpad. It can only normally push the deterministic issue branch to origin.
 
-2. Call `github_ensure_issue_pull_request`. It reconciles an existing open PR
-   for the exact issue head or creates one targeting `v1.2-dev`.
+2. Call `github_ensure_issue_pull_request` with a stable operation ID recorded
+   in the workpad. It reconciles an existing open PR for the exact issue head
+   or creates one targeting `v1.3-dev` without replaying an uncertain mutation.
 
 The PR must:
 
-- target `v1.2-dev`;
+- target `v1.3-dev`;
 - have a concise outcome-oriented title;
 - reference the Linear issue;
 - summarize the change;
@@ -481,11 +539,13 @@ If reconciliation remains unknown, record one blocker and stop.
 # Deterministic blockers
 
 An unchanged environment or control-plane blocker is terminal for the current
-supervisor invocation. Record it once in the workpad, then request operator
-input with the exact blocking condition so Symphony enters its blocked state.
-Do not spend continuation turns or retry cycles repeating the same failed Git
-operation. The outer supervisor stops when Symphony reports operator action is
-required; only a later operator-started invocation may resume.
+supervisor invocation. Record the exact blocking condition once in the workpad,
+then call `report_operator_blocker` with a stable operation ID and the narrowest
+approved blocker code. Do not include free-form details in that host signal.
+After the tool reports success, stop. Do not spend continuation turns or retry
+cycles repeating the same prerequisite check or failed Git operation. The outer
+supervisor records `OWNER_ACTION_REQUIRED` and terminates the service; only a
+later operator-started invocation may resume.
 
 # Linear handoff
 
@@ -511,8 +571,9 @@ Do not continue implementation unless the issue later enters `Rework`.
 # Completion rule
 
 The outer Sanctum supervisor may terminate the complete Symphony process group
-for wall-clock, token, turn, retry, stall, or output budgets. `max_turns` and the
-silence timeout are defense in depth, not the total-runtime control. If a
+for aggregate wall-clock, token, turn, retry, state-API, or output budgets.
+Symphony owns the per-worker turn and silence/stall limits; the outer supervisor
+owns total issue budgets and is the hard total-runtime authority. If a
 budget stop occurs, leave the issue in its current active state. The private
 supervisor incident receipt is the operator-visible stop record; on the next
 authorized run, copy its reason into the persistent workpad before resuming.

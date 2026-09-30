@@ -28,22 +28,40 @@ def sources(root=ROOT):
         for n in sorted(
             name
             for name in files
-            if not (exclude_finder_metadata and name == ".DS_Store")
+            if name != ".git" and not (exclude_finder_metadata and name == ".DS_Store")
         ):
             yield Path(base) / n
 
 
 PATTERNS = {
-    "private_key": r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
-    "provider_key": r"\b(?:sk-[A-Za-z0-9_-]{24,}|ghp_[A-Za-z0-9]{30,}|AKIA[A-Z0-9]{16})\b",
+    "private_key": (
+        r"-----BEGIN (?:(?:RSA|EC|OPENSSH) )?PRIVATE KEY-----"
+        r"|-----BEGIN PGP PRIVATE KEY BLOCK-----"
+    ),
+    "github_token": (
+        r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b"
+    ),
+    "linear_token": r"\blin_(?:api|oauth)_[A-Za-z0-9]{20,}\b",
+    "provider_key": (
+        r"\b(?:sk-[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16}" r"|fc-[A-Za-z0-9_-]{20,})\b"
+    ),
+    "credential_assignment": (
+        r"(?m)^[ \t]*(?:export[ \t]+)?(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN"
+        r"|FIRECRAWL_API_KEY|GH_TOKEN|GITHUB_TOKEN|LINEAR_API_KEY|OPENAI_API_KEY"
+        r"|PARALLEL_API_KEY|RUNPOD_API_KEY|SPLUNK_ACCESS_TOKEN|SPLUNK_HEC_TOKEN)"
+        r"[ \t]*=[ \t]*[\"']?(?!(?i:[^\r\n]*(?:<|\$|\.{3}|configure|example"
+        r"|fake|placeholder|synthetic|your)))[A-Za-z0-9_./+=:-]{12,}"
+    ),
     "owner_home": r"/Users/(?!example(?:/|$)|<)[a-zA-Z][a-zA-Z0-9_-]+/",
 }
 
 
 def scan(root=ROOT):
     issues = []
+    found = set()
     for p in sources(root):
         rel = str(p.relative_to(root))
+        found.add(rel)
         if p.is_symlink():
             issues.append((rel, "symlink"))
             continue
@@ -69,6 +87,17 @@ def scan(root=ROOT):
             for label, pattern in PATTERNS.items():
                 if re.search(pattern, text):
                     issues.append((rel, label))
+    manifest_path = root / "SOURCE-MANIFEST.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            if not isinstance(manifest, dict):
+                raise ValueError("invalid manifest")
+        except (OSError, ValueError):
+            issues.append(("SOURCE-MANIFEST.json", "invalid source manifest"))
+        else:
+            for name in sorted(found - set(manifest) - {"SOURCE-MANIFEST.json"}):
+                issues.append((name, "unlisted source"))
     return issues
 
 

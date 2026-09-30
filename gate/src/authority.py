@@ -28,10 +28,14 @@ OPERATIONS = {
     "worktree_edit",
     "worktree_observe",
     "worktree_patch",
+    "worktree_qwen_export",
+    "worktree_qwen_import",
+    "worktree_qwen_run",
     "worktree_command",
     "worktree_cleanup",
     "work_source_policy",
 }
+WORK_MODE_PACKET_BYTES = 49152
 
 
 def authorize(envelope, settings, now=time.time, settings_hash=None):
@@ -84,10 +88,34 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         raise Refused("invalid_identity")
     if type(b["strong"]) is not bool or type(b["packet"]) is not dict:
         raise Refused("packet_contract")
-    if b["operation"] == "classify" and (
-        b["tier"] != "GEMINI_AUDIT" or b["approval"] != "exact_disclosure"
-    ):
-        raise Refused("classification_approval")
+    if b["operation"] == "classify":
+        if b["tier"] != "GEMINI_AUDIT" or b["approval"] not in (
+            "exact_disclosure",
+            "session_audit_prompt",
+        ):
+            raise Refused("classification_approval")
+        if b["approval"] == "session_audit_prompt":
+            packet = b["packet"]
+            if (
+                set(packet)
+                != {
+                    "scope",
+                    "revision",
+                    "prompt",
+                    "semantic_state",
+                    "attachment_summary",
+                    "disclosed",
+                }
+                or packet["disclosed"] != {}
+                or packet["attachment_summary"]
+                != {
+                    "count": 0,
+                    "visual_count": 0,
+                    "document_count": 0,
+                    "video_count": 0,
+                }
+            ):
+                raise Refused("session_audit_grant_scope")
     if b["tier"] == "PRIVATE_80B" and b["operation"] not in (
         "status",
         "close",
@@ -138,7 +166,7 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
         if "experiment" in b["packet"]:
             validate_binding(b["packet"]["experiment"])
         raw = canonical(b["packet"]["request"])
-        if len(raw.encode()) > min(settings["max_context_bytes"], 196608):
+        if len(raw.encode()) > WORK_MODE_PACKET_BYTES:
             raise Refused("private_lead_proposal_limit")
     if b["operation"].startswith("work"):
         if b["tier"] != "PRIVATE_LEAD" or b["approval"] != "private_lead_workmode":
@@ -164,15 +192,21 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
             "worktree_acceptance": {"task_id", "profile"},
             "worktree_create": {"task_id", "profile"},
             "worktree_list": {"task_id", "path", "max_entries"},
-            "worktree_edit": {"task_id", "path", "old_text", "new_text"},
+            "worktree_edit": None,
             "worktree_observe": {"task_id", "path", "observation"},
             "worktree_read": {"task_id", "path", "max_chars"},
             "worktree_patch": {"task_id", "patch"},
+            "worktree_qwen_export": {"task_id", "profile"},
+            "worktree_qwen_import": {"task_id", "profile"},
+            "worktree_qwen_run": {"task_id", "profile", "goal"},
             "worktree_command": {"task_id", "operation", "profile"},
             "worktree_cleanup": {"task_id", "profile"},
             "work_source_policy": {"task_id", "prompt", "source_need"},
         }
-        if set(packet) != contracts[b["operation"]]:
+        if (
+            contracts[b["operation"]] is not None
+            and set(packet) != contracts[b["operation"]]
+        ):
             raise Refused(
                 "EDIT_SCHEMA_INVALID"
                 if b["operation"] == "worktree_edit"
@@ -203,6 +237,12 @@ def authorize(envelope, settings, now=time.time, settings_hash=None):
                 raise Refused(error)
         if b["operation"] == "worktree_patch" and (
             type(packet["patch"]) is not str or len(packet["patch"].encode()) > 48000
+        ):
+            raise Refused("workmode_packet_contract")
+        if b["operation"] == "worktree_qwen_run" and (
+            type(packet["goal"]) is not str
+            or not packet["goal"].strip()
+            or len(packet["goal"].encode()) > 32768
         ):
             raise Refused("workmode_packet_contract")
         if b["operation"] == "worktree_command" and packet["operation"] not in {

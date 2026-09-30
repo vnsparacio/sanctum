@@ -6,16 +6,67 @@
 | Plugin metadata generator rejects entry | Hook plugins use definePluginEntry; tool-only metadata generation does not apply. Use make build. |
 | Source/runtime drift | Compare reviewed hashes and changes. Do not auto-refresh pins. |
 | Setup refuses nonempty prefix | Preserve the contents and inspect partial installation; choose an empty private directory. |
-| Gateway exits | Inspect private gateway log; validate configuration using isolated OpenClaw state. |
-| Local answer unavailable | Check MLX model identity, selected loopback port, gateway authentication and agent model. Bare-model health does not establish the agent path. |
+| Managed stack start refuses an occupied port or separate gateway | Run `./sanctum status --prefix ...`, inspect the exact listener and private logs, then stop the known owner. The runner never adopts or broadly kills an unknown process. |
+| Managed stack reports `failed` | Run `./sanctum status --prefix ...`, `./sanctum ready --prefix ...` and `./sanctum logs --prefix ...`; inspect `stack.log` and the named component log. Resolve the exact failure before restarting. Managed startup quarantines only a provably stale, owner-controlled broker socket; a live, new, changed or unsafe path is deliberately refused for inspection. |
+| Gateway exits | Inspect `make status PREFIX=...` and the private gateway log; validate configuration with `make doctor PREFIX=...`. Do not start a duplicate while startup is pending. |
+| Gate plugin reports `Cannot find module './ajv.mjs'` | An existing prefix has an incomplete content-telemetry runtime closure. Stop the candidate gateway, run `.venv/bin/python scripts/upgrade_content_telemetry_runtime.py --prefix /absolute/private/prefix`, run `make doctor PREFIX=/absolute/private/prefix`, then restart it. Current Work Mode amendments include this closure. |
+| Local answer unavailable | Confirm MLX model identity and health, run doctor, check the selected loopback port, gateway authentication and agent model, and confirm Open WebUI is using **Mac prompt gate**, not the raw MLX provider. Bare-model health does not establish the authenticated agent path. After a Work Mode upgrade, reapply the supported amendment so `main` owns local requests and ambient model resolution. |
+| `LOCAL_4B grounding validation failed (GROUNDING_REQUIRED)` | The Mac refused a `WEB_REQUIRED` answer because fetched evidence was inadequate, the local answer was not marked `GROUNDED`, or it had no citations. The excerpts are diagnostic, not verified claims. Use the [local 4B prompting guide](local-4b-grounded-prompts.md) to check source relevance and narrow the request; do not bypass grounding to force an answer. |
+| Local tool answer ends with `Reply truncated at the model's output token limit` after only a fragment, or tools succeed but `LOCAL_4B answering was unavailable` follows | Stop the gateway, apply the current `scripts/upgrade_work_mode.py` amendment, run `make doctor PREFIX=...`, and restart. Current source pins `main.thinkingDefault` to `off`, sends `chat_template_kwargs.enable_thinking=false` to MLX, and pins the local model catalog to 4,096 output tokens per internal turn. Gate does not send an outer `max_completion_tokens` cap, which OpenClaw would share across tool selection, tool follow-up, and the final answer. Gate refuses a local handoff if these runtime pins drift. Do not route personal tool results to a hosted model as a workaround. |
 | Personal tool unavailable | Configure the read-only account/permission, marker, socket and explicitly allowed tool; do not broaden API/shell access. |
 | Unknown contact | Add an explicit local mapping after review; do not broaden the search automatically. |
-| Approval unavailable/expired | Deny/stop and obtain a fresh exact approval. Never add standing approval. |
+| WebUI prints `/gate approve <id>` instead of a dialog | Re-import the rendered prefix `gate/webui/pipe.py` into Open WebUI Functions and confirm version `2.1.0`. Updating the file on disk does not replace the function stored in the WebUI database. Exact commands remain valid for protocol diagnosis, but the current owner flow uses confirmation dialogs. |
+| Doctor reports stale `webui_function_sync` | Open WebUI **Functions**, replace the named stale function with the matching rendered prefix file, keep the gate guard enabled, then rerun doctor. Sanctum detects the drift read-only and never edits the owner UI database automatically. |
+| Startup says `owner-action-required` | Run `./sanctum ready --prefix ...`. Complete only the listed WebUI enrollment, function import or configured credential checkpoints. A healthy service report alone does not establish that those owner-controlled steps are complete. |
+| Approval unavailable/expired | Deny/stop and obtain a fresh exact approval. The optional audit grant is limited to current-prompt classification, eight calls and 15 minutes; inspect it with `/gate audit status` and remove it with `/gate audit revoke`. |
 | GPU allocation unresolved | Reconcile persisted intent; do not blindly create another Pod. |
+| Work Mode stops with `PRIVATE_LEAD_UNAVAILABLE` before a model call | Inspect `/work result` and the owner-only receipt for the allowlisted provider code. `capacity_timeout` means the configured GPU did not become available during the bounded wait; `gpu_price_or_identity` means its live identity or price failed preflight; `runpod_auth_missing` means the local credential binding is unavailable. Preserve the receipt, end the Work Mode session, and verify zero leases, requests and managed pods. For a confirmed stock shortage, see the reviewed B200 option in [configuration](configuration.md). Unknown worker failures remain generic; never copy provider responses or credentials into a task report. |
+| Work Mode stops with `MODEL_OUTPUT_LIMIT` | The private model reached its per-proposal output ceiling before producing a complete structured result. Preserve the private diagnostic receipt, end the task, and inspect the task scope and accepted output budget before a reviewed retry. Do not execute or splice the partial response. |
 | Deletion unconfirmed | Keep janitor running and reconcile provider state. Cached OFFLINE alone is insufficient. |
 | WebUI drops gate command | Use an administrator-owned saved chat and rendered pipe/filter; preserve preprocessing restrictions. |
+| Wrong model or unexpected raw answer | Select **Mac prompt gate** in WebUI. Use ordinary text for policy routing, `/gate ask-235` for hosted Qwen, `/gate ask-strong` for the frontier tier, and `/gate status` to inspect the session. Sanctum deliberately does not silently fall back. |
+| Current-news request reports unavailable or logs a Firecrawl 403 | Update to the reviewed core-fetch configuration and reapply the stopped-gateway Work Mode amendment. The supported web route uses Parallel for discovery and OpenClaw's guarded core fetcher for page retrieval; Firecrawl is not the selected fetch provider. Re-import the rendered WebUI pipe after the amendment because its longer transport deadline is stored in the WebUI database. |
+| Work Mode amendment says Docker timed out | Confirm Docker Desktop's engine is healthy, not merely that its UI process exists. `docker version` and the active local Unix context must return before retrying. The amendment refuses before writing when this preflight fails. Do not delete Docker data or edit a receipt to bypass it. |
+| Work Mode amendment refuses ownership or janitor state | Keep the gateway stopped. Reconcile both managed releases to offline/no leases, confirm permanent private-80B retirement and verify the prefix-specific janitor is loaded. Preserve uncertain ownership and use the refusal as the blocker. |
+| Candidate port already occupied | Identify the exact listener on ports 28000, 28080 or 28789. Stop only a verified candidate process. A legacy gateway on a different recorded port is not the candidate and should not be killed as cleanup. |
 
 Distinguish model selection, plugin dispatch, broker/wrapper response, provider readiness and UI finalization. A model's explanation of a tool error is not evidence of the underlying cause.
+
+## Local answer diagnostic order
+
+Run these checks from the source tree with the same prefix used at startup:
+
+```sh
+./sanctum status --prefix /absolute/private/prefix
+./sanctum logs --prefix /absolute/private/prefix
+.venv/bin/python scripts/component.py mlx \
+  --prefix /absolute/private/prefix \
+  --health
+make status PREFIX=/absolute/private/prefix
+make doctor PREFIX=/absolute/private/prefix
+make logs PREFIX=/absolute/private/prefix
+```
+
+MLX health proves only the model server. Doctor proves the installed source,
+runtime pins and rendered configuration. A successful end-to-end local answer
+also requires the authenticated OpenClaw gateway, explicit `main` ownership,
+the Gate local adapter, the current rendered WebUI pipe and a saved owner chat.
+
+If the installation predates explicit Work Mode ownership and all amendment
+preconditions are satisfied, stop the gateway and apply the current supported
+upgrade:
+
+```sh
+make down PREFIX=/absolute/private/prefix
+.venv/bin/python scripts/upgrade_work_mode.py \
+  --prefix /absolute/private/prefix \
+  --apply
+make doctor PREFIX=/absolute/private/prefix
+```
+
+Restart the normal component sequence and re-import the pipe if its version
+changed. Do not manually add an agent owner or refresh hashes in the private
+prefix.
 
 ## Qualification findings
 

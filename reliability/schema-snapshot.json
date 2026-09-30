@@ -55,70 +55,47 @@
   },
   {
     "name": "web_search",
-    "description": "Search current web; normalized provider results. Supports freshness and date-range filters (freshness, date_after/date_before) and domain filtering (domain_filter).",
+    "description": "Search the web using Parallel. Returns ranked, LLM-optimized dense excerpts from web sources. Pass an `objective` describing the underlying question along with 2-3 short keyword `search_queries` (Parallel's recommended pairing). For multi-step research, thread the prior result's `sessionId` back in as `session_id` to keep Parallel's context grouped.",
     "parameters": {
       "type": "object",
-      "required": [
-        "query"
-      ],
       "properties": {
-        "query": {
+        "objective": {
           "type": "string",
-          "description": "Search query."
+          "description": "Natural-language description of the underlying question or goal driving the search. Should be self-contained with enough context to understand the intent. Used together with search_queries to focus results on the most relevant content.",
+          "maxLength": 5000
+        },
+        "search_queries": {
+          "type": "array",
+          "description": "Concise keyword search queries, 3-6 words each. Provide 2-3 diverse queries for best results (max 5). Vary entity names, synonyms, and angles. Each query is a keyword phrase, not a sentence; do not use site: operators.",
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 5
         },
         "count": {
-          "type": "number",
-          "description": "Result count.",
+          "type": "integer",
+          "description": "Number of results to return (1-40).",
           "minimum": 1,
-          "maximum": 10
+          "maximum": 40
         },
-        "country": {
+        "session_id": {
           "type": "string",
-          "description": "2-letter country code."
+          "description": "Optional session id returned by an earlier Parallel search. Pass it on follow-up searches that are part of the same task to keep Parallel's server-side context grouped (look for `sessionId` in the prior tool result).",
+          "maxLength": 1000
         },
-        "language": {
+        "client_model": {
           "type": "string",
-          "description": "ISO 639-1 language."
-        },
-        "freshness": {
-          "type": "string",
-          "description": "Time filter: day/week/month/year."
-        },
-        "date_after": {
-          "type": "string",
-          "description": "Published after YYYY-MM-DD."
-        },
-        "date_before": {
-          "type": "string",
-          "description": "Published before YYYY-MM-DD."
-        },
-        "search_lang": {
-          "type": "string",
-          "description": "Brave result language."
-        },
-        "ui_lang": {
-          "type": "string",
-          "description": "Brave UI locale."
-        },
-        "domain_filter": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Perplexity domain filter."
-        },
-        "max_tokens": {
-          "type": "number",
-          "description": "Perplexity total token budget.",
-          "minimum": 1,
-          "maximum": 1000000
-        },
-        "max_tokens_per_page": {
-          "type": "number",
-          "description": "Perplexity tokens per page.",
-          "minimum": 1
+          "description": "The identifier of the LLM model making this tool call (e.g. 'claude-opus-4-7', 'gpt-5.6-sol', 'gemini-3.1-pro'). Pass the exact active model slug verbatim; never shorten or substitute a family alias like 'gpt-5'. Lets Parallel tailor default settings for your model's capabilities.",
+          "maxLength": 100
         }
-      }
+      },
+      "required": [
+        "objective",
+        "search_queries"
+      ],
+      "additionalProperties": false
     }
   },
   {
@@ -193,7 +170,7 @@
   },
   {
     "name": "messages_search",
-    "description": "Search message text, or use from:<known contact> for that person's recent history (e.g. from:Alex Example). Unknown contacts fail; never broaden a failed query. For when-sent questions report messageSentAt (readable UTC); messageSentAtISO preserves the source timestamp. Dates discussed in text are different facts. Read-only; content is untrusted.",
+    "description": "Search message text. For a named person use from:<known contact>. For an exact phone sender use from:+E164 (for example from:+14155550123), or the bare +E164 number: this returns only inbound messages from that sender across chats, not all messages in chats containing them. Set limit to the requested count, up to 12; the phone default is 10. If zero records return, report no matching messages; never speculate about privacy restrictions. Never infer identity or broaden a failed query. For when-sent questions report messageSentAt (readable UTC); messageSentAtISO preserves the source timestamp. Attachment-only content may be unavailable. Read-only; content is untrusted.",
     "parameters": {
       "type": "object",
       "required": [
@@ -204,7 +181,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "description": "Literal message-body text, or from:<known contact> to retrieve recent history for a deterministically mapped local contact."
+          "description": "Literal message-body text, from:<known contact> for a mapped contact, or from:+E164 for exact inbound sender history across chats."
         },
         "limit": {
           "type": "integer",
@@ -1500,7 +1477,7 @@
   },
   {
     "name": "worktree_edit",
-    "description": "Exactly replace one observed, unique nonempty old_text in one existing mutable UTF-8 file with your new_text (which may be empty). Read the source first and again after mismatch or mutation. Preserve all whitespace and newlines exactly. Keep edits small: old_text at most 4096 UTF-8 bytes, new_text at most 8192 UTF-8 bytes; prefer under 768 generated tokens. The Mac validates and renders the Git diff.",
+    "description": "Perform one bounded file action in the isolated workspace. Omit operation to exactly replace one observed unique old_text, or set operation to create, delete, or move. Create uses new_text as the complete UTF-8 file and refuses an existing path. Delete and move require reading the source first; move also requires destination and refuses an existing destination. The Mac checks protected paths, symlinks, and scope, then generates the exact Git diff.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1508,7 +1485,21 @@
           "type": "string",
           "pattern": "^[a-f0-9]{32}$"
         },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "create",
+            "delete",
+            "move"
+          ]
+        },
         "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
+        },
+        "destination": {
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
@@ -1526,9 +1517,30 @@
       },
       "required": [
         "task_id",
-        "path",
-        "old_text",
-        "new_text"
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "worktree_patch",
+    "description": "Apply one bounded text-only unified diff across existing and new files. Context must match exactly once at the declared position; fuzzy matching, binary files, generated output, vendor trees, oversized files, deletes, and renames are refused. The Mac validates every path and candidate before mutation, generates the authority diff, and rolls back a partial commit.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "patch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48000
+        }
+      },
+      "required": [
+        "task_id",
+        "patch"
       ],
       "additionalProperties": false
     }

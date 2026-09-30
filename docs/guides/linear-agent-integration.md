@@ -2,13 +2,14 @@
 
 This guide reproduces Sanctum's Linear metadata qualification and bounded
 management-agent activation. It does not authorize implementation. Only the
-owner may set both `Ready for Agent` and `symphony`, and only the owner may
-merge or move work to Done.
+owner may set `Ready for Agent`, `symphony`, and exactly one routing label
+(`agent-standard` or `agent-deep`), and only the owner may merge or move work
+to Done.
 
 ## Prerequisites
 
 - Run from the canonical Sanctum checkout on an issue-scoped branch based on
-  the current `origin/v1.2-dev`.
+  the current `origin/v1.3-dev`.
 - Install the pinned dependencies with `make deps`; reuse an existing healthy
   `.venv` rather than deleting it.
 - Create the project, workflow states, labels, `source` label group, and issue
@@ -16,9 +17,11 @@ merge or move work to Done.
 - Keep Repo Steward, Product Scout, and Triage writes and schedules disabled
   until metadata and shadow checks pass for a new workspace.
 
-The configured project slug is workspace-specific. A different project needs a
+The configured project is `Sanctum V1.3`, with workspace-specific slug
+`sanctum-v13-aafdb6e2bb76` and milestone `v1.3.0`. A different project needs a
 reviewed update to `config/agents.json` and its synthetic metadata fixture. Do
-not rename live objects or edit a captured snapshot to hide a mismatch.
+not rename live objects or edit a captured snapshot to hide a mismatch. Project
+membership or milestone assignment is not implementation authorization.
 
 ## Establish authentication without echoing it
 
@@ -92,8 +95,8 @@ management states with one approved management source label, and fails closed
 instead of silently truncating a paginated result.
 
 Management roles may create or organize findings only. They cannot add
-`symphony`, move an issue to `Ready for Agent`, modify source, merge, or move an
-issue to Done.
+`symphony`, `agent-standard`, or `agent-deep`, move an issue to `Ready for
+Agent`, modify source, merge, or move an issue to Done.
 
 ## Install Codex desktop schedules
 
@@ -125,8 +128,10 @@ make a reviewed source change that disables the affected schedules and
 
 Symphony is a separate owner checkpoint. A passing metadata capture and active
 management schedules do not authorize it. Before the first controlled smoke,
-the owner must select a tiny issue, personally apply both execution gates, and
-run the separate `symphony-preflight` procedure in the agent-system runbook.
+the owner must select a tiny issue, personally apply status `Ready for Agent`,
+label `symphony`, and exactly one routing label, then run the matching
+`symphony-preflight --worker-class standard|deep` procedure in the agent-system
+runbook.
 
 ## Human review feedback and Rework
 

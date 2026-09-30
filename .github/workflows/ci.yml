@@ -2,10 +2,11 @@ name: Repository checks
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches:
       - main
-      - v1.2-dev
+      - v1.3-dev
   workflow_dispatch:
 
 permissions:
@@ -19,6 +20,20 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
+  documentation:
+    name: Documentation impact
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+      - run: python -B scripts/check_documentation_impact.py --event-file "$GITHUB_EVENT_PATH"
+
   format:
     name: Python format
     runs-on: ubuntu-latest
@@ -48,6 +63,37 @@ jobs:
       - run: python -m venv .venv
       - run: .venv/bin/pip install -r requirements-dev.txt
       - run: make lint
+
+  lint-js:
+    name: JavaScript lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: make lint-js
+
+  gate-node22:
+    name: Gate JavaScript / Node 22
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: make deps
+      - run: make test-gate-js
 
   build:
     name: Plugin build and manifests
@@ -95,6 +141,8 @@ jobs:
             command: test-reliability
           - name: MCP containment
             command: test-mcp
+          - name: Router regressions
+            command: test-router
           - name: Owned plugins
             command: test-plugins
           - name: Release and portability

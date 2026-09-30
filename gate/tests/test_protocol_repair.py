@@ -2,14 +2,16 @@
 
 import ast
 import hashlib
+import importlib.util
 import io
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "src"))
@@ -62,6 +64,55 @@ class StreamingContracts(unittest.TestCase):
         ):
             opener.return_value.open.return_value = io.BytesIO(raw.encode())
             return backend.propose(self.request)
+
+    def test_task_data_cannot_override_host_sampling(self):
+        for phase in ("PLAN", "REVIEW"):
+            self.request["request"].update(
+                {
+                    "temperature": 2,
+                    "top_p": 1,
+                    "max_tokens": 99999,
+                    "chat_template_kwargs": {"enable_thinking": True},
+                }
+            )
+            self.request["request"]["state"]["phase"] = phase
+            payload = PrivateLeadBackend(self.settings).proposal_payload(self.request)
+            self.assertEqual(payload["temperature"], 0.7)
+            self.assertEqual(payload["top_p"], 0.8)
+            self.assertEqual(payload["top_k"], 20)
+            self.assertEqual(payload["presence_penalty"], 1.5)
+            self.assertEqual(payload["max_tokens"], 4096)
+            self.assertEqual(
+                payload["chat_template_kwargs"], {"enable_thinking": False}
+            )
+            self.assertNotIn("tools", payload)
+            self.assertEqual(payload["response_format"]["type"], "json_schema")
+
+    def test_historical_microprobe_keeps_its_sampling_and_output_reservation(self):
+        backend = PrivateLeadBackend(self.settings)
+        context = MagicMock()
+        context.timeout.return_value = 120
+        wire = b'data: {"choices":[{"delta":{"content":"{\\"kind\\":\\"ESCALATION\\",\\"reason\\":\\"SYNTHETIC\\"}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+        with (
+            patch.object(backend, "health_check"),
+            patch.object(backend, "diagnostic_guard", return_value=context),
+            patch("backends.urllib.request.build_opener") as opener,
+        ):
+            opener.return_value.open.return_value = io.BytesIO(wire)
+            result = backend.propose(self.request)
+            payload = json.loads(opener.return_value.open.call_args.args[0].data)
+        self.assertEqual(payload["temperature"], 0)
+        self.assertEqual(payload["max_tokens"], 1024)
+        for key in (
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repetition_penalty",
+        ):
+            self.assertNotIn(key, payload)
+        context.attempt.assert_called_once_with("proposal", 1024)
+        self.assertEqual(result["telemetry"]["generationProfile"], "LEGACY_GREEDY_V1")
 
     def test_split_unicode_escapes_and_reasoning_survive(self):
         value = {"kind": "FINAL", "text": 'quoted " \\ 雪'}
@@ -239,11 +290,29 @@ class StreamingContracts(unittest.TestCase):
                 self.assertEqual(next(iter(branch["properties"])), "kind")
                 if branch["properties"]["kind"]["const"] == "TOOL_PROPOSAL":
                     self.assertEqual(
-                        list(branch["properties"]), ["kind", "capability", "arguments"]
+                        list(branch["properties"]),
+                        ["kind", "capability", "arguments", "decision_note"],
                     )
-                    properties = branch["properties"]["arguments"]["properties"]
-                    if "path" in properties:
-                        self.assertEqual(next(iter(properties)), "path")
+                    self.assertNotIn("decision_note", branch["required"])
+                    arguments = branch["properties"]["arguments"]
+                    if "oneOf" in arguments:
+                        self.assertEqual(
+                            [set(shape["properties"]) for shape in arguments["oneOf"]],
+                            [
+                                {"operation", "path", "old_text", "new_text"},
+                                {"operation", "path", "new_text"},
+                                {"operation", "path"},
+                                {"operation", "path", "destination"},
+                            ],
+                        )
+                        self.assertTrue(
+                            all(
+                                shape["additionalProperties"] is False
+                                for shape in arguments["oneOf"]
+                            )
+                        )
+                    elif "path" in arguments["properties"]:
+                        self.assertEqual(next(iter(arguments["properties"])), "path")
             rendered = json.loads(sent["messages"][1]["content"])["messages"][0][
                 "content"
             ]
@@ -252,8 +321,13 @@ class StreamingContracts(unittest.TestCase):
             self.assertEqual(
                 rendered["state"]["correction"]["code"], "REASONER_RESULT_SCHEMA"
             )
-            self.assertEqual(sent["max_tokens"], 1024)
-            self.assertEqual(sent["temperature"], 0)
+            self.assertEqual(sent["max_tokens"], 4096)
+            self.assertEqual(sent["temperature"], 0.7)
+            self.assertEqual(sent["top_p"], 0.8)
+            self.assertEqual(sent["top_k"], 20)
+            self.assertEqual(sent["min_p"], 0.0)
+            self.assertEqual(sent["presence_penalty"], 1.5)
+            self.assertEqual(sent["repetition_penalty"], 1.0)
             self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
 
     def test_message_data_is_encoded_once_and_repository_bytes_are_preserved(self):
@@ -386,8 +460,117 @@ class StreamingContracts(unittest.TestCase):
             '{"kind":"TOOL_PROPOSAL","capability":"worktree_read","arguments":{"path":"source.txt","max_chars":100}}',
         )
 
+    def test_production_edit_wire_selects_action_before_file_content(self):
+        artifact = json.loads(
+            subprocess.check_output(["node", str(BASE / "runtime-readiness.mjs")])
+        )
+        operations = set()
+        for row in artifact["surfaces"].values():
+            original = row["request"]["schema"]
+            wire = json.loads(generation_wire_json(original))
+            self.assertEqual(wire, original)
+            for branch in wire["oneOf"]:
+                properties = branch["properties"]
+                if properties.get("capability", {}).get("const") != "worktree_edit":
+                    continue
+                for shape in properties["arguments"]["oneOf"]:
+                    fields = list(shape["properties"])
+                    action = shape["properties"].get("operation", {}).get("const")
+                    if action:
+                        operations.add(action)
+                        self.assertEqual(fields[:2], ["operation", "path"])
+                    else:
+                        self.assertEqual(fields, ["path", "old_text", "new_text"])
+        self.assertEqual(operations, {"replace", "create", "delete", "move"})
+
 
 class PackagingClosure(unittest.TestCase):
+    def test_work_mode_amendment_installs_explicit_local_agent_owner(self):
+        root = BASE.parent
+        spec = importlib.util.spec_from_file_location(
+            "work_mode_owner_amendment", root / "scripts/upgrade_work_mode.py"
+        )
+        amendment = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(amendment)
+        self.assertIn("plugin/local-agent.mjs", amendment.FILES)
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            config = prefix / "config/openclaw.json"
+            config.parent.mkdir(parents=True)
+            local_model = json.loads((root / "gate/SETTINGS.json").read_text())[
+                "local_model"
+            ]
+            config.write_text(
+                json.dumps(
+                    {
+                        "agents": {
+                            "defaults": {
+                                "model": {"primary": "mlx-local/" + local_model}
+                            }
+                        },
+                        "models": {
+                            "providers": {
+                                "mlx-local": {
+                                    "models": [
+                                        {"id": local_model, "contextWindow": 16384}
+                                    ]
+                                }
+                            }
+                        },
+                    }
+                )
+            )
+            rendered = json.loads(amendment.openclaw_config(prefix))
+            self.assertEqual(rendered["agents"]["ownership"], "explicit")
+            self.assertEqual(
+                rendered["agents"]["defaults"]["systemAgent"],
+                {"agentId": "main"},
+            )
+            self.assertIn("main", rendered["agents"]["entries"])
+            self.assertIn("workmode-broker", rendered["agents"]["entries"])
+            self.assertEqual(
+                rendered["agents"]["entries"]["main"]["thinkingDefault"],
+                "off",
+            )
+            self.assertFalse(
+                rendered["agents"]["entries"]["main"]["params"]["chat_template_kwargs"][
+                    "enable_thinking"
+                ]
+            )
+            self.assertEqual(
+                rendered["models"]["providers"]["mlx-local"]["models"][0][
+                    "contextWindow"
+                ],
+                24576,
+            )
+
+            rendered["agents"]["defaults"]["systemAgent"]["agentId"] = "other"
+            config.write_text(json.dumps(rendered))
+            with self.assertRaisesRegex(ValueError, "system agent"):
+                amendment.openclaw_config(prefix)
+
+    def test_work_mode_amendment_contains_content_telemetry_runtime_closure(self):
+        root = BASE.parent
+
+        def load(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        work_mode = load(
+            "work_mode_content_runtime", root / "scripts/upgrade_work_mode.py"
+        )
+        content_runtime = load(
+            "content_runtime_closure",
+            root / "scripts/upgrade_content_telemetry_runtime.py",
+        )
+        self.assertFalse(set(content_runtime.GATE_FILES) - set(work_mode.FILES))
+        self.assertEqual(
+            set(content_runtime.SCHEMA_FILES),
+            set(work_mode.CONTENT_TELEMETRY_SCHEMA_FILES),
+        )
+
     def test_amendment_contains_changed_runtime_files_and_local_import_dependencies(
         self,
     ):

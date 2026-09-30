@@ -102,14 +102,15 @@ TOOLS = [
     },
     {
         "name": "github_ensure_issue_pull_request",
-        "description": "Create or update the unmerged issue PR targeting v1.2-dev.",
+        "description": "Create or update the unmerged issue PR targeting v1.3-dev.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "minLength": 8, "maxLength": 120},
                 "body": {"type": "string", "minLength": 20, "maxLength": 4000},
+                "operation_id": {"type": "string", "minLength": 1, "maxLength": 80},
             },
-            "required": ["title", "body"],
+            "required": ["title", "body", "operation_id"],
             "additionalProperties": False,
         },
         "annotations": {
@@ -138,7 +139,11 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
     if name == "git_reconcile_operation":
         return broker.reconcile(arguments.get("kind"), arguments.get("operation_id"))
     if name == "github_ensure_issue_pull_request":
-        return broker.ensure_pull_request(arguments.get("title"), arguments.get("body"))
+        return broker.ensure_pull_request(
+            arguments.get("title"),
+            arguments.get("body"),
+            arguments.get("operation_id"),
+        )
     raise GitControlError("tool_unsupported", "unsupported Git control-plane operation")
 
 
@@ -205,6 +210,26 @@ def serve_mcp() -> int:
                             "isError": True,
                         },
                     )
+                except OSError:
+                    value = {
+                        "error": {
+                            "code": "broker_io_error",
+                            "message": "Git broker I/O failed; inspect the private broker log",
+                        }
+                    }
+                    response(
+                        identifier,
+                        {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": json.dumps(value, sort_keys=True),
+                                }
+                            ],
+                            "structuredContent": value,
+                            "isError": True,
+                        },
+                    )
             elif identifier is not None:
                 response(
                     identifier,
@@ -219,9 +244,12 @@ def main() -> int:
     if sys.argv[1:] == ["prepare"]:
         print(json.dumps(control_plane().prepare(), sort_keys=True))
         return 0
+    if sys.argv[1:] == ["prepare", "--fresh-workspace"]:
+        print(json.dumps(control_plane().prepare(fresh_workspace=True), sort_keys=True))
+        return 0
     if sys.argv[1:] == ["mcp"]:
         return serve_mcp()
-    raise SystemExit("usage: sanctum_git_broker.py prepare|mcp")
+    raise SystemExit("usage: sanctum_git_broker.py prepare [--fresh-workspace]|mcp")
 
 
 if __name__ == "__main__":
@@ -229,4 +257,16 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except GitControlError as exc:
         print(json.dumps({"error": {"code": exc.code, "message": str(exc)}}))
+        raise SystemExit(2) from None
+    except OSError:
+        print(
+            json.dumps(
+                {
+                    "error": {
+                        "code": "broker_io_error",
+                        "message": "Git broker I/O failed; inspect the private broker log",
+                    }
+                }
+            )
+        )
         raise SystemExit(2) from None

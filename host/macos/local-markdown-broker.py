@@ -190,10 +190,8 @@ def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CACHE_DIR, 0o700)
 
-    try:
-        SOCKET.unlink()
-    except FileNotFoundError:
-        pass
+    if os.path.lexists(SOCKET):
+        raise SystemExit("socket exists; lifecycle helper must resolve stale socket")
 
     server = UnixHTTPServer(str(SOCKET), Handler)
     os.chmod(SOCKET, 0o600)

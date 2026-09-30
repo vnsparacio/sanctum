@@ -127,6 +127,49 @@ def rejection(
     return error
 
 
+def safe_usage(value):
+    value = value if type(value) is dict else {}
+    return {
+        key: (
+            number
+            if type(number := value.get(key)) is int and 0 <= number <= 9007199254740991
+            else None
+        )
+        for key in ("prompt_tokens", "completion_tokens")
+    }
+
+
+def safe_telemetry(value):
+    """Numeric/fixed metadata only; never serialize arbitrary exception attributes."""
+    value = value if type(value) is dict else {}
+    result = safe_usage(value)
+    result["usage_complete"] = all(v is not None for v in result.values())
+    for key in (
+        "elapsed_seconds",
+        "ttft_seconds",
+        "decode_seconds",
+        "decode_tokens_per_second",
+    ):
+        number = value.get(key)
+        result[key] = (
+            number
+            if type(number) in (int, float)
+            and 0 <= number <= 9007199254740991
+            and math.isfinite(number)
+            else None
+        )
+    for key, allowed in {
+        "result_kind": ("FINAL", "ESCALATION", "TOOL_PROPOSAL"),
+        "generationProfile": ("QWEN35_INSTRUCT_V1", "LEGACY_GREEDY_V1"),
+        "streamStatus": ("COMPLETE", "INCOMPLETE", "NOT_STREAMED"),
+        "finishStatus": ("stop", "length", "tool_calls", "content_filter"),
+        "parseStatus": ("BEFORE_PARSE", "PARSED", "FAILED"),
+        "normalization": ("UNCHANGED", "NOT_REACHED"),
+    }.items():
+        result[key] = value.get(key) if value.get(key) in allowed else "UNKNOWN"
+    return result
+
+
 def completion_stream(response):
     parts = []
     size = 0
@@ -137,13 +180,16 @@ def completion_stream(response):
     done = False
 
     def fail(keyword):
-        return rejection(
+        error = rejection(
             "answer_incomplete",
             "STREAM",
             keyword,
             stream_status="INCOMPLETE",
             finish=finish,
         )
+        error.usage = safe_usage(usage)
+        error.first = first
+        return error
 
     lines = iter(response)
     while True:

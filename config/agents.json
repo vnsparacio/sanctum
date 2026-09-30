@@ -1,18 +1,22 @@
 {
   "schema_version": 1,
   "project": {
-    "linear_project_slug": "sanctum-v12-6fe3a63e0c69",
+    "linear_project_slug": "sanctum-v13-aafdb6e2bb76",
     "github_repository": "vnsparacio/sanctum",
-    "integration_branch": "v1.2-dev",
+    "integration_branch": "v1.3-dev",
     "implementation_gate": {
       "status": "Ready for Agent",
       "label": "symphony"
+    },
+    "worker_routing": {
+      "standard_label": "agent-standard",
+      "deep_label": "agent-deep"
     },
     "human_review_status": "Human Review"
   },
   "runtime": {
     "prefix_env": "SANCTUM_AGENT_PREFIX",
-    "default_prefix": "~/.sanctum/agents-v1.2",
+    "default_prefix": "~/.sanctum/agents-v1.3",
     "lock_stale_seconds": 7200,
     "log_output_limit_bytes": 262144
   },
@@ -23,6 +27,7 @@
     "triage": {"model": "gpt-5.6-luna", "reasoning": "medium"},
     "triage_escalation": {"model": "gpt-5.6-terra", "reasoning": "medium"},
     "implementation": {"model": "gpt-5.6-sol", "reasoning": "medium"},
+    "implementation_deep": {"model": "gpt-6-astra", "reasoning": "high"},
     "reviewer": {"model": "gpt-5.6-sol", "reasoning": "high"}
   },
   "roles": {
@@ -65,13 +70,25 @@
     "implementation": {
       "cadence": "continuous_symphony",
       "write_enabled": false,
-      "wall_clock_seconds": 3600,
-      "max_items": 1,
+      "wall_clock_seconds": 21600,
+      "max_items": 5,
       "max_sources": 0,
       "max_issues_created": 0,
-      "max_retries": 2,
-      "max_turns": 8,
-      "max_tokens": 500000,
+      "max_retries": 3,
+      "max_turns": 40,
+      "max_tokens": 8000000,
+      "repository_scope": []
+    },
+    "implementation_deep": {
+      "cadence": "manual_symphony",
+      "write_enabled": false,
+      "wall_clock_seconds": 28800,
+      "max_items": 5,
+      "max_sources": 0,
+      "max_issues_created": 0,
+      "max_retries": 3,
+      "max_turns": 60,
+      "max_tokens": 12000000,
       "repository_scope": []
     },
     "reviewer": {
@@ -88,15 +105,30 @@
     }
   },
   "symphony": {
+    "implementation_backend": "codex",
     "binary_env": "SANCTUM_SYMPHONY_BIN",
     "default_binary": "symphony",
     "engineering_preview_acknowledged": true,
     "workflow": "WORKFLOW.md",
-    "max_concurrency": 1,
+    "deep_workflow": "WORKFLOW.deep.md",
+    "work_mode_workflow": "WORKFLOW.work-mode.md",
+    "work_mode_deep_workflow": "WORKFLOW.work-mode.deep.md",
+    "work_mode_app_server_env": "SANCTUM_WORK_MODE_APP_SERVER",
+    "work_mode_profile": {
+      "relative_path": "config/work-mode-projects.json",
+      "project_id": "v13-qualification",
+      "repository": "vnsparacio/sanctum-work-mode-qualification",
+      "integration_branch": "main",
+      "validation_operations": ["build", "lint", "test"]
+    },
+    "max_concurrency": 5,
     "shutdown_grace_seconds": 10,
     "state_port": 7788,
     "poll_seconds": 2,
     "state_timeout_seconds": 2,
-    "output_limit_bytes": 1048576
+    "state_startup_grace_seconds": 120,
+    "state_stall_grace_seconds": 30,
+    "output_limit_bytes": 67108864,
+    "budget_warning_ratio": 0.8
   }
 }

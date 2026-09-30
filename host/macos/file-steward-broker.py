@@ -584,8 +584,13 @@ class S(socketserver.UnixStreamServer):
 if __name__ == "__main__":
     init_state()
     SOCKET.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if SOCKET.exists():
+    if os.path.lexists(SOCKET):
         raise SystemExit("socket exists; lifecycle helper must resolve stale socket")
-    with S(str(SOCKET), H) as s:
-        os.chmod(SOCKET, 0o600)
-        s.serve_forever(poll_interval=0.25)
+    try:
+        with S(str(SOCKET), H) as s:
+            os.chmod(SOCKET, 0o600)
+            s.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        SOCKET.unlink(missing_ok=True)

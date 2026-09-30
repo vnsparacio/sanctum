@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .ao_correlation import read_active_binding
+
 CANONICAL_REMOTE = "https://github.com/vnsparacio/sanctum.git"
 CANONICAL_GITHUB_REPOSITORY = "vnsparacio/sanctum"
 CANONICAL_GITHUB_OWNER = "vnsparacio"
-INTEGRATION_BASE = "v1.2-dev"
+INTEGRATION_BASE = "v1.3-dev"
 ISSUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*-[1-9][0-9]*$")
 OPERATION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 PROTECTED_PARTS = {".git", ".agents", ".codex"}
@@ -53,8 +55,11 @@ class UnknownGitResult(GitControlError):
     """A consequential operation could not be safely reconciled."""
 
 
-class _InjectedAmbiguity(RuntimeError):
-    pass
+class GitOperationTimeout(GitControlError):
+    """A bounded Git or GitHub call timed out with an uncertain result."""
+
+    def __init__(self, message: str):
+        super().__init__("git_timeout", message)
 
 
 @dataclass(frozen=True)
@@ -132,6 +137,20 @@ class GitControlPlane:
                 "state_root_invalid",
                 "broker state must remain outside issue workspaces",
             )
+
+    def _ao_binding(self, identity: WorkspaceIdentity) -> dict[str, str]:
+        """Optional evidence only; an absent binding never affects Git behavior."""
+        try:
+            return (
+                read_active_binding(
+                    self.state_root,
+                    identity.issue_identifier,
+                    identity.workspace,
+                )
+                or {}
+            )
+        except Exception:
+            return {}
 
     def _environment(self, *, github_authenticated: bool = False) -> dict[str, str]:
         allowed = (
@@ -226,7 +245,7 @@ class GitControlPlane:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise _InjectedAmbiguity("Git operation timed out") from exc
+            raise GitOperationTimeout("Git operation timed out") from exc
         if check and result.returncode:
             raise GitControlError(
                 "git_operation_failed",
@@ -251,7 +270,7 @@ class GitControlPlane:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise _InjectedAmbiguity("GitHub operation timed out") from exc
+            raise GitOperationTimeout("GitHub operation timed out") from exc
         if check and result.returncode:
             raise GitControlError(
                 "github_operation_failed",
@@ -359,11 +378,13 @@ class GitControlPlane:
         digest = hashlib.sha256(str(identity.workspace).encode()).hexdigest()
         return self.state_root / "workspaces" / f"{digest}.json"
 
-    def _lease_value(self, identity: WorkspaceIdentity) -> dict[str, Any]:
+    def _lease_value(
+        self, identity: WorkspaceIdentity, base_head: str
+    ) -> dict[str, Any]:
         stat = identity.workspace.stat()
         git_stat = identity.git_dir.stat()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace": str(identity.workspace),
             "workspace_root": str(identity.workspace_root),
             "workspace_device": stat.st_dev,
@@ -374,13 +395,22 @@ class GitControlPlane:
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
             "base": INTEGRATION_BASE,
+            "base_head": base_head,
             "remote": self.expected_remote,
         }
 
-    def _write_lease(self, identity: WorkspaceIdentity) -> None:
-        _atomic_private_json(self._lease_path(identity), self._lease_value(identity))
+    def _write_lease(self, identity: WorkspaceIdentity, base_head: str) -> None:
+        _atomic_private_json(
+            self._lease_path(identity), self._lease_value(identity, base_head)
+        )
 
-    def _require_lease(self, identity: WorkspaceIdentity) -> None:
+    def _legacy_lease_value(self, identity: WorkspaceIdentity) -> dict[str, Any]:
+        value = self._lease_value(identity, "0" * 40)
+        value["schema_version"] = 1
+        value.pop("base_head")
+        return value
+
+    def _read_lease(self, identity: WorkspaceIdentity) -> dict[str, Any]:
         path = self._lease_path(identity)
         try:
             value = json.loads(path.read_text())
@@ -388,11 +418,113 @@ class GitControlPlane:
             raise GitControlError(
                 "workspace_not_prepared", "host workspace lease is missing or invalid"
             ) from exc
-        if value != self._lease_value(identity):
+        if not isinstance(value, dict):
+            raise GitControlError(
+                "workspace_not_prepared", "host workspace lease is missing or invalid"
+            )
+        return value
+
+    def _legacy_base_head(self, identity: WorkspaceIdentity) -> str:
+        if self._current_branch() != identity.branch:
             raise GitControlError(
                 "workspace_identity_changed",
                 "host workspace identity no longer matches",
             )
+        result = self._git(
+            "merge-base",
+            "HEAD",
+            f"refs/remotes/origin/{INTEGRATION_BASE}",
+            check=False,
+        )
+        base_head = result.stdout.strip()
+        if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", base_head):
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        return base_head
+
+    def _require_lease(
+        self, identity: WorkspaceIdentity, *, migrate_legacy: bool = False
+    ) -> dict[str, Any]:
+        value = self._read_lease(identity)
+        if migrate_legacy and value.get("schema_version") == 1:
+            if value != self._legacy_lease_value(identity):
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
+            base_head = self._legacy_base_head(identity)
+            self._write_lease(identity, base_head)
+            return self._lease_value(identity, base_head)
+        base_head = value.get("base_head") if isinstance(value, dict) else None
+        if not isinstance(base_head, str) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", base_head
+        ):
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        if value != self._lease_value(identity, base_head):
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        return value
+
+    def _operation_receipts_exist(self, identity: WorkspaceIdentity) -> bool:
+        operations = self.state_root / "operations" / identity.issue_identifier
+        try:
+            if operations.is_symlink():
+                return True
+            if not operations.exists():
+                return False
+            if not operations.is_dir():
+                return True
+            return any(operations.iterdir())
+        except OSError:
+            return True
+
+    def _validate_stale_lease_binding(
+        self, identity: WorkspaceIdentity, value: dict[str, Any]
+    ) -> None:
+        schema = value.get("schema_version")
+        allowed = set(self._legacy_lease_value(identity))
+        if schema == 2:
+            allowed.add("base_head")
+            base_head = value.get("base_head")
+            if not isinstance(base_head, str) or not re.fullmatch(
+                r"[0-9a-f]{40,64}", base_head
+            ):
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
+        elif schema != 1:
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        if set(value) != allowed:
+            raise GitControlError(
+                "workspace_identity_changed",
+                "host workspace identity no longer matches",
+            )
+        expected = self._legacy_lease_value(identity)
+        for key in (
+            "workspace",
+            "workspace_root",
+            "git_dir",
+            "issue_identifier",
+            "branch",
+            "base",
+            "remote",
+        ):
+            if value.get(key) != expected[key]:
+                raise GitControlError(
+                    "workspace_identity_changed",
+                    "host workspace identity no longer matches",
+                )
 
     def _current_branch(self) -> str:
         return self._git("branch", "--show-current").stdout.strip()
@@ -403,19 +535,68 @@ class GitControlPlane:
     def _clean(self) -> bool:
         return not self._git("status", "--porcelain=v1", "--untracked-files=all").stdout
 
-    def prepare(self, requested_base: str = INTEGRATION_BASE) -> dict[str, Any]:
+    def prepare(
+        self,
+        requested_base: str = INTEGRATION_BASE,
+        *,
+        fresh_workspace: bool = False,
+    ) -> dict[str, Any]:
         if requested_base != INTEGRATION_BASE:
-            raise GitControlError("base_rejected", "only origin/v1.2-dev is permitted")
+            raise GitControlError("base_rejected", "only origin/v1.3-dev is permitted")
         identity = self.identity()
         lease_exists = self._lease_path(identity).exists()
+        lease = None
+        stale_lease = None
         if lease_exists:
-            self._require_lease(identity)
+            try:
+                lease = self._require_lease(identity, migrate_legacy=True)
+            except GitControlError as exc:
+                if not fresh_workspace or exc.code != "workspace_identity_changed":
+                    raise
+                stale_lease = self._read_lease(identity)
+                self._validate_stale_lease_binding(identity, stale_lease)
+                if (
+                    self._current_branch() != INTEGRATION_BASE
+                    or not self._clean()
+                    or self._operation_receipts_exist(identity)
+                ):
+                    raise GitControlError(
+                        "workspace_rebind_rejected",
+                        "fresh workspace cannot safely replace the existing lease",
+                    )
         self._git(
             "fetch",
             "--no-tags",
             "origin",
             f"refs/heads/{INTEGRATION_BASE}:refs/remotes/origin/{INTEGRATION_BASE}",
         )
+        base_head = self._git(
+            "rev-parse", f"refs/remotes/origin/{INTEGRATION_BASE}"
+        ).stdout.strip()
+        if lease and lease["base_head"] != base_head:
+            if (
+                self._current_branch() == identity.branch
+                and self._clean()
+                and self._head() == lease["base_head"]
+                and not self._operation_receipts_exist(identity)
+            ):
+                self._git(
+                    "merge",
+                    "--ff-only",
+                    f"refs/remotes/origin/{INTEGRATION_BASE}",
+                )
+                if self._head() != base_head:
+                    raise GitControlError(
+                        "base_refresh_failed",
+                        "untouched issue workspace did not reach the accepted base",
+                    )
+                self._write_lease(identity, base_head)
+                lease = self._lease_value(identity, base_head)
+            else:
+                raise GitControlError(
+                    "base_advanced",
+                    "accepted origin/v1.3-dev advanced after workspace preparation",
+                )
         current = self._current_branch()
         if current == INTEGRATION_BASE:
             if not self._clean():
@@ -423,12 +604,9 @@ class GitControlPlane:
                     "bootstrap_dirty",
                     "base workspace must be clean before branch creation",
                 )
-            base_head = self._git(
-                "rev-parse", f"refs/remotes/origin/{INTEGRATION_BASE}"
-            ).stdout.strip()
             if self._head() != base_head:
                 raise GitControlError(
-                    "base_stale", "local base does not equal accepted origin/v1.2-dev"
+                    "base_stale", "local base does not equal accepted origin/v1.3-dev"
                 )
             self._git(
                 "switch",
@@ -451,10 +629,21 @@ class GitControlPlane:
             if ancestry.returncode:
                 raise GitControlError(
                     "branch_base_rejected",
-                    "unleased issue branch does not descend from accepted origin/v1.2-dev",
+                    "unleased issue branch does not descend from accepted origin/v1.3-dev",
                 )
-        if not lease_exists:
-            self._write_lease(identity)
+        if stale_lease is not None:
+            if (
+                not self._clean()
+                or self._head() != base_head
+                or self._operation_receipts_exist(identity)
+            ):
+                raise GitControlError(
+                    "workspace_rebind_rejected",
+                    "fresh workspace cannot safely replace the existing lease",
+                )
+            self._write_lease(identity, base_head)
+        elif not lease_exists:
+            self._write_lease(identity, base_head)
         return {
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
@@ -697,15 +886,15 @@ class GitControlPlane:
                     "staged paths exceeded the explicit commit selection",
                 )
             expected_tree = self._git("write-tree").stdout.strip()
-        except GitControlError:
-            self._restore_clean_index()
-            raise
-        except _InjectedAmbiguity as exc:
+        except GitOperationTimeout as exc:
             self._restore_clean_index()
             raise UnknownGitResult(
                 "staging_unknown",
                 "staging timed out and was restored without replay; operator review required",
             ) from exc
+        except GitControlError:
+            self._restore_clean_index()
+            raise
         receipt = {
             "schema_version": 1,
             "kind": "commit",
@@ -718,6 +907,7 @@ class GitControlPlane:
             "paths": staged,
             "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
             "request_sha256": request_hash,
+            **self._ao_binding(identity),
         }
         _atomic_private_json(receipt_path, receipt)
         try:
@@ -733,7 +923,7 @@ class GitControlPlane:
                 check=False,
             )
             self._fault("after_commit")
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
             return self._reconcile_commit(receipt_path, receipt)
         if result.returncode:
             if self._commit_matches(receipt):
@@ -749,12 +939,12 @@ class GitControlPlane:
         _atomic_private_json(receipt_path, receipt)
         return {"status": "applied", "commit": receipt["head"], "paths": staged}
 
-    def _remote_branch_head(self, identity: WorkspaceIdentity) -> str | None:
+    def _remote_ref_head(self, ref: str) -> str | None:
         result = self._git(
             "ls-remote",
             "--heads",
             "origin",
-            f"refs/heads/{identity.branch}",
+            ref,
             check=False,
             credentialed=True,
         )
@@ -765,11 +955,25 @@ class GitControlPlane:
         fields = result.stdout.strip().split()
         if not fields:
             return None
-        if len(fields) != 2 or fields[1] != f"refs/heads/{identity.branch}":
+        if len(fields) != 2 or fields[1] != ref:
             raise UnknownGitResult(
                 "remote_state_unknown", "remote returned an unexpected branch identity"
             )
         return fields[0]
+
+    def _remote_branch_head(self, identity: WorkspaceIdentity) -> str | None:
+        return self._remote_ref_head(f"refs/heads/{identity.branch}")
+
+    def _require_base_unchanged(self, identity: WorkspaceIdentity) -> str:
+        lease = self._require_lease(identity)
+        accepted = lease["base_head"]
+        current = self._remote_ref_head(f"refs/heads/{INTEGRATION_BASE}")
+        if current != accepted:
+            raise GitControlError(
+                "base_advanced",
+                "accepted origin/v1.3-dev advanced after workspace preparation",
+            )
+        return accepted
 
     def _reconcile_push(
         self, path: Path, receipt: dict[str, Any], identity: WorkspaceIdentity
@@ -794,30 +998,52 @@ class GitControlPlane:
             raise GitControlError("operation_id_invalid", "operation id is required")
         if not self._clean():
             raise GitControlError("push_dirty", "push requires a clean issue workspace")
+        local_head = self._head()
+        lease = self._require_lease(identity)
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "branch": identity.branch,
+                    "local_head": local_head,
+                    "base_head": lease["base_head"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         receipt_path = self._receipt_path(identity, "push", operation_id)
         existing = self._load_receipt(receipt_path)
         if existing:
+            if existing.get("request_sha256") != request_hash:
+                raise GitControlError(
+                    "operation_id_conflict",
+                    "operation id was already used for a different push request",
+                )
             if existing.get("state") == "applied":
                 return {
                     "status": "already_applied",
                     "remote_head": existing.get("local_head"),
                 }
             return self._reconcile_push(receipt_path, existing, identity)
-        local_head = self._head()
+        accepted_base_head = self._require_base_unchanged(identity)
         remote_head = self._remote_branch_head(identity)
-        if remote_head == local_head:
-            return {"status": "already_applied", "remote_head": remote_head}
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "push",
             "state": "pending",
             "operation_id": operation_id,
             "issue_identifier": identity.issue_identifier,
             "branch": identity.branch,
             "local_head": local_head,
+            "base_head": accepted_base_head,
             "remote_head_before": remote_head,
+            "request_sha256": request_hash,
         }
         _atomic_private_json(receipt_path, receipt)
+        if remote_head == local_head:
+            receipt.update({"state": "applied", "reconciled": False})
+            _atomic_private_json(receipt_path, receipt)
+            return {"status": "already_applied", "remote_head": remote_head}
         try:
             result = self._git(
                 "push",
@@ -830,7 +1056,7 @@ class GitControlPlane:
                 credentialed=True,
             )
             self._fault("after_push")
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
             return self._reconcile_push(receipt_path, receipt, identity)
         if result.returncode:
             try:
@@ -919,7 +1145,9 @@ class GitControlPlane:
             )
         return value
 
-    def ensure_pull_request(self, title: Any, body: Any) -> dict[str, Any]:
+    def ensure_pull_request(
+        self, title: Any, body: Any, operation_id: Any
+    ) -> dict[str, Any]:
         identity = self._require_issue_branch()
         if (
             not isinstance(title, str)
@@ -942,6 +1170,8 @@ class GitControlPlane:
                 "pull_request_body_invalid",
                 "PR body must be bounded and reference the issue identifier",
             )
+        if not isinstance(operation_id, str):
+            raise GitControlError("operation_id_invalid", "operation id is required")
         if not self._clean():
             raise GitControlError(
                 "pull_request_dirty", "PR handoff requires a clean workspace"
@@ -951,6 +1181,52 @@ class GitControlPlane:
             raise GitControlError(
                 "pull_request_unpushed", "PR handoff requires the pushed local HEAD"
             )
+        receipt_path = self._receipt_path(identity, "pull-request", operation_id)
+        intent = {
+            "schema_version": 1,
+            "kind": "pull-request",
+            "operation_id": operation_id,
+            "issue_identifier": identity.issue_identifier,
+            "branch": identity.branch,
+            "head": local_head,
+            "title": title,
+            "body": body,
+        }
+        prior = self._load_receipt(receipt_path)
+        if prior:
+            if any(prior.get(key) != value for key, value in intent.items()):
+                raise GitControlError(
+                    "operation_id_conflict",
+                    "operation id was already used for a different pull-request request",
+                )
+            reconciled = self._open_pull_request(identity)
+            if (
+                reconciled
+                and reconciled.get("title") == title
+                and reconciled.get("body") == body
+            ):
+                prior.update(
+                    {
+                        "state": "applied",
+                        "number": reconciled["number"],
+                        "url": reconciled["url"],
+                        "reconciled": True,
+                    }
+                )
+                _atomic_private_json(receipt_path, prior)
+                return {
+                    "status": "already_applied",
+                    "number": reconciled["number"],
+                    "url": reconciled["url"],
+                    "base": INTEGRATION_BASE,
+                    "head": identity.branch,
+                }
+            raise UnknownGitResult(
+                "pull_request_unknown",
+                "pull-request result is unknown and was not replayed; operator review required",
+            )
+        receipt = {**intent, "state": "pending", **self._ao_binding(identity)}
+        _atomic_private_json(receipt_path, receipt)
         existing = self._open_pull_request(identity)
         if existing:
             if existing.get("title") != title or existing.get("body") != body:
@@ -966,7 +1242,7 @@ class GitControlPlane:
                         "--body",
                         body,
                     )
-                except _InjectedAmbiguity:
+                except GitOperationTimeout:
                     reconciled = self._open_pull_request(identity)
                     if (
                         not reconciled
@@ -977,6 +1253,25 @@ class GitControlPlane:
                             "pull_request_unknown",
                             "PR update result is unknown and was not replayed; operator review required",
                         )
+                existing = self._open_pull_request(identity)
+                if (
+                    not existing
+                    or existing.get("title") != title
+                    or existing.get("body") != body
+                ):
+                    raise UnknownGitResult(
+                        "pull_request_unknown",
+                        "PR update result is unknown and was not replayed; operator review required",
+                    )
+            receipt.update(
+                {
+                    "state": "applied",
+                    "number": existing["number"],
+                    "url": existing["url"],
+                    "reconciled": False,
+                }
+            )
+            _atomic_private_json(receipt_path, receipt)
             return {
                 "status": "updated",
                 "number": existing["number"],
@@ -984,6 +1279,7 @@ class GitControlPlane:
                 "base": INTEGRATION_BASE,
                 "head": identity.branch,
             }
+        creation_reconciled = False
         try:
             result = self._gh(
                 "pr",
@@ -1001,6 +1297,7 @@ class GitControlPlane:
                 check=False,
             )
             if result.returncode:
+                creation_reconciled = True
                 reconciled = self._open_pull_request(identity)
                 if not reconciled:
                     raise GitControlError(
@@ -1009,13 +1306,23 @@ class GitControlPlane:
                     )
             else:
                 reconciled = self._open_pull_request(identity)
-        except _InjectedAmbiguity:
+        except GitOperationTimeout:
+            creation_reconciled = True
             reconciled = self._open_pull_request(identity)
         if not reconciled:
             raise UnknownGitResult(
                 "pull_request_unknown",
                 "PR creation result is unknown and was not replayed; operator review required",
             )
+        receipt.update(
+            {
+                "state": "applied",
+                "number": reconciled["number"],
+                "url": reconciled["url"],
+                "reconciled": creation_reconciled,
+            }
+        )
+        _atomic_private_json(receipt_path, receipt)
         return {
             "status": "created",
             "number": reconciled["number"],

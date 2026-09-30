@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -13,6 +14,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+stage_spec = importlib.util.spec_from_file_location(
+    "work_stages", ROOT / "scripts/work_stages.py"
+)
+stage_module = importlib.util.module_from_spec(stage_spec)
+stage_spec.loader.exec_module(stage_module)
 spec = importlib.util.spec_from_file_location(
     "release_operator", ROOT / "scripts/release_operator.py"
 )
@@ -20,7 +26,10 @@ op = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(op)
 
 FILES = (
+    "src/common.py",
     "src/worktree_edit.py",
+    "src/qwen_snapshot.py",
+    "src/qwen_runner.py",
     "src/task_evidence.py",
     "runtime/protected-test-driver.cjs",
     "runtime/protected-test-preload.cjs",
@@ -56,8 +65,20 @@ FILES = (
     "foundation/evidence.mjs",
     "foundation/work-intent.mjs",
     "foundation/vllm-structured-output.mjs",
+    "content-telemetry/ajv.mjs",
+    "content-telemetry/benchmark.mjs",
+    "content-telemetry/contract.mjs",
+    "content-telemetry/redaction.mjs",
+    "content-telemetry/interaction.mjs",
+    "content-telemetry/quality.mjs",
+    "content-telemetry/spool.mjs",
+    "content-telemetry/delivery.mjs",
     "plugin/index.mjs",
     "plugin/core.mjs",
+    "plugin/calendar-week.mjs",
+    "plugin/local-agent.mjs",
+    "plugin/local-synthesis.mjs",
+    "plugin/local-tool-boundary.mjs",
     "plugin/observability.mjs",
     "plugin/observability-bootstrap.mjs",
     "plugin/telemetry-client.mjs",
@@ -65,6 +86,10 @@ FILES = (
     "plugin/source-retrieval.mjs",
     "plugin/work-mode.mjs",
     "plugin/work-command.mjs",
+    "plugin/work-stages.mjs",
+    "plugin/qwen-work-mode.mjs",
+    "plugin/work-trace.mjs",
+    "foundation/decision-note.mjs",
     "plugin/command-broker.mjs",
     "plugin/work-ledger.mjs",
     "plugin/workspace-tools.mjs",
@@ -73,15 +98,28 @@ FILES = (
     "runtime/private-lead-interface-profile.json",
     "runtime/private-releases.json",
     "runtime/bootstrap-vllm.sh",
+    "runtime/bootstrap-private-lead-vllm.sh",
     "runtime/work-runner.json",
     "runtime/work-runner.Dockerfile",
+    "runtime/qwen-headless-broker.mjs",
+    "runtime/qwen-request-policy.mjs",
+    "runtime/qwen-code-image/Dockerfile",
+    "runtime/qwen-code-image/package.json",
+    "runtime/qwen-code-image/package-lock.json",
     "webui/bridge.mjs",
     "webui/pipe.py",
+)
+CONTENT_TELEMETRY_SCHEMA_FILES = (
+    "benchmark-dataset-v1.schema.json",
+    "benchmark-replay-v1.schema.json",
+    "content-telemetry-v1.schema.json",
+    "quality-annotation-v1.schema.json",
 )
 WORK_TOOLS = [
     "worktree_list",
     "worktree_read",
     "worktree_edit",
+    "worktree_patch",
     "worktree_command",
     "source_first_research",
 ]
@@ -225,6 +263,38 @@ def docker_details():
     return str(Path(docker).resolve()), host, tag, image
 
 
+def qwen_image_details(docker):
+    """Build the separately pinned coding-agent image for an opt-in profile."""
+    tag = "sanctum-qwen-code:0.24.6-workmode"
+    source = ROOT / "gate/runtime/qwen-code-image"
+    subprocess.run(
+        [
+            docker,
+            "build",
+            "--pull",
+            "--platform",
+            "linux/arm64",
+            "--tag",
+            tag,
+            "--file",
+            str(source / "Dockerfile"),
+            str(source),
+        ],
+        check=True,
+        timeout=1800,
+    )
+    image = subprocess.run(
+        [docker, "image", "inspect", "--format", "{{.Id}}", tag],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    ).stdout.strip()
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+        raise ValueError("Qwen runner image identity unavailable")
+    return tag, image
+
+
 def rendered_settings(prefix):
     data = (ROOT / "gate/SETTINGS.json").read_text()
     for old, new in {
@@ -245,6 +315,9 @@ def rendered_settings(prefix):
         ):
             if key in installed.get(section, {}):
                 value[section][key] = installed[section][key]
+    lead = installed.get("private_lead", {})
+    if (lead.get("gpu"), lead.get("max_hourly_usd")) == ("NVIDIA B200", 7):
+        value["private_lead"]["gpu"] = lead["gpu"]
     value["private_lead"]["enabled"] = True
     value["private_lead"]["auto_start"] = False
     value["work_mode"]["enabled"] = True
@@ -274,8 +347,25 @@ def openclaw_config(prefix):
     value = json.loads(path.read_text())
     agents = value.setdefault("agents", {})
     agents["ownership"] = "explicit"
+    defaults = agents.setdefault("defaults", {})
+    system_agent = defaults.setdefault("systemAgent", {})
+    if system_agent.get("agentId") not in (None, "main"):
+        raise ValueError("Refusing to replace the existing OpenClaw system agent")
+    system_agent["agentId"] = "main"
     entries = agents.setdefault("entries", {})
     main = entries.setdefault("main", {})
+    main["thinkingDefault"] = "off"
+    params = main.setdefault("params", {})
+    chat_template_kwargs = params.setdefault("chat_template_kwargs", {})
+    chat_template_kwargs["enable_thinking"] = False
+    local_model = json.loads((ROOT / "gate/SETTINGS.json").read_text())["local_model"]
+    provider_models = value["models"]["providers"]["mlx-local"]["models"]
+    matching_models = [
+        model for model in provider_models if model.get("id") == local_model
+    ]
+    if len(matching_models) != 1:
+        raise ValueError("Expected exactly one reviewed local model")
+    matching_models[0]["contextWindow"] = 24576
     tools = main.setdefault("tools", {})
     tools["deny"] = sorted(set(tools.get("deny", []) + WORK_TOOLS))
     entries["workmode-broker"] = {
@@ -292,10 +382,25 @@ def openclaw_config(prefix):
     }
     top = value.setdefault("tools", {})
     top["alsoAllow"] = list(dict.fromkeys(top.get("alsoAllow", []) + WORK_TOOLS))
+    web = top.get("web")
+    if (
+        isinstance(web, dict)
+        and web.get("search", {}).get("provider") == "parallel"
+        and web.get("fetch", {}).get("provider") == "firecrawl"
+    ):
+        web["fetch"].pop("provider")
+        plugins = value.setdefault("plugins", {})
+        firecrawl = str(prefix / "runtime/web/node_modules/@openclaw/firecrawl-plugin")
+        load = plugins.setdefault("load", {})
+        load["paths"] = [path for path in load.get("paths", []) if path != firecrawl]
+        plugins["allow"] = [
+            name for name in plugins.get("allow", []) if name != "firecrawl"
+        ]
+        plugins.setdefault("entries", {}).pop("firecrawl", None)
     return json.dumps(value, indent=2) + "\n"
 
 
-def work_profile(prefix, docker, host, tag, image):
+def work_profile(prefix, docker, host, tag, image, qwen_tag=None, qwen_image=None):
     qualification_spec = importlib.util.spec_from_file_location(
         "qualification_contract", ROOT / "gate/qualify_work_mode.py"
     )
@@ -319,6 +424,11 @@ def work_profile(prefix, docker, host, tag, image):
         "docker_host": host,
         "runner_image": tag,
         "runner_image_id": image,
+        **(
+            {"qwen_runner_image": qwen_tag, "qwen_runner_image_id": qwen_image}
+            if qwen_tag and qwen_image
+            else {}
+        ),
         "runner_user": f"{os.getuid()}:{os.getgid()}",
         "platform": "linux/arm64",
         "timeout_seconds": 120,
@@ -376,14 +486,132 @@ def work_profile(prefix, docker, host, tag, image):
     )
 
 
+def preserve_registered_profiles(prefix, rendered):
+    """Refresh owner registrations from reviewed bases without losing their bindings."""
+    path = prefix / "config/work-mode.json"
+    if not path.exists():
+        return rendered
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError("Unsafe installed Work Mode profiles")
+    old, new = json.loads(path.read_text()), json.loads(rendered)
+    if old.get("schema") != new["schema"] or type(old.get("profiles")) is not dict:
+        raise ValueError("Invalid installed Work Mode profiles")
+    previous, current = old["profiles"], new["profiles"]
+    if any(name not in previous for name in current):
+        raise ValueError("Missing reviewed Work Mode profile")
+    binding = {"repository", "staging_root", "task_protection", "stages"}
+    budgets = {"max_iterations": 32, "max_model_calls": 32, "max_tokens": 200000}
+    ignored = (
+        binding
+        | set(budgets)
+        | {
+            "engine",
+            "qwen_runner_image",
+            "qwen_runner_image_id",
+            "qwen_model_calls",
+            "qwen_tool_calls",
+            "qwen_wall_seconds",
+            "qwen_outer_seconds",
+            "qwen_retries",
+        }
+    )
+    for name, profile in previous.items():
+        if name in current:
+            continue
+        if (
+            type(name) is not str
+            or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name)
+            or type(profile) is not dict
+            or type(profile.get("repository")) is not str
+            or type(profile.get("task_protection")) is not dict
+        ):
+            raise ValueError("Invalid registered Work Mode profile")
+        staging = (
+            prefix / "state/gate/private-lead/work-mode/registered" / name / "staging"
+        )
+        repo = Path(profile.get("repository", ""))
+        if (
+            profile.get("staging_root") != str(staging)
+            or not staging.is_dir()
+            or staging.resolve() != staging
+            or staging.stat().st_mode & 0o077
+            or not repo.is_absolute()
+            or not repo.is_dir()
+            or repo.resolve() != repo
+            or not repo.is_relative_to(prefix.resolve())
+            or repo.stat().st_mode & 0o077
+        ):
+            raise ValueError("Unsafe registered Work Mode binding")
+        compared = ignored | (
+            {"max_gpu_seconds", "max_cost_usd"}
+            if profile.get("engine") == "qwen_code"
+            else set()
+        )
+        matches = [
+            base
+            for base, prior in previous.items()
+            if base in current
+            and {k: v for k, v in prior.items() if k not in compared}
+            == {k: v for k, v in profile.items() if k not in compared}
+        ]
+        if not matches:
+            raise ValueError("Registered Work Mode policy cannot be refreshed safely")
+        base = matches[0]
+        refreshed = {
+            **current[base],
+            "repository": str(repo),
+            "staging_root": str(staging),
+            "task_protection": profile["task_protection"],
+        }
+        for key, ceiling in budgets.items():
+            value = profile.get(key)
+            if type(value) is not int or not 1 <= value <= ceiling:
+                raise ValueError("Invalid registered Work Mode budget")
+            if value != previous[base][key]:
+                refreshed[key] = value
+        if "stages" in profile:
+            refreshed["stages"] = stage_module.validate_stages(profile["stages"])
+        if "engine" in profile:
+            if (
+                profile["engine"] != "qwen_code"
+                or refreshed.get("reviewer") is False
+                or refreshed.get("stages")
+            ):
+                raise ValueError("Invalid registered Qwen engine")
+            refreshed["engine"] = "qwen_code"
+            qwen_limits = {
+                "qwen_model_calls": 48,
+                "qwen_tool_calls": 40,
+                "qwen_wall_seconds": 1200,
+                "qwen_outer_seconds": 2400,
+                "qwen_retries": 0,
+                "max_gpu_seconds": 2700,
+                "max_cost_usd": 10,
+            }
+            if any(profile.get(key) != value for key, value in qwen_limits.items()):
+                raise ValueError("Qwen budget drift")
+            refreshed.update(qwen_limits)
+        current[name] = refreshed
+    return json.dumps(new, indent=2) + "\n"
+
+
 def apply(prefix):
     op.verify()
+    source_commit = op.source_commit()
     receipt = op.verify_install(prefix)
     safe(prefix)
     docker, host, tag, image = docker_details()
+    qwen_tag, qwen_image = qwen_image_details(docker)
+    profiles = preserve_registered_profiles(
+        prefix, work_profile(prefix, docker, host, tag, image, qwen_tag, qwen_image)
+    )
     record = prefix / "state/amendments" / ("work-mode-" + str(time.time_ns()))
     op.private(record)
     targets = [("gate/" + name, prefix / "gate" / name) for name in FILES] + [
+        *(
+            ("config/schemas/" + name, prefix / "config/schemas" / name)
+            for name in CONTENT_TELEMETRY_SCHEMA_FILES
+        ),
         ("config/openclaw.json", prefix / "config/openclaw.json"),
         ("config/work-mode.json", prefix / "config/work-mode.json"),
     ]
@@ -402,10 +630,12 @@ def apply(prefix):
         target = prefix / "gate" / name
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic(target, rendered_file(prefix, name))
+    for name in CONTENT_TELEMETRY_SCHEMA_FILES:
+        target = prefix / "config/schemas" / name
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic(target, (ROOT / "config/schemas" / name).read_text())
     atomic(prefix / "config/openclaw.json", openclaw_config(prefix))
-    atomic(
-        prefix / "config/work-mode.json", work_profile(prefix, docker, host, tag, image)
-    )
+    atomic(prefix / "config/work-mode.json", profiles)
     freeze = json.loads((prefix / "gate/FREEZE.json").read_text())
     for name in FILES:
         freeze[name] = sha(prefix / "gate" / name)
@@ -421,14 +651,10 @@ def apply(prefix):
         "files": [name for name, _ in targets],
         "runner_image": tag,
         "runner_image_id": image,
+        "qwen_runner_image": qwen_tag,
+        "qwen_runner_image_id": qwen_image,
         "source_manifest_sha256": sha(ROOT / "SOURCE-MANIFEST.json"),
-        "source_commit": subprocess.run(
-            ["/usr/bin/git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip(),
+        "source_commit": source_commit,
     }
     atomic(record / "transaction.json", json.dumps(tx, indent=2) + "\n")
     op.write(record / "complete", "complete\n")
@@ -440,12 +666,29 @@ def apply(prefix):
 
 def rollback(prefix, record):
     safe(prefix)
-    record = record.absolute()
-    if not record.is_relative_to((prefix / "state/amendments").absolute()):
+    record = record.resolve()
+    if not record.is_relative_to((prefix / "state/amendments").resolve()):
         raise ValueError("Rollback record must belong to prefix")
     tx = json.loads((record / "transaction.json").read_text())
     if tx.get("schema") != "sanctum-work-mode-amendment/v1":
         raise ValueError("Wrong rollback transaction")
+    expected = {
+        *("gate/" + name for name in FILES),
+        *("config/schemas/" + name for name in CONTENT_TELEMETRY_SCHEMA_FILES),
+        "config/openclaw.json",
+        "config/work-mode.json",
+    }
+    if set(tx["before"]) != expected:
+        raise ValueError("Unsafe rollback targets")
+    for name, state in tx["before"].items():
+        path = Path(name)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or state not in {"present", "absent"}
+            or not (prefix / name).resolve().is_relative_to(prefix.resolve())
+        ):
+            raise ValueError("Unsafe rollback target")
     for name, state in tx["before"].items():
         target = prefix / name
         if state == "present":

@@ -1,0 +1,67 @@
+# Sanctum is currently a single-owner project. These rules make review
+# responsibility visible on pull requests without assigning every repository
+# file. Keep each section limited to paths that can change a trust boundary.
+
+# The ownership map protects itself; otherwise a change could silently remove
+# the review requests established below.
+/.github/CODEOWNERS @vnsparacio
+
+# GitHub workflows, dependency automation, and protected-branch policy define
+# what code is trusted, checked, and allowed to reach integration branches.
+/.github/workflows/ @vnsparacio
+/.github/dependabot.yml @vnsparacio
+/.github/rulesets/ @vnsparacio
+
+# The authenticated gate owns authority, disclosure/egress decisions, provider
+# routing, and the WebUI boundary. Its plugin and core implementation are kept
+# together because changes anywhere in these directories can alter that path.
+/gate/plugin/ @vnsparacio
+/gate/src/ @vnsparacio
+/gate/webui/ @vnsparacio
+/gate/SETTINGS.json @vnsparacio
+/mcp-integration/guard/ @vnsparacio
+
+# Work Mode runner profiles and protected-test shims enforce the no-network,
+# no-live-mount execution boundary installed by the reviewed upgrade scripts.
+/gate/runtime/work-runner.Dockerfile @vnsparacio
+/gate/runtime/work-runner.json @vnsparacio
+/gate/runtime/protected-test-driver.cjs @vnsparacio
+/gate/runtime/protected-test-preload.cjs @vnsparacio
+/scripts/upgrade_work_mode.py @vnsparacio
+/scripts/upgrade_source_first.py @vnsparacio
+
+# Agent workflow instructions and the host-broker-facing implementation keep
+# execution, validation, Git, and completion authority outside model output.
+/AGENTS.md @vnsparacio
+/WORKFLOW.md @vnsparacio
+/WORKFLOW.deep.md @vnsparacio
+/sanctum_agents/authority.py @vnsparacio
+/sanctum_agents/git_control_plane.py @vnsparacio
+/sanctum_agents/implementation.py @vnsparacio
+/sanctum_agents/symphony_supervisor.py @vnsparacio
+/sanctum_agents/work_validation.py @vnsparacio
+/scripts/sanctum_git_broker.py @vnsparacio
+/scripts/sanctum_validation_runner.py @vnsparacio
+
+# Source freezes, dependency locks, and runtime/provider pins are release
+# integrity inputs. They must not drift merely to make verification pass.
+/SOURCE-MANIFEST.json @vnsparacio
+/package.json @vnsparacio
+/package-lock.json @vnsparacio
+/requirements-dev.txt @vnsparacio
+/config/runtime-versions.json @vnsparacio
+/gate/runtime/private-releases.json @vnsparacio
+/gate/runtime/RUNPODCTL.json @vnsparacio
+/gate/runtime/requirements.txt @vnsparacio
+/host/requirements-macos.txt @vnsparacio
+/host/requirements-webui.txt @vnsparacio
+/host/web-runtime/package.json @vnsparacio
+/host/web-runtime/package-lock.json @vnsparacio
+/reliability/runtime-pins.json @vnsparacio
+
+# Release tooling and the public security contract control publication,
+# integrity verification, vulnerability handling, and release evidence.
+/SECURITY.md @vnsparacio
+/scripts/audit.py @vnsparacio
+/scripts/release_operator.py @vnsparacio
+/docs/guides/release.md @vnsparacio

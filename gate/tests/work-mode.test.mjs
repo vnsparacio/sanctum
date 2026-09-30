@@ -4,13 +4,13 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {deriveCapabilityManifest} from '../foundation/manifest.mjs';
-import {CONTRACT_VERSION,digest,validateToolProposal} from '../foundation/contracts.mjs';
+import {CONTRACT_VERSION,canonical,digest,validateToolProposal} from '../foundation/contracts.mjs';
 import {bindWorkIntent,validateWorkIntent,workIntentRequest,workIntentSchema} from '../foundation/work-intent.mjs';
 import {incompatibleVllmPattern,projectVllmGenerationSchema,validateVllmGenerationSchema} from '../foundation/vllm-structured-output.mjs';
-import {argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
+import {rememberFileFacts,testRecoveryCode,argumentsMatchSchema,completionEligibility,createWorkMode,defaultResultEgress,inferenceContextCurrent,MUTABLE_WORKTREE_COMPLETION_POLICY,normalizeWorkspaceEvidence,selectCapabilities,WORKSPACE_EVIDENCE_VERSION} from '../plugin/work-mode.mjs';
 import {commandCatalog,createCommandBroker} from '../plugin/command-broker.mjs';
-import {normalizeWorkspacePacket,workCapabilityErrorCode} from '../plugin/work-command.mjs';
-import {createPrivateLeadReasoner} from '../plugin/private-lead.mjs';
+import {normalizeWorkspacePacket,selectWorkCapabilityNames,workCapabilityErrorCode} from '../plugin/work-command.mjs';
+import {createPrivateLeadReasoner,privateLeadPacket,WORK_MODE_PACKET_BYTES} from '../plugin/private-lead.mjs';
 import {createWorkLedger} from '../plugin/work-ledger.mjs';
 import {workModeTools} from '../plugin/workspace-tools.mjs';
 import {preflightCurrentWorkIntentSchemas} from '../preflight-work-intent.mjs';
@@ -59,7 +59,7 @@ test('a model-requested passing test triggers host evaluation and one reviewer w
  const result=await createWorkMode(workConfig({reasoner:reasoner([row]),manifest:tools,invoke:async()=>({ok:true,code:'OK',executionState:'COMPLETED',verifier:'VERIFIED'}),authorize,egress,evaluate:async()=>{evaluations++;return {passed:true,diffDigest:'d'.repeat(64),diffStable:true,checks:[{operation:'test',ok:true,code:'OK',outputDigest:'e'.repeat(64),elapsedMs:3}]};},reviewer:async({state})=>{reviews++;assert.equal(state.tests.checks[0].operation,'test');assert.equal(state.tests.diffStable,true);return {verdict:'ACCEPT'};}})).run({task:'fix',scope,requestId,capabilities:[tool.name]});
  assert.equal(result.status,'COMPLETE');assert.equal(result.metrics.modelCalls,1);assert.equal(evaluations,1);assert.equal(reviews,1);
 });
-test('a successful patch makes a host test the only permitted next action',async()=>{
+test('successful edits can continue before the host-required test and cannot complete early',async()=>{
  const patchTool={name:'worktree_edit',description:'Patch.',parameters:{type:'object',properties:{task_id:{type:'string'},path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'}},required:['task_id','path','old_text','new_text'],additionalProperties:false}};
  const testTool={name:'worktree_command',description:'Test.',parameters:{type:'object',properties:{task_id:{type:'string'},operation:{type:'string',enum:['test']}},required:['task_id','operation'],additionalProperties:false}};
  const tools=deriveCapabilityManifest({schemas:[patchTool,testTool],declaredTools:[patchTool.name,testTool.name],registeredTools:[patchTool.name,testTool.name],adaptedTools:[],runtimeConfig:{tools:{alsoAllow:[patchTool.name,testTool.name]}}});
@@ -67,7 +67,7 @@ test('a successful patch makes a host test the only permitted next action',async
  const taskId='a'.repeat(32),calls=[];const authorize=(p,s,scope)=>({schema:CONTRACT_VERSION,outcome:'ALLOW',capability:p.capability,proposalDigest:'a'.repeat(64),scope,effect:s.policy.effect,source:'MAC_GATE',reasonCodes:['WORK_TASK_BINDING'],expires:null,oneUse:false});
  const egress=({claim})=>({schema:CONTRACT_VERSION,outcome:'ALLOW',...claim,expires:null,oneUse:false,approvalState:'NONE',reasonCodes:['EXACT_WORK_TASK_EGRESS']});
  const result=await createWorkMode(workConfig({reasoner:reasoner([row(patchTool,{path:'index.js',old_text:'old',new_text:'first'}),row(patchTool,{path:'index.js',old_text:'old',new_text:'second'}),row(testTool,{operation:'test'})]),manifest:tools,workspaceState:async({turn})=>workspaceEvidence({scope:taskId,turn}),invoke:async({proposal})=>{calls.push(proposal.arguments);return {ok:true,executionState:'COMPLETED',verifier:'VERIFIED'};},authorize,egress,evaluate:async()=>({passed:true}),reviewer:null})).run({task:'fix',scope:taskId,requestId,capabilities:[patchTool.name,testTool.name],maxIterations:4});
- assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.new_text),['first','test']);assert.ok(result.state.observations.some(x=>x.code==='CAPABILITY_NOT_VISIBLE'));
+ assert.equal(result.status,'COMPLETE');assert.deepEqual(calls.map(x=>x.operation??x.new_text),['first','second','test']);assert.equal(result.metrics.modelCalls,3);assert.ok(!result.state.observations.some(x=>x.code==='CAPABILITY_NOT_VISIBLE'));
 });
 test('host bindings are derived once and forbidden injection consumes the correction turn',async()=>{
  const badRequest={kind:'TOOL_PROPOSAL',capability:'calc',arguments:{expression:'1'},revision:9};
@@ -86,7 +86,41 @@ test('PRIVATE_LEAD adapter preserves the worker schema-failure classification',a
  const adapter=createPrivateLeadReasoner({profile,body:()=>({}),execute:async()=>({status:'UNAVAILABLE',reason:'private_lead_result_schema'})});
  await assert.rejects(adapter.invoke(request,new AbortController().signal),/reasoner_result_shape/);
 });
+test('Work Mode reports only allowlisted local provider refusal codes',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ for(const [workerReason,expected] of [['capacity_timeout','capacity_timeout'],['private-url-or-secret',undefined]]){
+  const adapter=createPrivateLeadReasoner({profile,body:()=>({}),execute:async()=>({status:'UNAVAILABLE',reason:workerReason})});
+  const events=[];
+  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true}),onEvent:(kind,fields)=>events.push({kind,...fields})})).run({task:'synthetic',scope,requestId});
+  assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'PRIVATE_LEAD_UNAVAILABLE');assert.equal(result.providerCode,expected);
+  assert.equal(events.find(row=>row.kind==='STOP').providerCode,expected);
+  assert.equal(JSON.stringify(events).includes('private-url-or-secret'),false);
+ }
+});
 test('surface is host-selected and never includes unavailable capabilities',()=>{assert.deepEqual(selectCapabilities(manifest,{names:['calc','unknown'],limit:4}).map(x=>x.name),['calc']);assert.equal(selectCapabilities(manifest,{limit:1}).length,1);});
+test('explicit research replaces patch, while ordinary app wording retains it',()=>{
+ const tools=deriveCapabilityManifest({schemas:workModeTools,declaredTools:workModeTools.map(x=>x.name),registeredTools:workModeTools.map(x=>x.name),adaptedTools:[],runtimeConfig:{tools:{alsoAllow:workModeTools.map(x=>x.name)}}});
+ const configured=workModeTools.map(x=>x.name);
+ for(const [goal,research] of [
+  ['Build a local web application.',false],
+  ['Selecting a mood should update a message showing the current selection.',false],
+  ['Build a browser application without remote assets or external APIs.',false],
+  ['Use current documentation to build an app.',true],
+  ['Research latest docs before editing.',true],
+  ['Build an app.',false],
+ ]){
+  const names=selectWorkCapabilityNames(goal,configured,tools);
+  const visible=selectCapabilities(tools,{names,limit:5}).map(x=>x.name);
+  assert.ok(visible.includes('worktree_edit'),goal);
+  assert.ok(visible.includes('worktree_command'),goal);
+  assert.ok(visible.includes('worktree_read'),goal);
+  assert.ok(visible.length<=5);
+  assert.equal(visible.includes('source_first_research'),research,goal);
+  assert.equal(visible.includes('worktree_patch'),!research,goal);
+ }
+ const readOnly=configured.filter(x=>x!=='worktree_edit');
+ assert.ok(!selectWorkCapabilityNames('Build a web app.',readOnly,tools).includes('worktree_edit'));
+});
 test('Work Mode reveals only enumerated workspace repair codes',()=>{assert.equal(workCapabilityErrorCode('workspace_patch_shape'),'WORKSPACE_PATCH_SHAPE');assert.equal(workCapabilityErrorCode('arbitrary backend text'),'WORK_CAPABILITY_FAILED');});
 test('Work Mode fills owner-controlled defaults before signing workspace packets',()=>{
  assert.deepEqual(normalizeWorkspacePacket('worktree_list',{task_id:'a'.repeat(32)}),{task_id:'a'.repeat(32),path:'',max_entries:100});
@@ -155,7 +189,7 @@ test('structured decoding rejection is distinct and never retries or falls back'
  const request={schema:CONTRACT_VERSION,requestId:'r'.repeat(32),scope:'a'.repeat(32),revision:0,messages:[{role:'user',content:'synthetic'}],manifestDigest:'b'.repeat(64),state:{phase:'PLAN'}};
  await assert.rejects(adapter.invoke(request,new AbortController().signal),error=>error.message==='structured_decoding_unavailable'&&error.httpStatus===400);assert.equal(calls,1);
  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>{throw Error('must not execute')},egress:defaultResultEgress,evaluate:async()=>({passed:true})})).run({task:'synthetic',scope,requestId,capabilities:['calc']});
- assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'STRUCTURED_DECODING_UNAVAILABLE');assert.equal(calls,2);assert.equal(result.metrics.modelCalls,0);
+ assert.equal(result.status,'ENVIRONMENT_FAILURE');assert.equal(result.reason,'STRUCTURED_DECODING_UNAVAILABLE');assert.equal(calls,2);assert.equal(result.metrics.modelCalls,1);
 });
 test('a changed host workspace fingerprint rejects a delayed mutation before authority',async()=>{
  const patch={name:'worktree_edit',parameters:{type:'object',properties:{task_id:{type:'string'},path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'}},required:['task_id','path','old_text','new_text'],additionalProperties:false}};
@@ -291,10 +325,12 @@ test('SEMANTIC_SURFACE telemetry is allowlisted, redacts escalation text, and pr
  const root=mkdtempSync(join(tmpdir(),'sanctum-ledger-')),taskId='b'.repeat(32),secret='PRIVATE_SECRET_VALUE';
  try{
    const ledger=createWorkLedger({root,taskId,key:Buffer.alloc(32,7),metadata:{goal:'private goal',profile:'synthetic',reasonerRelease:'test',manifestDigest:'a'.repeat(64)},now:()=>1});
+   ledger.event('EXECUTION',{capability:'worktree_command',executionState:'COMPLETION_UNKNOWN',resultDigest:'f'.repeat(64),verifier:'REJECTED',operation:'test',commandCode:'COMMAND_TIMEOUT',outputDigest:'e'.repeat(64),outputBytes:32,elapsedMs:1000,containerAbsent:true,output:secret,diagnostic:secret});
    const result=await createWorkMode(workConfig({reasoner:reasoner([{kind:'ESCALATION',reason:secret}]),manifest,workspaceState:async({scope,workspace,turn})=>workspaceEvidence({scope,workspace,turn,diffBytes:0,statusBytes:0}),invoke:async()=>({ok:true}),egress:defaultResultEgress,evaluate:async()=>({passed:true}),onEvent:(kind,value)=>ledger.event(kind,value)})).run({task:'private goal',scope:taskId,requestId});
    ledger.finish({status:result.status,reason:result.reason,metrics:result.metrics});
    const raw=readFileSync(join(root,taskId,'events.jsonl'),'utf8');assert.ok(!raw.includes(secret));assert.ok(!raw.includes('private goal'));
    const rows=raw.trim().split('\n').map(JSON.parse),surfaces=rows.filter(x=>x.kind==='SEMANTIC_SURFACE');assert.equal(surfaces.length,2);
+   const command=rows.find(x=>x.kind==='EXECUTION');assert.equal(command.commandCode,'COMMAND_TIMEOUT');assert.equal(command.outputDigest,'e'.repeat(64));assert.equal(command.output,undefined);assert.equal(command.diagnostic,undefined);
    const allowed=new Set(['schema','taskId','sequence','time','kind','previousDigest','eventDigest','phase','iteration','modelCalls','stage','decisionState','completionEligible','eligibilityReason','completionPolicy','schemaVersion','schemaDigest','semanticSchemaDigest','terminalKinds','visibleCapabilities','workspaceGeneration','snapshotDigest','postPatchTestOutstanding','latestTestState','evaluatorState','evaluationTrigger','selectedResultKind','validationCode','reviewDisposition']);
    for(const row of surfaces)assert.deepEqual(Object.keys(row).filter(key=>!allowed.has(key)),[]);
    let previous='0'.repeat(64);for(const row of rows){const {eventDigest,...base}=row;assert.equal(base.previousDigest,previous);assert.equal(digest(base),eventDigest);previous=eventDigest;}
@@ -307,5 +343,245 @@ test('escalation diagnostics are payload-free observations, never a routing clas
  const row=events.find(x=>x.kind==='PROPOSAL'&&x.outcome==='ESCALATION');
  assert.equal(result.reason,'MODEL_ESCALATION');assert.equal(effects,0);
  assert.equal(row.reasonConcepts.permission,true);assert.equal(row.reasonConcepts.toolUnavailable,true);
+ assert.equal(row.reasonCategory,'AUTHORITY');
  assert.match(row.reasonDigest,/^[a-f0-9]{64}$/);assert.ok(!JSON.stringify(events).includes('PERMISSION_UNAVAILABLE'));
+});
+test('escalation categories remain fixed and do not retain model reason text',async()=>{
+ for(const [reason,category] of [['TEST_REQUIRED','TEST_OR_BUILD'],['MISSING_CONTEXT','EVIDENCE'],['WORKSPACE_BLOCKED','WORKSPACE'],['TASK_INCOMPLETE','TASK_SCOPE'],['PRIVATE_SECRET_VALUE','OTHER']]){
+  const events=[];await run({rows:[{kind:'ESCALATION',reason}],onEvent:(kind,value)=>events.push({kind,...value})});
+  const row=events.find(x=>x.kind==='PROPOSAL'&&x.outcome==='ESCALATION');
+  assert.equal(row.reasonCategory,category);assert.ok(!JSON.stringify(events).includes(reason));
+ }
+});
+
+test('disclosed test recovery survives six observations and later edits until the next test',async()=>{
+ const names=['worktree_list','worktree_edit','worktree_command'];
+ const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ const rows=[proposal('worktree_command',{operation:'test'}),...Array.from({length:7},()=>proposal('worktree_list',{})),proposal('worktree_edit',{operation:'create',path:'example.test.js',new_text:'synthetic'}),proposal('worktree_command',{operation:'test'}),{kind:'ESCALATION',reason:'SYNTHETIC_STOP'}];
+ const requests=[];let tests=0;
+ const result=await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(request){requests.push(JSON.parse(request.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:allowEgress,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:++tests===1?'NO_TESTS_DISCOVERED':'TEST_COUNT_UNVERIFIED',diagnostic:'SYNTHETIC_RAW_OUTPUT'},executionState:'COMPLETED',verifier:'REJECTED'}:{ok:true,data:{},executionState:'COMPLETED',verifier:'VERIFIED'},evaluate:async()=>{throw Error('must not evaluate failed test');}})).run({task:'Implement a small utility and tests',scope,requestId,capabilities:names,maxIterations:12});
+ assert.equal(result.reason,'MODEL_ESCALATION');
+ assert.equal(requests[8].state.observations.length,6);
+ assert.ok(!JSON.stringify(requests[8].state.observations).includes('NO_TESTS_DISCOVERED'));
+ for(const index of [1,8,9]){
+  assert.equal(requests[index].state.lastTest.code,'NO_TESTS_DISCOVERED');
+  assert.match(requests[index].state.lastTest.recovery,/Add discoverable tests/);
+  assert.ok(!JSON.stringify(requests[index].state.lastTest).includes('SYNTHETIC_RAW_OUTPUT'));
+ }
+ assert.equal(requests[9].state.tests.required,true);
+ assert.equal(requests[9].state.lastTest.workspaceGeneration,0);
+ assert.equal(requests[10].state.lastTest.code,'TEST_COUNT_UNVERIFIED');
+ assert.equal(requests[10].state.lastTest.workspaceGeneration,1);
+});
+
+test('test recovery summary cannot bypass denied egress, omitted results or fixed codes',async()=>{
+ const names=['worktree_command'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['denied','oversize','arbitrary','prototype']){
+  const requests=[];const rows=[proposal('worktree_command',{operation:'test'}),{kind:'ESCALATION',reason:'SYNTHETIC_STOP'}];
+  await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(request){requests.push(JSON.parse(request.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async()=>({ok:false,error:{code:variant==='arbitrary'?'SYNTHETIC_UNTRUSTED_CODE':variant==='prototype'?'constructor':'NO_TESTS_DISCOVERED',diagnostic:variant==='oversize'?'x'.repeat(13000):'SYNTHETIC_RAW_OUTPUT'},executionState:'COMPLETED',verifier:'REJECTED'}),evaluate:async()=>({passed:false})})).run({task:'synthetic',scope,requestId,capabilities:names});
+  if(['arbitrary','prototype'].includes(variant)){
+   assert.equal(requests[1].state.lastTest.code,'TEST_FAILED');
+   assert.match(requests[1].state.lastTest.recovery,/Inspect the disclosed test result/);
+   assert.ok(!JSON.stringify(requests[1].state.lastTest).includes('SYNTHETIC_'));
+  }else assert.equal(requests[1].state.lastTest,null);
+ }
+});
+
+test('disclosed file facts survive observation eviction but never authorize edits',async()=>{
+ const names=['worktree_list','worktree_read','worktree_edit'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['allowed','denied','omitted']){
+  const rows=[proposal('worktree_edit',{operation:'create',path:'view.js',new_text:'synthetic'}),...Array.from({length:7},()=>proposal('worktree_list',{})),{kind:'ESCALATION',reason:'STOP'}],requests=[];
+  const result=await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async()=>({ok:true,data:variant==='omitted'?{text:'x'.repeat(13000)}:{},executionState:'COMPLETED',verifier:'VERIFIED'}),evaluate:async()=>{throw Error('no evaluation');}})).run({task:'synthetic',scope,requestId,capabilities:names,maxIterations:12});
+  assert.equal(result.reason,'MODEL_ESCALATION');if(variant!=='denied')assert.equal(requests[8].state.observations.length,6);
+  assert.deepEqual(requests[8].state.fileFacts,variant==='allowed'?[{path:'view.js',exists:true,observedGeneration:1}]:[]);
+  assert.equal(requests[8].state.tests.required,true);assert.deepEqual(requests[8].state.readRequired,['view.js']);
+ }
+});
+
+test('file facts are bounded, relative, update moves/deletes and clear after patch',()=>{
+ let facts=[];const edit=(args,successful=true,errorCode=null)=>facts=rememberFileFacts(facts,{name:'worktree_edit',args,successful,errorCode,executionState:successful?'COMPLETED':'NOT_STARTED',generation:4});
+ for(let i=0;i<40;i++)edit({operation:'create',path:`file${i}.js`});assert.equal(facts.length,32);assert.equal(facts[0].path,'file8.js');
+ edit({operation:'move',path:'file39.js',destination:'moved.js'});assert.equal(facts.find(x=>x.path==='file39.js').exists,false);assert.equal(facts.at(-1).exists,true);
+ edit({operation:'delete',path:'moved.js'});assert.equal(facts.at(-1).exists,false);
+ edit({operation:'create',path:'existing.js'},false,'EDIT_DESTINATION_EXISTS');assert.equal(facts.at(-1).exists,true);
+ edit({operation:'replace',path:'missing.js'},false,'EDIT_SOURCE_MISSING');assert.equal(facts.at(-1).exists,false);
+ const before=structuredClone(facts);for(const path of ['/private/file','../file','a/../file','x\nsecret'])edit({path});assert.deepEqual(facts,before);
+ assert.deepEqual(rememberFileFacts(facts,{name:'worktree_patch',successful:true}),[]);
+});
+
+test('dependency recovery is fixed guidance derived only from disclosed failure output',async()=>{
+ const names=['worktree_command','worktree_edit'];const schemas=workModeTools.filter(x=>names.includes(x.name));
+ const tools=deriveCapabilityManifest({schemas,declaredTools:names,registeredTools:names,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:names}}});
+ for(const variant of ['allowed','denied','omitted']){
+  const requests=[],rows=[proposal('worktree_command',{operation:'test'}),proposal('worktree_edit',{operation:'create',path:'repair.js',new_text:'synthetic'}),{kind:'ESCALATION',reason:'STOP'}];
+  await createWorkMode(workConfig({manifest:tools,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:'COMMAND_FAILED',diagnostic:'ERR_MODULE_NOT_FOUND: PRIVATE_PACKAGE_NAME '+(variant==='omitted'?'x'.repeat(13000):'')},executionState:'COMPLETED',verifier:'REJECTED'}:{ok:true,data:{},executionState:'COMPLETED',verifier:'VERIFIED'},evaluate:async()=>{throw Error('failed tests cannot pass');}})).run({task:'synthetic',scope,requestId,capabilities:names});
+  if(variant==='allowed'){
+   assert.equal(requests[1].state.lastTest.code,'DEPENDENCY_UNAVAILABLE');assert.equal(requests[1].state.lastTest.currentForWorkspace,true);
+   assert.equal(requests[2].state.lastTest.currentForWorkspace,false);assert.match(requests[2].state.lastTest.recovery,/Do not remove, skip or weaken tests/);
+   assert.ok(!JSON.stringify(requests[2].state.lastTest).includes('PRIVATE_PACKAGE_NAME'));
+  }else assert.equal(requests[1].state.lastTest,null);
+ }
+ assert.equal(testRecoveryCode('COMMAND_FAILED','MODULE_NOT_FOUND'),'DEPENDENCY_UNAVAILABLE');
+ assert.equal(testRecoveryCode('COMMAND_FAILED','assertion failed'),'TEST_FAILED');
+ assert.equal(testRecoveryCode('OTHER','ERR_MODULE_NOT_FOUND'),'TEST_FAILED');
+});
+
+
+test('PRIVATE_LEAD budgets the full UTF-8 packet and retains the newest complete observation',()=>{
+ const system='profile overhead '.repeat(40);
+ const observations=Array.from({length:6},(_,n)=>({kind:'RESULT',result:{path:`file${n}.js`,text:'界🙂'.repeat(750)}}));
+ const context={task:'synthetic task',state:{observations,fileFacts:[{path:'file0.js',exists:true}],lastTest:{passed:false,currentForWorkspace:false},tests:{required:true},readRequired:['file5.js'],completion:{completionEligible:false}},capabilities:[{name:'worktree_read'}]};
+ const request={messages:[{role:'system',content:'fixed host instructions'},{role:'user',content:canonical(context)}],state:{workIntent:{schema:{const:'fixed schema'}}}};
+ const original=structuredClone(request),bytes=x=>Buffer.byteLength(canonical(x),'utf8');
+ assert.ok(bytes({system,request})>32768);
+ const packet=privateLeadPacket(system,request),sent=JSON.parse(packet.request.messages[1].content);
+ assert.ok(bytes(packet)<=32768);assert.ok(sent.state.earlierObservationsOmitted>0);
+ assert.deepEqual(sent.state.observations,observations.slice(sent.state.earlierObservationsOmitted));
+ assert.deepEqual(sent.state.observations.at(-1),observations.at(-1));
+ const {observations:ignored,earlierObservationsOmitted:removed,...sentState}=sent.state;
+ const {observations:alsoIgnored,...originalState}=context.state;
+ assert.deepEqual(sentState,originalState);assert.equal(sent.task,context.task);assert.deepEqual(sent.capabilities,context.capabilities);
+ assert.deepEqual(request,original);assert.deepEqual(packet.request.state,request.state);assert.equal(packet.system,system);assert.deepEqual(packet.request.messages[0],request.messages[0]);
+ const exact=bytes(packet);assert.deepEqual(privateLeadPacket(system,packet.request,exact),packet);
+ assert.ok(bytes(privateLeadPacket(system,packet.request,exact-1))<=exact-1);
+});
+
+test('Work Mode packet retains the five small sources needed before a first edit',()=>{
+ const files=[['storage.js',3118],['logic.js',2262],['index.html',1532],['index.js',4896],['ui.test.js',9340]];
+ const observations=files.map(([path,size])=>({kind:'RESULT',capability:'worktree_read',result:{ok:true,data:{path,text:'s'.repeat(size)}}}));
+ const request={messages:[{role:'system',content:'Host instructions '.repeat(700)},{role:'user',content:canonical({task:'synthetic MoodLog checkpoint',state:{observations}})}],state:{workIntent:{schema:{const:'synthetic'}}}};
+ const bytes=value=>Buffer.byteLength(canonical(value),'utf8');
+ const raw={system:'private profile',request};
+ assert.ok(bytes(raw)>32768);assert.ok(bytes(raw)<WORK_MODE_PACKET_BYTES);
+ const old=JSON.parse(privateLeadPacket(raw.system,request,32768).request.messages[1].content);
+ assert.ok(old.state.earlierObservationsOmitted>0);
+ const fitted=privateLeadPacket(raw.system,request,WORK_MODE_PACKET_BYTES);
+ assert.ok(bytes(fitted)<=WORK_MODE_PACKET_BYTES);
+ assert.deepEqual(JSON.parse(fitted.request.messages[1].content).state.observations,observations);
+});
+
+test('PRIVATE_LEAD context fitting stops before dispatch when essential or newest content cannot fit',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ for(const workerRefusal of [false,true]){
+  let dispatches=0;
+  const adapter=createPrivateLeadReasoner({profile,maxContextBytes:workerRefusal?32768:128,body:()=>({}),execute:async()=>{dispatches++;return {status:'UNAVAILABLE',reason:'private_lead_proposal_limit'};}});
+  const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async()=>{throw Error('must not execute');},egress:defaultResultEgress,evaluate:async()=>{throw Error('must not evaluate');}})).run({task:'synthetic',scope,requestId});
+  assert.equal(result.status,'BUDGET_EXHAUSTED');assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(result.metrics.modelCalls,0);assert.equal(result.metrics.iterations,0);assert.equal(dispatches,workerRefusal?1:0);
+ }
+ const request={messages:[{role:'system',content:'host'},{role:'user',content:canonical({state:{observations:[{kind:'RESULT',result:{text:'界'.repeat(1000)}}]}})}]};
+ assert.throws(()=>privateLeadPacket('profile',request,1000),/model_context_limit/);
+ const review={messages:[{role:'system',content:'review'},{role:'user',content:canonical({reviewEvidence:'x'.repeat(1000)})}]};
+ assert.throws(()=>privateLeadPacket('profile',review,100),/model_context_limit/);
+ assert.throws(()=>privateLeadPacket('x'.repeat(196609),{},999999),/model_context_limit/);
+ for(const invalid of [0,-1,1.5,NaN,'32768'])assert.throws(()=>privateLeadPacket('profile',{},invalid),/private_lead_adapter_config/);
+});
+
+test('PRIVATE_LEAD omission does not reintroduce withheld results or change authoritative state',async()=>{
+ const profile={status:'accepted-characterized',logical_profile:'PRIVATE_LEAD',prompt:{system:'synthetic'}};
+ let calls=0;const requests=[];
+ const adapter=createPrivateLeadReasoner({profile,maxContextBytes:18000,body:(_operation,_tier,packet)=>packet,execute:async({request:packet})=>{
+  assert.ok(Buffer.byteLength(canonical(packet),'utf8')<=18000);
+  assert.equal(canonical(packet).includes('PRIVATE_SENTINEL'),false);
+  requests.push(JSON.parse(packet.request.messages[1].content));
+  return {status:'OK',result:++calls===1?proposal('gmail_search',{query:'synthetic'}):calls<=6?proposal('calc',{expression:'1'}):final};
+ }});
+ const result=await createWorkMode(workConfig({reasoner:adapter,manifest,invoke:async({proposal:p})=>({ok:true,data:{text:p.capability==='gmail_search'?'PRIVATE_SENTINEL':'界'.repeat(2600)},executionState:'COMPLETED',verifier:'VERIFIED'}),egress:defaultResultEgress,evaluate:async()=>({passed:true})})).run({task:'synthetic',scope,requestId});
+ assert.equal(result.status,'COMPLETE');assert.equal(calls,7);assert.equal(result.state.observations.length,6);
+ const last=requests.at(-1);assert.ok(last.state.earlierObservationsOmitted>0);assert.equal(last.state.observations.at(-1).result.data.text,'界'.repeat(2600));
+ assert.equal(result.state.observations[0].kind,'RESULT_WITHHELD');assert.equal(result.state.earlierObservationsOmitted,undefined);
+});
+
+test('review context exhaustion is reported without accepting completion',async()=>{
+ const result=await run({rows:[final],reviewer:async()=>{throw Error('model_context_limit');}});
+ assert.equal(result.status,'BUDGET_EXHAUSTED');assert.equal(result.reason,'MODEL_CONTEXT_LIMIT');assert.equal(result.state.review,null);
+});
+
+const progressNames=['worktree_read','worktree_edit','worktree_command'];
+const progressSchemas=workModeTools.filter(x=>progressNames.includes(x.name));
+const progressManifest=deriveCapabilityManifest({schemas:progressSchemas,declaredTools:progressNames,registeredTools:progressNames,adaptedTools:[],runtimeConfig:{tools:{alsoAllow:progressNames}}});
+const syntheticRead=p=>({ok:true,data:{...(p.arguments.path?{path:p.arguments.path}:{}),text:'synthetic source',truncated:false},executionState:'COMPLETED',verifier:'VERIFIED'});
+const runProgress=({rows,requests=[],invoke=async({proposal:p})=>syntheticRead(p),egress=allowEgress,observeRead,evaluate=async()=>({passed:true}),reviewer}={})=>createWorkMode(workConfig({manifest:progressManifest,reasoner:{async invoke(r){requests.push(JSON.parse(r.messages[1].content));return rows.shift();}},authorize:allowAuthority,egress,invoke,observeRead,evaluate,reviewer})).run({task:'Complete a synthetic utility',scope,requestId,capabilities:progressNames,maxIterations:32,maxModelCalls:32});
+
+test('progress survives source eviction and preserves the edit-test-review completion path',async()=>{
+ const requests=[],rows=[proposal('worktree_edit',{operation:'create',path:'helper.js',new_text:'PRIVATE_SYNTHETIC_BODY'}),...Array.from({length:7},(_,i)=>proposal('worktree_read',{path:`file${i}.js`})),proposal('worktree_read',{path:'helper.js'}),proposal('worktree_edit',{operation:'replace',path:'helper.js',old_text:'old',new_text:'new'}),proposal('worktree_command',{operation:'test'})];
+ let observed=0,reviewed=0;
+ const result=await runProgress({rows,requests,observeRead:async()=>{observed++;return true;},reviewer:async()=>{reviewed++;return {verdict:'ACCEPT'};}});
+ assert.equal(result.status,'COMPLETE');assert.equal(observed,8);assert.equal(reviewed,1);
+ assert.ok(!requests[8].state.observations.some(x=>x.capability==='worktree_edit'));
+ assert.deepEqual(requests[8].state.progress.recentActions,[{capability:'worktree_edit',operation:'create',path:'helper.js',outcome:'SUCCEEDED',workspaceGeneration:1}]);
+ assert.ok(!JSON.stringify(requests[8].state.progress).includes('PRIVATE_SYNTHETIC_BODY'));
+ assert.equal(requests[8].state.tests.required,true);assert.deepEqual(requests[8].state.readRequired,['helper.js']);
+ assert.deepEqual(requests[9].state.readRequired,[]);
+ assert.equal(requests[10].state.progress.recentActions.at(-1).operation,'replace');
+ assert.equal(requests[10].state.tests.required,true);assert.deepEqual(requests[10].state.progress.inspectedFiles,[]);
+});
+
+test('repeated reads warn then stop before another inference, without skipping read mediation',async()=>{
+ const requests=[],rows=Array.from({length:12},()=>proposal('worktree_read',{path:'file.js'}));let reads=0,observed=0;
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>{reads++;return syntheticRead(p);},observeRead:async()=>{observed++;return true;},evaluate:async()=>{throw Error('stalled task must not evaluate');}});
+ assert.equal(result.status,'BLOCKED');assert.equal(result.reason,'WORKSPACE_INSPECTION_STALLED');
+ assert.equal(result.metrics.modelCalls,7);assert.equal(reads,7);assert.equal(observed,7);
+ assert.equal(requests[2].state.progress.guidance,null);assert.match(requests[3].state.progress.guidance,/one concrete edit/);
+ assert.equal(requests[6].state.progress.repeatedReads,5);assert.equal(result.state.progress.repeatedReads,6);
+ assert.equal(result.state.observations.length,1);assert.equal(result.state.observations[0].result.data.text,'synthetic source');
+});
+
+test('changed source and distinct files are not treated as unchanged rereading',async()=>{
+ for(const changed of [false,true]){
+  const requests=[],rows=[...Array.from({length:26},(_,i)=>proposal('worktree_read',{path:changed?'file.js':`file${i}.js`})),{kind:'ESCALATION',reason:'STOP'}];let sequence=0;
+  const result=await runProgress({rows,requests,invoke:async({proposal:p})=>{const value=syntheticRead(p);if(changed)value.data.text=`version ${sequence++}`;return value;}});
+  assert.equal(result.reason,'MODEL_ESCALATION');assert.equal(requests[26].state.progress.repeatedReads,0);
+  assert.equal(requests[26].state.progress.inspectedFiles.length,changed?1:24);
+  assert.equal(result.state.observations.length,changed?1:6);
+  if(changed)assert.equal(result.state.observations[0].result.data.text,'version 25');
+ }
+});
+
+test('disclosed edits and checks break a reading cycle without claiming failed validation passed',async()=>{
+ const requests=[],rows=[...Array.from({length:5},()=>proposal('worktree_read',{path:'file.js'})),proposal('worktree_edit',{operation:'replace',path:'file.js',old_text:'old',new_text:'new'}),...Array.from({length:5},()=>proposal('worktree_read',{path:'file.js'})),proposal('worktree_command',{operation:'test'}),proposal('worktree_read',{path:'file.js'}),{kind:'ESCALATION',reason:'STOP'}];
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>p.capability==='worktree_command'?{ok:false,error:{code:'COMMAND_FAILED',diagnostic:'MODULE_NOT_FOUND'},executionState:'COMPLETED',verifier:'REJECTED'}:syntheticRead(p),evaluate:async()=>{throw Error('failed tests cannot complete');}});
+ assert.equal(result.reason,'MODEL_ESCALATION');
+ for(const i of [6,12,13])assert.equal(requests[i].state.progress.repeatedReads,0);
+ assert.equal(requests[12].state.progress.recentActions.at(-1).outcome,'FAILED');assert.equal(requests[12].state.lastTest.code,'DEPENDENCY_UNAVAILABLE');
+ assert.equal(requests[12].state.tests.passed,false);assert.equal(requests[6].state.tests.required,true);
+});
+
+test('withheld, omitted and failed reads add no progress memory or duplicate-read stop',async()=>{
+ for(const variant of ['denied','omitted','failed']){
+  const requests=[],rows=[proposal('worktree_edit',{operation:'create',path:'hidden.js',new_text:'PRIVATE_BODY'}),...Array.from({length:9},()=>proposal('worktree_read',{path:'hidden.js'})),{kind:'ESCALATION',reason:'STOP'}];
+  const result=await runProgress({rows,requests,egress:variant==='denied'?({claim})=>({...allowEgress({claim}),outcome:'DENY'}):allowEgress,invoke:async({proposal:p})=>variant==='failed'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:{...syntheticRead(p),data:{path:p.arguments.path,text:'x'.repeat(13000)}}});
+  assert.equal(result.reason,'MODEL_ESCALATION');
+  for(const request of requests){assert.deepEqual(request.state.progress.recentActions,[]);assert.deepEqual(request.state.progress.inspectedFiles,[]);assert.equal(request.state.progress.repeatedReads,0);}
+ }
+});
+
+test('progress retains only twelve fixed action summaries and survives request-byte fitting',async()=>{
+ const requests=[],rows=[...Array.from({length:14},(_,i)=>proposal('worktree_edit',{operation:'create',path:`file${i}.js`,new_text:'BODY_NOT_A_SUMMARY'})),...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i}.js`})),{kind:'ESCALATION',reason:'STOP'}];
+ let fitted;
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>({...syntheticRead(p),data:{path:p.arguments.path,text:'界'.repeat(2000)}})});
+ assert.equal(result.reason,'MODEL_ESCALATION');const context=requests.at(-1);
+ assert.equal(context.state.progress.recentActions.length,12);assert.equal(context.state.progress.recentActions[0].path,'file2.js');
+ const packet=privateLeadPacket('profile',{messages:[{role:'system',content:'fixed'},{role:'user',content:canonical(context)}]},20000);
+ fitted=JSON.parse(packet.request.messages[1].content);
+ assert.deepEqual(fitted.state.progress,context.state.progress);assert.ok(fitted.state.observations.length<context.state.observations.length);
+ assert.ok(!JSON.stringify(fitted.state.progress).includes('BODY_NOT_A_SUMMARY'));assert.ok(!JSON.stringify(fitted.state.progress).includes('contentDigest'));
+});
+
+test('alternating unchanged files and failed edits cannot erase the repeat counter',async()=>{
+ const requests=[],rows=[...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i%2}.js`})),proposal('worktree_edit',{operation:'replace',path:'file0.js',old_text:'old',new_text:'new'}),...Array.from({length:5},(_,i)=>proposal('worktree_read',{path:`file${i%2}.js`}))];
+ const result=await runProgress({rows,requests,invoke:async({proposal:p})=>p.capability==='worktree_edit'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:syntheticRead(p)});
+ assert.equal(result.reason,'WORKSPACE_INSPECTION_STALLED');assert.equal(result.metrics.modelCalls,9);
+ assert.equal(requests[5].state.progress.repeatedReads,3);assert.equal(requests[6].state.progress.repeatedReads,3);
+ assert.deepEqual(requests[6].state.progress.recentActions,[]);assert.equal(result.state.observations.filter(x=>x.capability==='worktree_read').length,2);
+});
+
+test('a failed or omitted read does not supersede the last disclosed successful source',async()=>{
+ for(const variant of ['failed','omitted']){
+  let sequence=0;const requests=[],rows=[proposal('worktree_read',{path:'file.js'}),proposal('worktree_read',{path:'file.js'}),{kind:'ESCALATION',reason:'STOP'}];
+  await runProgress({rows,requests,invoke:async({proposal:p})=>sequence++===0?syntheticRead(p):variant==='failed'?{ok:false,error:{code:'BACKEND_FAILURE'},executionState:'NOT_STARTED',verifier:'REJECTED'}:{...syntheticRead(p),data:{path:'file.js',text:'x'.repeat(13000)}}});
+  assert.equal(requests[2].state.observations.length,2);assert.equal(requests[2].state.observations[0].result.data.text,'synthetic source');assert.equal(requests[2].state.progress.repeatedReads,0);
+ }
 });

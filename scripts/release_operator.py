@@ -24,6 +24,31 @@ def sha(p):
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def source_commit():
+    """Return the exact checkout commit, or no commit for a source archive."""
+    if not (ROOT / ".git").exists():
+        return None
+    top = subprocess.run(
+        ["/usr/bin/git", "rev-parse", "--show-toplevel"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if Path(top).resolve() != ROOT.resolve():
+        raise ValueError("Source Git root does not match release source")
+    commit = subprocess.run(
+        ["/usr/bin/git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if len(commit) != 40 or any(ch not in "0123456789abcdef" for ch in commit):
+        raise ValueError("Invalid source commit identity")
+    return commit
+
+
 def private(p):
     for item in [p, *p.parents]:
         if item.is_symlink():
@@ -88,6 +113,16 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
         "state/workspace",
     ):
         private(prefix / name)
+    for name in (
+        "benchmark-dataset-v1.schema.json",
+        "benchmark-replay-v1.schema.json",
+        "content-telemetry-v1.schema.json",
+        "quality-annotation-v1.schema.json",
+    ):
+        write(
+            prefix / "config/schemas" / name,
+            (ROOT / "config/schemas" / name).read_text(),
+        )
     python = str(ROOT / ".venv/bin/python")
     node = shutil.which("node")
     if not Path(python).exists() or not node:
@@ -182,7 +217,13 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
                 "skills": [],
                 "heartbeat": {"every": "0m"},
                 "compaction": {"keepRecentTokens": 2048},
-            }
+            },
+            "entries": {
+                "main": {
+                    "thinkingDefault": "off",
+                    "params": {"chat_template_kwargs": {"enable_thinking": False}},
+                }
+            },
         },
         "models": {
             "providers": {
@@ -194,7 +235,7 @@ def setup(prefix, gateway_port=28789, mlx_port=28080):
                         {
                             "id": model,
                             "name": "Local Qwen 4B",
-                            "contextWindow": 16384,
+                            "contextWindow": 24576,
                             "maxTokens": 4096,
                         }
                     ],
@@ -360,6 +401,42 @@ def gateway_socket_ready(port):
     with socket.socket() as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def webui_function_sync(prefix):
+    """Compare active imported WebUI functions with reviewed rendered files."""
+    database = prefix / "state/webui/webui.db"
+    if not database.exists():
+        return "not-enrolled"
+    if database.is_symlink() or not database.is_file():
+        return "unsafe"
+    expected = {
+        "sanctum_gate_guard": prefix / "gate/webui/guard.py",
+        "sanctum_gate_pipe": prefix / "gate/webui/pipe.py",
+    }
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+            rows = {
+                row[0]: (row[1], row[2])
+                for row in connection.execute(
+                    "select id, content, is_active from function " "where id in (?, ?)",
+                    tuple(expected),
+                )
+            }
+    except sqlite3.Error:
+        return "unavailable"
+    missing = [name for name in expected if name not in rows]
+    if missing:
+        return "missing:" + ",".join(sorted(missing))
+    inactive = [name for name, (_, active) in rows.items() if active != 1]
+    if inactive:
+        return "inactive:" + ",".join(sorted(inactive))
+    stale = [
+        name
+        for name, path in expected.items()
+        if not path.is_file() or path.is_symlink() or rows[name][0] != path.read_text()
+    ]
+    return "pass" if not stale else "stale:" + ",".join(sorted(stale))
 
 
 def gateway_command(prefix, receipt_value, expected, env):
@@ -532,6 +609,7 @@ def doctor(prefix):
         "gateway_running": running,
         "gateway_identity": identity,
         "gateway_health": health,
+        "webui_function_sync": webui_function_sync(prefix),
         "optional_integrations": "unconfigured; no credential or provider probe performed",
         "ports": {"gateway": r["gateway_port"], "mlx": r["mlx_port"]},
     }

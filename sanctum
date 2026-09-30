@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Repository-local Sanctum setup and lifecycle command."""
+
+from scripts.lifecycle import entrypoint
+
+if __name__ == "__main__":
+    entrypoint()

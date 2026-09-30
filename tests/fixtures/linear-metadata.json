@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "project": {
-    "id": "project-sanctum-v12",
-    "slug": "sanctum-v12-6fe3a63e0c69",
+    "id": "project-sanctum-v13",
+    "slug": "sanctum-v13-aafdb6e2bb76",
     "team_id": "team-sanctum"
   },
   "states": {
@@ -26,6 +26,8 @@
     "research": "label-research",
     "documentation": "label-documentation",
     "symphony": "label-symphony",
+    "agent-standard": "label-agent-standard",
+    "agent-deep": "label-agent-deep",
     "Repo Steward": "label-source-repo",
     "Product Scout": "label-source-product"
   },

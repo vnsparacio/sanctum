@@ -1,0 +1,12 @@
+[
+  {
+    "name": "persistence-wiring",
+    "goal": "Wire persistence into the actual UI. First read logic.js and storage.js, then make one small edit in storage.js: rename its ALLOWED_MOODS, MAX_NOTE_LENGTH and MAX_HISTORY_SIZE constants and their uses to distinct STORAGE_* names. These classic scripts currently collide at the top level; do not reread unchanged files before this edit. Next read index.html and index.js, load storage.js before index.js, and connect startup load, save and clear to the existing UI state. The owner-provided ui.test.js is a JSDOM-free real-script test; preserve it and consult it for concrete test details. Keep controls usable on throwing storage access or failed writes/clears and show an honest visible warning. Preserve logic and protected tests. Run lint/build/test after implementation.",
+    "required_files": ["logic.js", "storage.js", "index.html", "index.js", "ui.test.js"]
+  },
+  {
+    "name": "documentation",
+    "goal": "Read README.md and update only that file to accurately explain operation, reload/clear persistence, storage-error behavior and the available test command. Do not claim a browser check occurred. Do not reread or rewrite implementation that passed the previous checkpoint unless a new test failure requires it. Run the listed lint/build/test operations once for this checkpoint and finish only on host-validated evidence.",
+    "required_files": ["README.md"]
+  }
+]

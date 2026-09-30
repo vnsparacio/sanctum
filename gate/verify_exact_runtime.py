@@ -200,7 +200,7 @@ def verify_artifact(artifact):
         "accumulatedObservations",
         "activeCorrection",
         "nearCharacterLimit",
-        "postPatchTestOnly",
+        "postPatchContinue",
         "reviewer",
     }:
         raise ValueError("REQUEST_ENUMERATION")

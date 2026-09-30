@@ -139,7 +139,11 @@ TOOL_CASES = [
         "domain": "web",
         "prompt": "Search the current web for the synthetic Project Cedar release announcement.",
         "tool": "web_search",
-        "args": {"query": "Project Cedar release announcement"},
+        "args": {
+            "objective": "Find the public Project Cedar release announcement.",
+            "search_queries": ["Project Cedar release announcement"],
+            "count": 5,
+        },
     },
     {
         "id": "web_fetch",

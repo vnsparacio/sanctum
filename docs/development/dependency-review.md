@@ -23,3 +23,27 @@ disabled; only manual allowlisted signals are used.
 
 `npm audit` still reports the two documented moderate Vitest development-path
 entries. No unrelated upgrade or forced audit fix was applied.
+
+## V1.3.0 candidate audit — 2026-09-29
+
+Release completion changes only the root package version; the dependency
+graph and exact `openclaw@2026.8.1` runtime pin remain those merged on
+`v1.3-dev`. A fresh `npm audit --omit=dev` reported five production-path
+entries: two high and three moderate. The high entries are transitive
+`brace-expansion@5.0.9` (CPU/stack denial of service advisories) and
+`undici@8.10.0` (transport advisories, including denial of service and
+cache/response handling). The `undici` path is through OpenClaw.
+`fast-uri` and `ip-address` account for the other package-level moderate
+entries, while the direct OpenClaw entry derives from `undici`. The full
+audit reported seven entries after adding the two documented development
+Vitest/mocker entries. Advisory entries may share root causes; these counts
+are not counts of distinct exploitable product paths.
+
+The audit report identifies available upstream updates, including
+`openclaw@2026.9.7`; it does not establish that a pin update preserves
+Sanctum's installed runtime and authority contracts. This release-completion
+change does not update a runtime pin or claim the advisory paths unreachable.
+Any remediation needs a separate reviewed pin change and the corresponding
+source/private-runtime qualification. The V1.3.0 release decision must
+explicitly review this inherited dependency risk; do not call the lockfile
+vulnerability-free.
