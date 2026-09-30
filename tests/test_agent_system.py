@@ -1314,9 +1314,9 @@ class ImplementationLifecycleTests(unittest.TestCase):
 
     def test_codex_observability_is_local_and_content_free(self):
         workflow = (ROOT / "WORKFLOW.md").read_text()
-        codex_command = workflow.split("\ncodex:\n", 1)[1].split(
-            "\n    app-server", 1
-        )[0]
+        codex_command = workflow.split("\ncodex:\n", 1)[1].split("\n    app-server", 1)[
+            0
+        ]
         otel_settings = {
             line.strip()
             for line in codex_command.splitlines()
@@ -1329,7 +1329,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
                 "-c 'otel.log_user_prompt=false'",
                 "-c 'otel.exporter=\"none\"'",
                 "-c 'otel.metrics_exporter=\"none\"'",
-                "-c 'otel.trace_exporter={ otlp-http = { endpoint = \"http://127.0.0.1:4318/v1/traces\", protocol = \"binary\" } }'",
+                '-c \'otel.trace_exporter={ otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "binary" } }\'',
             },
             otel_settings,
         )
