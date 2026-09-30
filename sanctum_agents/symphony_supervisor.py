@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from .ao_correlation import (
+    AttemptObserver,
+    BestEffortAOEmitter,
+    CorrelationEvent,
+    persist_active_bindings,
+)
 from .config import AgentConfig, ConfigError
 from .implementation import LifecycleError, implementation_backend_dispatch
 from .runtime import (
@@ -1037,6 +1043,19 @@ def supervise(
     validation_state.chmod(0o700)
     values["SANCTUM_VALIDATION_STATE"] = str(validation_state)
     run_id = new_run_id("implementation")
+    ao_observer = (
+        AttemptObserver(
+            run_id,
+            worker_class,
+            checked["model"],
+            checked["reasoning_effort"],
+        )
+        if checked["implementation_backend"] == "codex"
+        else None
+    )
+    ao_emitter = BestEffortAOEmitter(
+        prefix / "logs" / "implementation" / f"{run_id}.ao-correlation.jsonl"
+    )
     log = JsonlRunLog(
         prefix / "logs" / "implementation" / f"{run_id}.jsonl",
         run_id,
@@ -1149,6 +1168,16 @@ def supervise(
                             )
                         ]
                     else:
+                        if ao_observer is not None:
+                            try:
+                                for event in ao_observer.observe(snapshot):
+                                    ao_emitter.emit(event)
+                                persist_active_bindings(
+                                    ao_observer, prefix / "state", workspace_root
+                                )
+                            except Exception:
+                                # AO evidence is never a supervisor prerequisite.
+                                pass
                         prior_issues = set(ledger.get("issues", {}))
                         violations = evaluate_snapshot(
                             snapshot,
@@ -1244,6 +1273,22 @@ def supervise(
                                 worker_class=worker_class,
                             )
                 if violations:
+                    if ao_observer is not None:
+                        for item in violations:
+                            try:
+                                ao_emitter.emit(
+                                    CorrelationEvent(
+                                        "sanctum.symphony.supervisor_stop",
+                                        {
+                                            "sanctum.symphony.run_id": run_id,
+                                            "sanctum.issue.identifier": item.issue_identifier,
+                                            "sanctum.workflow.observed_state": "budget_stopped",
+                                            "sanctum.symphony.stop_reason": item.reason,
+                                        },
+                                    )
+                                )
+                            except Exception:
+                                pass
                     incident_metrics = {}
                     for item in violations:
                         record = ledger.get("issues", {}).get(item.issue_identifier)

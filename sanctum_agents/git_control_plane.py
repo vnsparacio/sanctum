@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .ao_correlation import read_active_binding
+
 CANONICAL_REMOTE = "https://github.com/vnsparacio/sanctum.git"
 CANONICAL_GITHUB_REPOSITORY = "vnsparacio/sanctum"
 CANONICAL_GITHUB_OWNER = "vnsparacio"
@@ -135,6 +137,20 @@ class GitControlPlane:
                 "state_root_invalid",
                 "broker state must remain outside issue workspaces",
             )
+
+    def _ao_binding(self, identity: WorkspaceIdentity) -> dict[str, str]:
+        """Optional evidence only; an absent binding never affects Git behavior."""
+        try:
+            return (
+                read_active_binding(
+                    self.state_root,
+                    identity.issue_identifier,
+                    identity.workspace,
+                )
+                or {}
+            )
+        except Exception:
+            return {}
 
     def _environment(self, *, github_authenticated: bool = False) -> dict[str, str]:
         allowed = (
@@ -891,6 +907,7 @@ class GitControlPlane:
             "paths": staged,
             "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
             "request_sha256": request_hash,
+            **self._ao_binding(identity),
         }
         _atomic_private_json(receipt_path, receipt)
         try:
@@ -1208,7 +1225,7 @@ class GitControlPlane:
                 "pull_request_unknown",
                 "pull-request result is unknown and was not replayed; operator review required",
             )
-        receipt = {**intent, "state": "pending"}
+        receipt = {**intent, "state": "pending", **self._ao_binding(identity)}
         _atomic_private_json(receipt_path, receipt)
         existing = self._open_pull_request(identity)
         if existing:
