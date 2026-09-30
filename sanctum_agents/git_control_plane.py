@@ -7,6 +7,8 @@ import json
 import os
 import re
 import subprocess
+import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -18,6 +20,10 @@ CANONICAL_REMOTE = "https://github.com/vnsparacio/sanctum.git"
 CANONICAL_GITHUB_REPOSITORY = "vnsparacio/sanctum"
 CANONICAL_GITHUB_OWNER = "vnsparacio"
 INTEGRATION_BASE = "v1.3-dev"
+CI_WAIT_TIMEOUT_SECONDS = 600
+CI_POLL_INTERVAL_SECONDS = 20
+CI_MAX_POLLS = 31
+CI_GITHUB_CALL_TIMEOUT_SECONDS = 30
 ISSUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*-[1-9][0-9]*$")
 OPERATION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 PROTECTED_PARTS = {".git", ".agents", ".codex"}
@@ -1093,7 +1099,9 @@ class GitControlPlane:
             return self._reconcile_commit(path, receipt)
         return self._reconcile_push(path, receipt, identity)
 
-    def _open_pull_request(self, identity: WorkspaceIdentity) -> dict[str, Any] | None:
+    def _open_pull_request(
+        self, identity: WorkspaceIdentity, *, timeout: float = 60
+    ) -> dict[str, Any] | None:
         result = self._gh(
             "pr",
             "list",
@@ -1105,6 +1113,7 @@ class GitControlPlane:
             identity.branch,
             "--json",
             "number,url,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isDraft,title,body",
+            timeout=timeout,
         )
         try:
             values = json.loads(result.stdout)
@@ -1144,6 +1153,256 @@ class GitControlPlane:
                 "pull_request_state_invalid", "open PR does not match the issue handoff"
             )
         return value
+
+    @staticmethod
+    def _required_ci_checks() -> tuple[str, ...]:
+        """Use the reviewed source ruleset, never a model-supplied check list."""
+        path = (
+            Path(__file__).resolve().parents[1]
+            / ".github/rulesets/protected-branches.json"
+        )
+        try:
+            ruleset = json.loads(path.read_text())
+            rules = [
+                rule
+                for rule in ruleset["rules"]
+                if rule["type"] == "required_status_checks"
+            ]
+            checks = rules[0]["parameters"]["required_status_checks"]
+            names = tuple(item["context"] for item in checks)
+            if (
+                len(rules) != 1
+                or not names
+                or len(names) != len(set(names))
+                or any(
+                    not isinstance(name, str)
+                    or not name
+                    or item["integration_id"] != 15368
+                    for name, item in zip(names, checks, strict=True)
+                )
+            ):
+                raise ValueError("invalid required checks")
+            return names
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as exc:
+            raise GitControlError(
+                "ci_policy_invalid", "reviewed required CI check policy is unavailable"
+            ) from exc
+
+    def wait_issue_ci(self) -> dict[str, Any]:
+        """Observe one issue PR head and its required checks within fixed bounds."""
+        identity = self._require_issue_branch()
+        required = self._required_ci_checks()
+        started = time.monotonic()
+        deadline = started + CI_WAIT_TIMEOUT_SECONDS
+        receipt_path = (
+            self.state_root
+            / "ci-waits"
+            / identity.issue_identifier
+            / f"{uuid.uuid4().hex}.json"
+        )
+        observations: list[dict[str, Any]] = []
+        poll_count = 0
+        head_sha: str | None = None
+        number: int | None = None
+        latest: list[dict[str, str | None]] = []
+
+        def remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        def github_read(*arguments: str) -> Any:
+            budget = remaining()
+            if budget <= 0:
+                raise GitOperationTimeout("CI wait deadline reached")
+            result = self._gh(
+                *arguments,
+                timeout=min(CI_GITHUB_CALL_TIMEOUT_SECONDS, budget),
+            )
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise GitControlError(
+                    "ci_response_invalid", "GitHub CI response is malformed"
+                ) from exc
+
+        def current_pr_head() -> str | None:
+            pr_state = github_read(
+                "pr",
+                "view",
+                str(number),
+                "--repo",
+                CANONICAL_GITHUB_REPOSITORY,
+                "--json",
+                "number,state,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner",
+            )
+            if (
+                not isinstance(pr_state, dict)
+                or pr_state.get("number") != number
+                or pr_state.get("state") != "OPEN"
+                or pr_state.get("baseRefName") != INTEGRATION_BASE
+                or pr_state.get("headRefName") != identity.branch
+                or not isinstance(pr_state.get("headRepository"), dict)
+                or pr_state["headRepository"].get("nameWithOwner")
+                != CANONICAL_GITHUB_REPOSITORY
+                or not isinstance(pr_state.get("headRepositoryOwner"), dict)
+                or pr_state["headRepositoryOwner"].get("login")
+                != CANONICAL_GITHUB_OWNER
+            ):
+                return None
+            return pr_state.get("headRefOid")
+
+        def finish(status: str, reason: str | None = None) -> dict[str, Any]:
+            elapsed = round(time.monotonic() - started, 2)
+            receipt = {
+                "schema_version": 1,
+                "issue_identifier": identity.issue_identifier,
+                "repository": CANONICAL_GITHUB_REPOSITORY,
+                "pr_number": number,
+                "head_sha": head_sha,
+                "status": status,
+                "reason": reason,
+                "elapsed_seconds": elapsed,
+                "poll_count": poll_count,
+                "checks": latest,
+                "observations": observations,
+            }
+            _atomic_private_json(receipt_path, receipt)
+            return {
+                "status": status,
+                "reason": reason,
+                "head_sha": head_sha,
+                "checks": latest,
+                "elapsed_seconds": elapsed,
+                "poll_count": poll_count,
+                "receipt": str(receipt_path.relative_to(self.state_root)),
+            }
+
+        try:
+            pr = self._open_pull_request(
+                identity,
+                timeout=min(CI_GITHUB_CALL_TIMEOUT_SECONDS, max(0.01, remaining())),
+            )
+            if pr is None:
+                return finish("UNAVAILABLE", "issue_pr_missing_or_head_mismatch")
+            number = pr["number"]
+            head_sha = pr["headRefOid"]
+            if not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+                return finish("UNAVAILABLE", "invalid_pr_head")
+
+            while poll_count < CI_MAX_POLLS and remaining() > 0:
+                observed_head = current_pr_head()
+                if observed_head is None:
+                    return finish("UNAVAILABLE", "issue_pr_identity_changed")
+                if observed_head != head_sha:
+                    return finish("HEAD_CHANGED", "pr_head_changed")
+
+                poll_count += 1
+                payload = github_read(
+                    "api",
+                    f"repos/{CANONICAL_GITHUB_REPOSITORY}/commits/{head_sha}/check-runs?per_page=100&app_id=15368&filter=latest",
+                )
+                if (
+                    not isinstance(payload, dict)
+                    or not isinstance(payload.get("check_runs"), list)
+                    or type(payload.get("total_count")) is not int
+                ):
+                    return finish("UNAVAILABLE", "ci_response_invalid")
+                if payload["total_count"] > len(payload["check_runs"]):
+                    return finish("UNAVAILABLE", "ci_response_incomplete")
+                by_name: dict[str, dict[str, Any]] = {}
+                for check in payload["check_runs"]:
+                    if not isinstance(check, dict):
+                        return finish("UNAVAILABLE", "ci_response_invalid")
+                    name = check.get("name")
+                    if name in required:
+                        if name in by_name:
+                            return finish("UNAVAILABLE", "ci_response_ambiguous")
+                        by_name[name] = check
+                latest = []
+                for name in required:
+                    check = by_name.get(name)
+                    status = check.get("status") if check else None
+                    conclusion = check.get("conclusion") if check else None
+                    if check and (
+                        check.get("head_sha") != head_sha
+                        or not isinstance(check.get("app"), dict)
+                        or check["app"].get("id") != 15368
+                        or status
+                        not in {
+                            "queued",
+                            "in_progress",
+                            "completed",
+                            "waiting",
+                            "pending",
+                            "requested",
+                        }
+                        or (
+                            conclusion is not None
+                            and conclusion
+                            not in {
+                                "success",
+                                "failure",
+                                "neutral",
+                                "cancelled",
+                                "skipped",
+                                "timed_out",
+                                "action_required",
+                                "stale",
+                            }
+                        )
+                    ):
+                        return finish("UNAVAILABLE", "ci_response_invalid")
+                    latest.append(
+                        {"name": name, "status": status, "conclusion": conclusion}
+                    )
+                observations.append(
+                    {
+                        "poll": poll_count,
+                        "completed": sum(
+                            item["status"] == "completed" for item in latest
+                        ),
+                        "failed": sum(
+                            item["status"] == "completed"
+                            and item["conclusion"] not in {None, "success"}
+                            for item in latest
+                        ),
+                    }
+                )
+                # A second PR read prevents attributing a terminal result to a moved head.
+                if all(
+                    item["status"] == "completed" and item["conclusion"] == "success"
+                    for item in latest
+                ) or any(
+                    item["status"] == "completed"
+                    and item["conclusion"] not in {None, "success"}
+                    for item in latest
+                ):
+                    confirmed_head = current_pr_head()
+                    if confirmed_head is None:
+                        return finish("UNAVAILABLE", "issue_pr_identity_changed")
+                    if confirmed_head != head_sha:
+                        return finish("HEAD_CHANGED", "pr_head_changed")
+                    if all(
+                        item["status"] == "completed"
+                        and item["conclusion"] == "success"
+                        for item in latest
+                    ):
+                        return finish("PASSED")
+                    return finish("FAILED")
+                if poll_count < CI_MAX_POLLS and remaining() > 0:
+                    time.sleep(min(CI_POLL_INTERVAL_SECONDS, remaining()))
+            if remaining() > 0:
+                final_head = current_pr_head()
+                if final_head is None:
+                    return finish("UNAVAILABLE", "issue_pr_identity_changed")
+                if final_head != head_sha:
+                    return finish("HEAD_CHANGED", "pr_head_changed")
+            return finish(
+                "PENDING_TIMEOUT", "timeout" if remaining() <= 0 else "poll_limit"
+            )
+        except GitControlError:
+            if remaining() <= 0:
+                return finish("PENDING_TIMEOUT", "timeout")
+            return finish("UNAVAILABLE", "github_read_failed")
 
     def ensure_pull_request(
         self, title: Any, body: Any, operation_id: Any

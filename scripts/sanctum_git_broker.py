@@ -119,6 +119,16 @@ TOOLS = [
             "idempotentHint": True,
         },
     },
+    {
+        "name": "github_wait_issue_ci",
+        "description": "Wait within fixed host bounds for required checks on this issue PR's pinned head.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True},
+    },
 ]
 
 
@@ -144,6 +154,8 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
             arguments.get("body"),
             arguments.get("operation_id"),
         )
+    if name == "github_wait_issue_ci" and not arguments:
+        return broker.wait_issue_ci()
     raise GitControlError("tool_unsupported", "unsupported Git control-plane operation")
 
 

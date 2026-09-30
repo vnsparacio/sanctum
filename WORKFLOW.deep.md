@@ -59,7 +59,7 @@ codex:
     -c "mcp_servers.sanctum_git.command=\"$SANCTUM_GIT_BROKER_PYTHON\""
     -c "mcp_servers.sanctum_git.args=[\"$SANCTUM_GIT_BROKER_SCRIPT\",\"mcp\"]"
     -c 'mcp_servers.sanctum_git.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_GIT_CREDENTIAL_HELPER","SANCTUM_GIT_GH_CONFIG_DIR"]'
-    -c 'mcp_servers.sanctum_git.enabled_tools=["git_workspace_status","git_commit_issue_changes","git_push_issue_branch","git_reconcile_operation","github_ensure_issue_pull_request"]'
+    -c 'mcp_servers.sanctum_git.enabled_tools=["git_workspace_status","git_commit_issue_changes","git_push_issue_branch","git_reconcile_operation","github_ensure_issue_pull_request","github_wait_issue_ci"]'
     -c 'mcp_servers.sanctum_git.default_tools_approval_mode="approve"'
     -c "mcp_servers.sanctum_validation.command=\"$SANCTUM_VALIDATION_RUNNER_PYTHON\""
     -c "mcp_servers.sanctum_validation.args=[\"$SANCTUM_VALIDATION_RUNNER_SCRIPT\",\"mcp\"]"
@@ -162,6 +162,15 @@ command interface.
 PR creation uses `github_ensure_issue_pull_request` after the host Git control
 plane has pushed the issue branch. The sandboxed shell never receives GitHub
 credentials or ambient home-directory access.
+
+After PR creation, prefer one `github_wait_issue_ci` call over repeated
+model-driven CI status and job polling. The host reads the issue PR's exact
+head and required checks with a ten-minute deadline, twenty-second interval,
+and at most 31 polls. A passed result is evidence for the normal handoff, not
+merge or completion authority. On failure, inspect the failed jobs through the
+existing narrow read-only GitHub path and diagnose normally. On timeout,
+unavailable GitHub state, or a changed head, record the bounded result and
+follow the existing supervisor and Human Review policy; do not infer success.
 
 If a required tool or authorization is genuinely unavailable, record the
 blocker in the Linear workpad and stop rather than pretending completion.
@@ -518,6 +527,11 @@ After a valid commit exists:
 2. Call `github_ensure_issue_pull_request` with a stable operation ID recorded
    in the workpad. It reconciles an existing open PR for the exact issue head
    or creates one targeting `v1.3-dev` without replaying an uncertain mutation.
+
+3. Call `github_wait_issue_ci` once for the created issue PR. It has no model
+arguments and returns a compact result and private receipt reference. If it
+reports `FAILED`, inspect the failing checks as needed. `PENDING_TIMEOUT`,
+`HEAD_CHANGED`, and `UNAVAILABLE` are not successful CI evidence.
 
 The PR must:
 

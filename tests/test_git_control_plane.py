@@ -16,6 +16,7 @@ from sanctum_agents.git_control_plane import (
     GitOperationTimeout,
     UnknownGitResult,
 )
+from scripts import sanctum_git_broker
 
 
 class GitControlPlaneTests(unittest.TestCase):
@@ -678,6 +679,192 @@ class GitControlPlaneTests(unittest.TestCase):
         self.assertEqual("created", first["status"])
         self.assertEqual("already_applied", second["status"])
         self.assertEqual(1, creates)
+
+    def _ci_broker(self):
+        broker = self.broker()
+        broker.prepare()
+        head = broker._head()
+        pr = {
+            "number": 41,
+            "url": "https://github.com/vnsparacio/sanctum/pull/41",
+            "state": "OPEN",
+            "baseRefName": "v1.3-dev",
+            "headRefName": "symphony/tte-9",
+            "headRefOid": head,
+            "headRepository": {"nameWithOwner": "vnsparacio/sanctum"},
+            "headRepositoryOwner": {"login": "vnsparacio"},
+        }
+        names = broker._required_ci_checks()
+        checks = [
+            {
+                "name": name,
+                "head_sha": head,
+                "app": {"id": 15368},
+                "status": "completed",
+                "conclusion": "success",
+                "output": {"text": "PRIVATE LOG CONTENT"},
+            }
+            for name in names
+        ]
+        return broker, pr, checks
+
+    @staticmethod
+    def _ci_reader(pr, checks, *, calls=None):
+        def read(*arguments, **_kwargs):
+            if calls is not None:
+                calls.append(arguments)
+            if arguments[:2] == ("pr", "list"):
+                payload = [pr]
+            elif arguments[:2] == ("pr", "view"):
+                payload = pr
+            elif arguments[0] == "api":
+                payload = {"total_count": len(checks), "check_runs": checks}
+            else:
+                raise AssertionError(arguments)
+            return subprocess.CompletedProcess(arguments, 0, json.dumps(payload), "")
+
+        return read
+
+    def test_ci_wait_passes_only_all_required_checks_on_pinned_head(self):
+        broker, pr, checks = self._ci_broker()
+        calls = []
+        with patch.object(
+            broker, "_gh", side_effect=self._ci_reader(pr, checks, calls=calls)
+        ):
+            result = broker.wait_issue_ci()
+        self.assertEqual("PASSED", result["status"])
+        self.assertEqual(pr["headRefOid"], result["head_sha"])
+        self.assertEqual(1, result["poll_count"])
+        self.assertEqual(len(checks), len(result["checks"]))
+        self.assertEqual({"name", "status", "conclusion"}, set(result["checks"][0]))
+        self.assertNotIn("PRIVATE LOG CONTENT", json.dumps(result))
+        self.assertNotIn(
+            "PRIVATE LOG CONTENT", (self.state / result["receipt"]).read_text()
+        )
+        self.assertEqual({"pr", "api"}, {call[0] for call in calls})
+        self.assertTrue(
+            all(
+                call[:2] in {("pr", "list"), ("pr", "view")} or call[0] == "api"
+                for call in calls
+            )
+        )
+        self.assertIn(
+            pr["headRefOid"], next(call[1] for call in calls if call[0] == "api")
+        )
+
+    def test_ci_wait_failure_returns_compact_evidence_without_logs(self):
+        broker, pr, checks = self._ci_broker()
+        checks[0]["conclusion"] = "failure"
+        with patch.object(broker, "_gh", side_effect=self._ci_reader(pr, checks)):
+            result = broker.wait_issue_ci()
+        self.assertEqual("FAILED", result["status"])
+        self.assertEqual("failure", result["checks"][0]["conclusion"])
+        self.assertLess(len(json.dumps(result)), 2500)
+        self.assertNotIn("output", json.dumps(result))
+
+    def test_ci_wait_missing_or_empty_checks_never_passes(self):
+        broker, pr, _checks = self._ci_broker()
+        with (
+            patch.object(broker, "_gh", side_effect=self._ci_reader(pr, [])),
+            patch("sanctum_agents.git_control_plane.CI_MAX_POLLS", 2),
+            patch("sanctum_agents.git_control_plane.CI_POLL_INTERVAL_SECONDS", 0),
+        ):
+            result = broker.wait_issue_ci()
+        self.assertEqual("PENDING_TIMEOUT", result["status"])
+        self.assertEqual("poll_limit", result["reason"])
+        self.assertEqual(2, result["poll_count"])
+        self.assertTrue(all(check["status"] is None for check in result["checks"]))
+
+    def test_ci_wait_wall_deadline_stops_pending_checks(self):
+        broker, pr, checks = self._ci_broker()
+        checks[0]["status"] = "in_progress"
+        checks[0]["conclusion"] = None
+        with (
+            patch.object(broker, "_gh", side_effect=self._ci_reader(pr, checks)),
+            patch("sanctum_agents.git_control_plane.CI_WAIT_TIMEOUT_SECONDS", 0.01),
+            patch("sanctum_agents.git_control_plane.CI_POLL_INTERVAL_SECONDS", 0.02),
+        ):
+            result = broker.wait_issue_ci()
+        self.assertEqual("PENDING_TIMEOUT", result["status"])
+        self.assertEqual("timeout", result["reason"])
+        self.assertLessEqual(result["poll_count"], 1)
+
+    def test_ci_wait_stops_on_changed_pr_head_without_switching(self):
+        broker, pr, checks = self._ci_broker()
+        checks[0]["status"] = "in_progress"
+        checks[0]["conclusion"] = None
+        views = 0
+
+        def changed(*arguments, **kwargs):
+            nonlocal views
+            if arguments[:2] == ("pr", "view"):
+                views += 1
+                if views == 2:
+                    moved = {**pr, "headRefOid": "f" * 40}
+                    return subprocess.CompletedProcess(
+                        arguments, 0, json.dumps(moved), ""
+                    )
+            return self._ci_reader(pr, checks)(*arguments, **kwargs)
+
+        with (
+            patch.object(broker, "_gh", side_effect=changed),
+            patch("sanctum_agents.git_control_plane.CI_POLL_INTERVAL_SECONDS", 0),
+        ):
+            result = broker.wait_issue_ci()
+        self.assertEqual("HEAD_CHANGED", result["status"])
+        self.assertEqual(pr["headRefOid"], result["head_sha"])
+        self.assertEqual(1, result["poll_count"])
+
+    def test_ci_wait_read_failure_is_unavailable_and_never_retries_writes(self):
+        broker, pr, checks = self._ci_broker()
+        calls = []
+
+        def fail(*arguments, **kwargs):
+            calls.append(arguments)
+            if arguments[0] == "api":
+                raise GitControlError("github_operation_failed", "PRIVATE DETAILS")
+            return self._ci_reader(pr, checks)(*arguments, **kwargs)
+
+        with patch.object(broker, "_gh", side_effect=fail):
+            result = broker.wait_issue_ci()
+        self.assertEqual("UNAVAILABLE", result["status"])
+        self.assertEqual("github_read_failed", result["reason"])
+        self.assertNotIn("PRIVATE DETAILS", json.dumps(result))
+        self.assertEqual(1, len([call for call in calls if call[0] == "api"]))
+
+    def test_ci_wait_does_not_accept_stale_or_wrong_app_checks(self):
+        broker, pr, checks = self._ci_broker()
+        checks[0]["head_sha"] = "f" * 40
+        with patch.object(broker, "_gh", side_effect=self._ci_reader(pr, checks)):
+            self.assertEqual("UNAVAILABLE", broker.wait_issue_ci()["status"])
+        checks[0]["head_sha"] = pr["headRefOid"]
+        checks[0]["app"] = {"id": 1}
+        with patch.object(broker, "_gh", side_effect=self._ci_reader(pr, checks)):
+            self.assertEqual("UNAVAILABLE", broker.wait_issue_ci()["status"])
+
+    def test_ci_wait_tool_has_no_selector_or_write_authority(self):
+        tool = next(
+            item
+            for item in sanctum_git_broker.TOOLS
+            if item["name"] == "github_wait_issue_ci"
+        )
+        self.assertEqual({}, tool["inputSchema"]["properties"])
+        self.assertFalse(tool["inputSchema"]["additionalProperties"])
+        self.assertTrue(tool["annotations"]["readOnlyHint"])
+        with patch.object(sanctum_git_broker, "control_plane") as control:
+            control.return_value.wait_issue_ci.return_value = {"status": "PASSED"}
+            self.assertEqual(
+                {"status": "PASSED"},
+                sanctum_git_broker.call_tool("github_wait_issue_ci", {}),
+            )
+            with self.assertRaises(GitControlError):
+                sanctum_git_broker.call_tool(
+                    "github_wait_issue_ci", {"repo": "other/repo"}
+                )
+            control.return_value.wait_issue_ci.assert_called_once_with()
+            control.return_value.ensure_pull_request.assert_not_called()
+            control.return_value.push.assert_not_called()
+            control.return_value.commit.assert_not_called()
 
 
 if __name__ == "__main__":
