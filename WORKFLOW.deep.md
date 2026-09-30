@@ -66,6 +66,11 @@ codex:
     -c 'mcp_servers.sanctum_validation.env_vars=["SYMPHONY_WORKSPACE_ROOT","SANCTUM_GIT_BROKER_STATE","SANCTUM_VALIDATION_STATE"]'
     -c 'mcp_servers.sanctum_validation.enabled_tools=["run_validation_profile","report_operator_blocker"]'
     -c 'mcp_servers.sanctum_validation.default_tools_approval_mode="approve"'
+    -c 'otel.environment="sanctum-codex-dev"'
+    -c 'otel.log_user_prompt=false'
+    -c 'otel.exporter="none"'
+    -c 'otel.metrics_exporter="none"'
+    -c 'otel.trace_exporter={ otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "binary" } }'
     app-server
   approval_policy: never
   thread_sandbox: workspace-write
