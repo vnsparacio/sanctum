@@ -176,6 +176,15 @@ class Setup(unittest.TestCase):
                 installed_freeze[name.removeprefix("gate/")], op.sha(launcher)
             )
             record = next((self.prefix / "state/amendments").iterdir())
+            transaction = json.loads((record / "transaction.json").read_text())
+            if (ROOT / ".git").exists():
+                self.assertRegex(transaction["source_commit"], r"^[0-9a-f]{40}$")
+            else:
+                self.assertIsNone(transaction["source_commit"])
+            self.assertEqual(
+                transaction["source_manifest_sha256"],
+                op.sha(ROOT / "SOURCE-MANIFEST.json"),
+            )
             work_mode.rollback(self.prefix, record)
         self.assertEqual(launcher.read_text(), old)
         op.verify_install(self.prefix)
@@ -421,6 +430,15 @@ for(const name of ['contract.mjs','quality.mjs','benchmark.mjs']){
         before = (self.prefix / "receipt.json").read_bytes()
         record = upgrade.apply(self.prefix)
         self.assertTrue((record / "complete").is_file())
+        transaction = json.loads((record / "transaction.json").read_text())
+        if (ROOT / ".git").exists():
+            self.assertRegex(transaction["source_commit"], r"^[0-9a-f]{40}$")
+        else:
+            self.assertIsNone(transaction["source_commit"])
+        self.assertEqual(
+            transaction["source_manifest_sha256"],
+            op.sha(ROOT / "SOURCE-MANIFEST.json"),
+        )
         op.verify_install(self.prefix)
         upgrade.rollback(self.prefix, record)
         self.assertEqual((self.prefix / "receipt.json").read_bytes(), before)

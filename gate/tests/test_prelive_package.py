@@ -50,20 +50,18 @@ class PackageClosure(unittest.TestCase):
             prefix = Path(td).resolve()
             package = prefix / "gate"
             package.mkdir()
-            base_files = subprocess.check_output(
-                ["git", "ls-tree", "-r", "--name-only", "HEAD", "gate"],
-                cwd=ROOT,
-                text=True,
-            ).splitlines()
+            base_files = sorted(
+                path
+                for path in json.loads((ROOT / "SOURCE-MANIFEST.json").read_text())
+                if path.startswith("gate/")
+            )
             for path in base_files:
                 name = Path(path).relative_to("gate")
                 if "tests" in name.parts:
                     continue
                 target = package / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(
-                    subprocess.check_output(["git", "show", "HEAD:" + path], cwd=ROOT)
-                )
+                target.write_bytes((ROOT / path).read_bytes())
             for name in files:
                 target = package / name
                 target.parent.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,6 @@ import importlib.util
 import json
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -60,6 +59,7 @@ def targets(prefix):
 
 def apply(prefix):
     op.verify()
+    source_commit = op.source_commit()
     receipt = op.verify_install(prefix)
     if op.owns_process(op.process_record(prefix)):
         raise ValueError("Stop candidate gateway before runtime amendment")
@@ -109,13 +109,7 @@ def apply(prefix):
         "before": before,
         "after": after,
         "source_manifest_sha256": sha(ROOT / "SOURCE-MANIFEST.json"),
-        "source_commit": subprocess.run(
-            ["/usr/bin/git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip(),
+        "source_commit": source_commit,
     }
     atomic(record / "transaction.json", json.dumps(transaction, indent=2) + "\n")
     op.write(record / "complete", "complete\n")

@@ -12,9 +12,9 @@ Sanctum keeps credentials, tools, approvals and privacy policy on your machine w
 
 **Reasoning is replaceable. Authority stays local.**
 
-## V1.3 development
+## V1.3.0 source scope
 
-V1.3 development starts from the immutable V1.2.0 release on `v1.3-dev`.
+V1.3 develops from the immutable V1.2.0 release on `v1.3-dev`.
 Linear project `Sanctum V1.3` is the work and decision record; implementation
 still requires the owner to set both `Ready for Agent` and `symphony`, runs at
 up to five implementation workers in one Symphony service, opens an unmerged
@@ -22,14 +22,16 @@ PR to `v1.3-dev`, and stops at `Human Review`. Project membership and the
 `v1.3.0` milestone do not authorize work.
 See the [V1.3 development bootstrap](docs/current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md).
 
-The integration line also contains conversational WebUI consent, explicit
-Assistant/Work Mode separation, bounded Work Mode create/delete/move and exact
-multi-file text patches, and restricted content telemetry. These are not a
-V1.3 release claim. Evaluators should follow the
+The reviewed V1.3 source adds conversational WebUI consent, explicit
+Assistant/Work Mode separation, bounded Work Mode editing and recovery,
+restricted content telemetry, and a separately qualified local Codex
+development Agent Observability lane. The [V1.3 release record](docs/history/v1.3/V1.3-RELEASE-COMPLETION.md)
+identifies the accepted scope and retained limits. Source publication does not
+install or migrate the private runtime. Evaluators should follow the
 [end-to-end quickstart](docs/guides/quickstart.md) and the documented upgrade
 checkpoints instead of copying commands from historical evidence.
 
-## V1.2 release
+## Previous V1.2 release
 
 Sanctum V1.2.0 is **complete with documented limitations**. This backward-compatible release retains the V1.1 shared-capability, Source-First and private Qwen Work Mode boundaries while adding bounded agent management, qualified Linear workflows, feedback-aware Symphony execution, a narrow host-owned Git control plane, stronger repository/CI integrity and gateway-only Splunk observability. The original V1.0.0 and V1.1.0 releases and tags remain immutable. The original deployment was called **VinceAI** and remains the reference installation; publication does not migrate or redeploy it. Source and documentation use [Apache-2.0](LICENSE), with [external licenses retained](THIRD-PARTY-NOTICES.md).
 
@@ -98,6 +100,7 @@ starts from ordinary chat and requires an explicit `/work` command.
 - Run explicit Work Mode tasks in isolated worktrees with bounded exact replacement, text-file create/delete/move, exact preflighted multi-file text patches and fixed-profile repository commands. Path escape, fuzzy/binary/vendor/generated edits, live host mounts, networked runner commands, Docker-socket access and inherited credentials remain unavailable.
 - Manage work through bounded Repo Steward, Product Scout and Triage roles; run owner-authorized implementation through Symphony in isolated workspaces; stop every implementation at Human Review. Management agents cannot set execution gates, edit source or merge.
 - Emit optional metadata-only gateway traces and bounded custom metrics directly to Splunk Observability Cloud while preserving the existing private-spool/S3/Splunk Enterprise path. Telemetry is fail-open and has no authority or completion role.
+- For the local Codex development lane, send privacy-filtered native traces through an owner-private loopback collector to Splunk Agent Observability and correlate Symphony attempts with confirmed Git, CI and Linear outcomes. This does not instrument the product agent, GPU or host.
 
 Sanctum does not promise full autonomy, universal factual accuracy, full Linux
 product parity, an all-Docker deployment or guaranteed cleanup during
@@ -105,11 +108,13 @@ simultaneous Mac/network/provider outages. V1.3 Work Mode broadens only its
 bounded isolated text-worktree operations; it still has no arbitrary host
 filesystem or generic shell authority. Fresh core setup does not automatically
 enable Work Mode. The agent-management path requires human execution gates,
-review and merge. Splunk coverage does not include agent, GPU, host or provider
-monitoring. The local model's browser-target selection and exact draft
-formatting have recorded failures. A reviewed moderate Vitest/mocker advisory
-remains in development tooling; the vulnerable dev-server path is unused by
-the prescribed tests. See [the V1.2 release record](docs/history/v1.2/V1.2-RELEASE-COMPLETION.md), [current limitations](docs/current/limitations.md), [the V1.1 release record](docs/history/v1.1/V1.1-RELEASE-COMPLETION.md) and [dependency review](docs/development/dependency-review.md).
+review and merge. Splunk coverage does not include product-agent, GPU, host or
+provider monitoring; the native Codex LLM model display remains empty pending
+a separately reviewed trace-aware mapping. The local model's browser-target selection and exact draft
+formatting have recorded failures. The inherited dependency graph retains
+production-path npm advisories and a reviewed moderate Vitest/mocker
+development advisory; the vulnerable Vitest dev-server path is unused by the
+prescribed tests. See [the V1.2 release record](docs/history/v1.2/V1.2-RELEASE-COMPLETION.md), [current limitations](docs/current/limitations.md), [the V1.1 release record](docs/history/v1.1/V1.1-RELEASE-COMPLETION.md) and [dependency review](docs/development/dependency-review.md).
 
 ## Read more
 

@@ -23,6 +23,11 @@ No logs are sent to Observability Cloud. This slice installs no macOS Collector,
 profiling, runtime/host metrics, automatic HTTP or provider instrumentation,
 dashboards, detectors, RUM, GPU monitoring, or agent observability.
 
+The separate [local Codex development Agent Observability lane](../current/agent-system/V1.3-CODEX-AO-CORRELATION.md)
+was subsequently live-qualified with an owner-private loopback collector. It
+does not change this gateway slice or add product-agent, host, GPU or provider
+monitoring.
+
 The supported gateway launcher preloads the manual OTel provider before
 OpenClaw starts so active span context remains available to the gate and Core
 event writer. The preload catches initialization failures and continues normal

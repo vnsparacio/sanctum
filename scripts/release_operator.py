@@ -24,6 +24,31 @@ def sha(p):
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def source_commit():
+    """Return the exact checkout commit, or no commit for a source archive."""
+    if not (ROOT / ".git").exists():
+        return None
+    top = subprocess.run(
+        ["/usr/bin/git", "rev-parse", "--show-toplevel"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if Path(top).resolve() != ROOT.resolve():
+        raise ValueError("Source Git root does not match release source")
+    commit = subprocess.run(
+        ["/usr/bin/git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if len(commit) != 40 or any(ch not in "0123456789abcdef" for ch in commit):
+        raise ValueError("Invalid source commit identity")
+    return commit
+
+
 def private(p):
     for item in [p, *p.parents]:
         if item.is_symlink():
