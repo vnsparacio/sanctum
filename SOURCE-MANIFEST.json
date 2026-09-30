@@ -513,7 +513,7 @@
   "tests/fixtures/linear-triage-snapshot.json": "233e21e7879c98fd0c95dd28aca522246aee333d259ab57096f481292824ac22",
   "tests/fixtures/reviewer-packet.json": "2621773936d6ceb1449dcb2b4d3e9616fa9d962aa7e3a041121a9a4d55d5db55",
   "tests/fixtures/splunk-content-events.jsonl": "d3659f14476ceb162f2e200c880a0e86be681cfcb8a54355218214b25e623866",
-  "tests/test_agent_system.py": "6b4f9d667f9aeb9af28091ef349a47bb9c79731ebbfbd5e4f02a6e688535ed13",
+  "tests/test_agent_system.py": "cd45036bbde02d51aa291667dd81f6bb3c295f80e35ab0ac73fe2c6471bf51a7",
   "tests/test_calendar_read_broker.py": "c2bf50bf358050a8372bfd7d2c8868cba639594db5a7d8557b6e00ac0860f5d2",
   "tests/test_codex_token_baseline.py": "0138c3ffeac91c7fcc06abdc96e99d556558cbd9030f7c69373fea60e35fb9d5",
   "tests/test_documentation_impact.py": "2cdf7f95367dec945044142a3d84abd6255fd741b61e0b20aa2117fb4efbcab7",
