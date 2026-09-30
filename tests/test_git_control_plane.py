@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -262,6 +263,43 @@ class GitControlPlaneTests(unittest.TestCase):
             cwd=self.root,
         ).stdout.strip()
         self.assertEqual(committed["commit"], remote_head)
+
+    def test_commit_receipt_records_only_fresh_observed_ao_attempt(self):
+        broker = self.broker()
+        broker.prepare()
+        active = self.state.parent / "ao-correlation" / "active"
+        active.mkdir(parents=True)
+        binding = active / "TTE-9.json"
+        binding.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "issue_identifier": "TTE-9",
+                    "workspace_path": str(self.workspace.resolve()),
+                    "run_id": "implementation-20260930T020838Z-da1429c96768",
+                    "attempt_id": "a" * 24,
+                    "updated_at": time.time(),
+                }
+            )
+        )
+        (self.workspace / "docs.md").write_text("bounded change\n")
+        broker.commit("Record observed attempt", ["docs.md"], "with-ao-binding")
+        receipt = json.loads(
+            (
+                self.state / "operations" / "TTE-9" / "commit-with-ao-binding.json"
+            ).read_text()
+        )
+        self.assertEqual("a" * 24, receipt["ao_attempt_id"])
+
+        binding.unlink()
+        (self.workspace / "docs.md").write_text("next bounded change\n")
+        broker.commit("Commit without AO", ["docs.md"], "without-ao-binding")
+        receipt = json.loads(
+            (
+                self.state / "operations" / "TTE-9" / "commit-without-ao-binding.json"
+            ).read_text()
+        )
+        self.assertNotIn("ao_attempt_id", receipt)
 
     def test_rejected_directory_scope_leaves_index_clean(self):
         broker = self.broker()
