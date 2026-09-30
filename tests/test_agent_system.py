@@ -1312,6 +1312,35 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertNotIn(" gh ", workflow)
         self.assertNotIn("gh pr merge", workflow)
 
+    def test_codex_observability_is_local_and_content_free(self):
+        workflow = (ROOT / "WORKFLOW.md").read_text()
+        codex_command = workflow.split("\ncodex:\n", 1)[1].split("\n    app-server", 1)[
+            0
+        ]
+        otel_settings = {
+            line.strip()
+            for line in codex_command.splitlines()
+            if line.strip().startswith("-c 'otel.")
+        }
+
+        self.assertEqual(
+            {
+                "-c 'otel.environment=\"sanctum-codex-dev\"'",
+                "-c 'otel.log_user_prompt=false'",
+                "-c 'otel.exporter=\"none\"'",
+                "-c 'otel.metrics_exporter=\"none\"'",
+                '-c \'otel.trace_exporter={ otlp-http = { endpoint = "http://127.0.0.1:4318/v1/traces", protocol = "binary" } }\'',
+            },
+            otel_settings,
+        )
+        self.assertIsNone(
+            re.search(
+                r"splunk|x-sf-token|sf[_-]?token|api[_-]?key|access[_-]?token",
+                codex_command,
+                re.IGNORECASE,
+            )
+        )
+
     def test_standard_and_deep_workflows_have_identical_authority(self):
         standard = (ROOT / "WORKFLOW.md").read_text()
         deep = (ROOT / "WORKFLOW.deep.md").read_text()
