@@ -7,10 +7,21 @@ Current contributor and operator material is organized by purpose:
 - [`guides/`](guides/) starts with the [end-to-end quickstart](guides/quickstart.md), then covers detailed installation/upgrades, configuration, operations, troubleshooting, release and migration procedures. The [interactive Qwen Code guide](guides/qwen-code.md) describes direct Mac coding with demand-started private Runpod inference. The [local 4B prompting guide](guides/local-4b-grounded-prompts.md) explains how to ask checkable public questions and interpret grounding failures. The [Linear agent integration guide](guides/linear-agent-integration.md) reproduces the current V1.3 metadata and bounded management-agent setup.
 - [`development/`](development/) covers testing, dependency review, publication scope and the [secret-detection controls](development/secret-scanning.md). Start with the [testing guide](development/testing.md).
 - [`observability/`](observability/) documents the bounded Splunk application tracing/custom-metrics slice, the restricted content contract, and the reviewable Splunk Core content app/runbook.
-- [`current/`](current/) records stable V1.2 limitations, the V1.3 roadmap and the accepted agent-management system.
+- [`current/`](current/) records V1.3 source limitations, the roadmap and the accepted agent-management system.
 - [`history/`](history/) retains design history, lessons, benchmarks and versioned project evidence.
 
-The stable release record is [Sanctum V1.2.0 release completion](history/v1.2/V1.2-RELEASE-COMPLETION.md). V1.3 begins with the [development bootstrap](current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md), and the [Qwen lifecycle qualification](current/agent-system/V1.3-QWEN-LIFECYCLE-QUALIFICATION.md) records the first owner-gated non-Sanctum Work Mode implementation. Accepted V1.2 component evidence remains in the [agent-system handoff](current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md), [Linear live qualification](current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md), [Git control plane](current/agent-system/V1.2-GIT-CONTROL-PLANE.md) and [Splunk Observability guide](observability/SPLUNK-O11Y-CLOUD.md).
+The [V1.3 release-completion record](history/v1.3/V1.3-RELEASE-COMPLETION.md)
+tracks the source candidate and owner promotion gates. The preceding immutable
+release record is [V1.2.0](history/v1.2/V1.2-RELEASE-COMPLETION.md). V1.3 began
+with the [development bootstrap](current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP.md);
+the [Qwen lifecycle qualification](current/agent-system/V1.3-QWEN-LIFECYCLE-QUALIFICATION.md)
+records one owner-gated non-Sanctum Work Mode implementation, and the
+[Codex AO correlation guide](current/agent-system/V1.3-CODEX-AO-CORRELATION.md)
+records the local development telemetry lane. Accepted V1.2 component evidence
+remains in the [agent-system handoff](current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md),
+[Linear live qualification](current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md),
+[Git control plane](current/agent-system/V1.2-GIT-CONTROL-PLANE.md) and
+[Splunk Observability guide](observability/SPLUNK-O11Y-CLOUD.md).
 
 The [guided MoodLog POC milestone](history/v1.3/WORK-MODE-MOODLOG-MILESTONE.md)
 records browser-functional partial acceptance and its limits; the

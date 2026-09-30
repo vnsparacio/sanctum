@@ -597,6 +597,7 @@ def preserve_registered_profiles(prefix, rendered):
 
 def apply(prefix):
     op.verify()
+    source_commit = op.source_commit()
     receipt = op.verify_install(prefix)
     safe(prefix)
     docker, host, tag, image = docker_details()
@@ -653,13 +654,7 @@ def apply(prefix):
         "qwen_runner_image": qwen_tag,
         "qwen_runner_image_id": qwen_image,
         "source_manifest_sha256": sha(ROOT / "SOURCE-MANIFEST.json"),
-        "source_commit": subprocess.run(
-            ["/usr/bin/git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip(),
+        "source_commit": source_commit,
     }
     atomic(record / "transaction.json", json.dumps(tx, indent=2) + "\n")
     op.write(record / "complete", "complete\n")
