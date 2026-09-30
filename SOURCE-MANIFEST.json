@@ -293,7 +293,7 @@
   "gate/tests/content-telemetry-contract.test.mjs": "2c42767bf0f7d898435497b2ab5b8fa337dec1fe916984d01067d7128da0a0aa",
   "gate/tests/content-telemetry-delivery.test.mjs": "111af5c5b4d11d9fd971423b1a0396820ea52c053754d0ddf2dc23967d3d5ec6",
   "gate/tests/content-telemetry-spool.test.mjs": "3f91106dc179ed278a1bc0ec66f4af4eb8e376f0147d3217ffbb2078d7d315ed",
-  "gate/tests/core.test.mjs": "a86df4a6a006649f6043489134a88449c70f5809bcaa3e8b4daf3fca855012cc",
+  "gate/tests/core.test.mjs": "30f20acc02ae4f9c957e9de963be7c1495a456c1139cb3fbaa571d33b86c9c0b",
   "gate/tests/fixtures/actual_protocol_worker.py": "d1e0707c46e5caebbe7f5f29ccb3f0812e9d123b18173c99bc7bdae032576677",
   "gate/tests/fixtures/prelive_worker.py": "2d4fdcf689ac4734723b69f17777e8ae4599aa96a8ca5dd2ab5af413054a4d73",
   "gate/tests/fixtures/protocol_worker.py": "ee02ff31e24785c1bc51da2de32661f5f3b477a1a9ce7c4158202d4fc84aab35",
