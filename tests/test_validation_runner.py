@@ -138,6 +138,147 @@ class HostValidationRunnerTests(unittest.TestCase):
             self.assertTrue(home.is_relative_to(self.validation_state / "runtime"))
             self.assertFalse(shared_cache.is_relative_to(home))
 
+    def test_dependency_preflight_creates_missing_environment_with_private_cache(self):
+        observed = []
+
+        def setup(command, environment):
+            observed.append((command, environment))
+            (self.workspace / ".venv").mkdir()
+            (self.workspace / "node_modules").mkdir()
+            return {"exit_code": 0, "timed_out": False}
+
+        with (
+            patch.object(self.runner, "_dependencies_ready", side_effect=[False, True]),
+            patch.object(self.runner, "_run_command", side_effect=setup),
+        ):
+            result = self.runner.preflight_dependencies()
+        self.assertTrue(result["passed"])
+        self.assertEqual("created", result["state"])
+        command, environment = observed[0]
+        self.assertEqual(("/usr/bin/make", "deps"), command.arguments)
+        self.assertEqual(1500, command.timeout_seconds)
+        self.assertEqual(
+            str(self.validation_state / "cache" / "uv"), environment["UV_CACHE_DIR"]
+        )
+        self.assertNotIn("LINEAR_API_KEY", environment)
+        receipt_path = next(
+            (self.validation_state / "dependency-preflight").rglob("*.json")
+        )
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(0o600, receipt_path.stat().st_mode & 0o777)
+        self.assertEqual("shared-private-validation", receipt["cache_class"])
+        self.assertNotIn(str(self.root), receipt_path.read_text())
+        self.assertTrue(self.runner.git.status()["clean"])
+
+    def test_dependency_preflight_retains_existing_environment_on_resume(self):
+        (self.workspace / ".venv").mkdir()
+        with (
+            patch.object(self.runner, "_dependencies_ready", return_value=True),
+            patch.object(self.runner, "_run_command") as setup,
+        ):
+            first = self.runner.preflight_dependencies()
+            second = self.runner.preflight_dependencies()
+        self.assertEqual("existing", first["state"])
+        self.assertEqual("existing", second["state"])
+        setup.assert_not_called()
+        self.assertTrue((self.workspace / ".venv").exists())
+
+    def test_dependency_preflight_ignores_unwritable_default_cache(self):
+        with (
+            patch.dict("os.environ", {"UV_CACHE_DIR": "/unwritable/default"}),
+            patch.object(self.runner, "_dependencies_ready", side_effect=[False, True]),
+            patch.object(
+                self.runner,
+                "_run_command",
+                return_value={"exit_code": 0, "timed_out": False},
+            ) as setup,
+        ):
+            self.assertTrue(self.runner.preflight_dependencies()["passed"])
+        self.assertEqual(
+            str(self.validation_state / "cache" / "uv"),
+            setup.call_args.args[1]["UV_CACHE_DIR"],
+        )
+
+    def test_dependency_readiness_checks_pins_and_existing_artifacts(self):
+        venv = self.workspace / ".venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").write_text("synthetic interpreter placeholder\n")
+        (venv / "pyvenv.cfg").write_text("version = 3.12.4\n")
+        (self.workspace / "gate" / "runtime").mkdir(parents=True)
+        (self.workspace / "gate" / "runtime" / "requirements.txt").write_text(
+            "Pillow==12.3.0\n"
+        )
+        (self.workspace / "requirements-dev.txt").write_text("black==26.5.1\n")
+        (self.workspace / "node_modules").mkdir()
+
+        def completed(output):
+            return subprocess.CompletedProcess([], 0, output, "")
+
+        responses = [
+            completed(
+                '[{"name":"Pillow","version":"12.3.0"},{"name":"black","version":"26.5.1"}]'
+            ),
+            completed("All installed packages are compatible"),
+            completed('{"dependencies":{}}'),
+        ]
+        with patch("sanctum_agents.validation.subprocess.run", side_effect=responses):
+            self.assertTrue(
+                self.runner._dependencies_ready(self.runner._environment("TTE-14"))
+            )
+        responses[0] = completed('[{"name":"Pillow","version":"12.3.0"}]')
+        with patch("sanctum_agents.validation.subprocess.run", side_effect=responses):
+            self.assertFalse(
+                self.runner._dependencies_ready(self.runner._environment("TTE-14"))
+            )
+
+    def test_dependency_preflight_rejects_modified_make_contract(self):
+        (self.workspace / "Makefile").write_text("deps:\n\t@echo unreviewed\n")
+        with patch.object(self.runner, "_run_command") as setup:
+            result = self.runner.preflight_dependencies()
+        self.assertFalse(result["passed"])
+        setup.assert_not_called()
+
+    def test_dependency_preflight_fails_closed_for_failed_timeout_and_partial_setup(
+        self,
+    ):
+        for command_result, ready_after in (
+            ({"exit_code": 1, "timed_out": False}, False),
+            ({"exit_code": -15, "timed_out": True}, False),
+            ({"exit_code": 0, "timed_out": False}, False),
+        ):
+            with self.subTest(command_result=command_result, ready_after=ready_after):
+                with (
+                    patch.object(
+                        self.runner,
+                        "_dependencies_ready",
+                        side_effect=[False, ready_after],
+                    ),
+                    patch.object(
+                        self.runner, "_run_command", return_value=command_result
+                    ),
+                ):
+                    result = self.runner.preflight_dependencies()
+                self.assertFalse(result["passed"])
+                self.assertEqual("failed", result["state"])
+
+    def test_dependency_preflight_rejects_source_mutation_and_symlink_artifacts(self):
+        def mutating_setup(_command, _environment):
+            (self.workspace / "README.md").write_text("changed\n")
+            return {"exit_code": 0, "timed_out": False}
+
+        with (
+            patch.object(self.runner, "_dependencies_ready", side_effect=[False, True]),
+            patch.object(self.runner, "_run_command", side_effect=mutating_setup),
+        ):
+            self.assertFalse(self.runner.preflight_dependencies()["passed"])
+        (self.workspace / "README.md").write_text("accepted base\n")
+        (self.workspace / ".venv").symlink_to(
+            self.validation_state, target_is_directory=True
+        )
+        with patch.object(self.runner, "_run_command") as setup:
+            self.assertFalse(self.runner.preflight_dependencies()["passed"])
+        setup.assert_not_called()
+
     def test_failed_process_inspection_preflight_stops_before_expensive_validation(
         self,
     ):

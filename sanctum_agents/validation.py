@@ -9,7 +9,9 @@ import re
 import signal
 import stat
 import subprocess
+import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -24,6 +26,15 @@ class ValidationError(ValueError):
 
 ISSUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*-[1-9][0-9]*$")
 OPERATION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+!-]+)$")
+DEPENDENCY_TIMEOUT_SECONDS = 1500
+DEPENDENCY_CONTRACT_PATHS = (
+    "Makefile",
+    "package.json",
+    "package-lock.json",
+    "requirements-dev.txt",
+    "gate/runtime/requirements.txt",
+)
 
 
 @dataclass(frozen=True)
@@ -203,6 +214,13 @@ class HostValidationRunner:
             uv_cache,
             uv_python,
         ):
+            if path.is_symlink() or any(
+                parent.is_symlink()
+                for parent in path.parents
+                if parent == self.validation_state_root
+                or parent.is_relative_to(self.validation_state_root)
+            ):
+                raise ValidationError("validation cache path may not be a symlink")
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
             path.chmod(0o700)
         return {
@@ -252,6 +270,206 @@ class HostValidationRunner:
             "stdout": stdout[-limit:].decode("utf-8", errors="replace"),
             "stderr": stderr[-limit:].decode("utf-8", errors="replace"),
             "output_truncated": len(stdout) > limit or len(stderr) > limit,
+        }
+
+    def _dependencies_ready(self, environment: dict[str, str]) -> bool:
+        """Inspect installed packages without changing an existing environment."""
+        venv = self.workspace / ".venv"
+        python = venv / "bin" / "python"
+        if venv.is_symlink() or not venv.is_dir() or not python.is_file():
+            return False
+        try:
+            venv_config = (venv / "pyvenv.cfg").read_text()
+            if not re.search(r"(?m)^version\s*=\s*3\.12(?:\.|$)", venv_config):
+                return False
+            installed = subprocess.run(
+                ["uv", "pip", "list", "--python", str(python), "--format", "json"],
+                cwd=self.workspace,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if installed.returncode:
+                return False
+            packages = {
+                item["name"].lower().replace("_", "-"): item["version"]
+                for item in json.loads(installed.stdout)
+            }
+            for relative in ("gate/runtime/requirements.txt", "requirements-dev.txt"):
+                for line in (self.workspace / relative).read_text().splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    pin = PIN_PATTERN.fullmatch(stripped)
+                    if (
+                        not pin
+                        or packages.get(pin[1].lower().replace("_", "-")) != pin[2]
+                    ):
+                        return False
+            consistency = subprocess.run(
+                ["uv", "pip", "check", "--python", str(python)],
+                cwd=self.workspace,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if consistency.returncode:
+                return False
+            npm = subprocess.run(
+                ["npm", "ls", "--depth=0", "--json"],
+                cwd=self.workspace,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            return npm.returncode == 0 and not json.loads(npm.stdout).get("problems")
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+            return False
+
+    def _dependency_contract_unchanged(self) -> bool:
+        environment = {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "HOME": "/var/empty",
+            "LANG": "C",
+            "PATH": "/usr/bin:/bin",
+        }
+        status = subprocess.run(
+            [
+                "/usr/bin/git",
+                "status",
+                "--porcelain=v1",
+                "--",
+                *DEPENDENCY_CONTRACT_PATHS,
+            ],
+            cwd=self.workspace,
+            env=environment,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if status.returncode or status.stdout:
+            return False
+        result = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "diff",
+                "--quiet",
+                "--no-ext-diff",
+                "--no-textconv",
+                "origin/v1.3-dev",
+                "--",
+                *DEPENDENCY_CONTRACT_PATHS,
+            ],
+            cwd=self.workspace,
+            env=environment,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def preflight_dependencies(self) -> dict[str, Any]:
+        """Prepare one leased workspace before Symphony dispatches Codex."""
+        issue_id = self.workspace.name
+        status = self._identity(issue_id, issue_id)
+        before = self._workspace_fingerprint(status)
+        started = time.monotonic()
+        receipt_id = uuid.uuid4().hex
+        receipt_path = (
+            self.validation_state_root
+            / "dependency-preflight"
+            / issue_id
+            / f"{receipt_id}.json"
+        )
+        receipt: dict[str, Any] = {
+            "schema_version": 1,
+            "receipt_id": receipt_id,
+            "issue_id": issue_id,
+            "workspace_id": issue_id,
+            "workspace_fingerprint": before,
+            "command": "make deps",
+            "cache_class": "shared-private-validation",
+            "state": "running",
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+        _atomic_private_json(receipt_path, receipt)
+        result: dict[str, Any] | None = None
+        ready_before = False
+        ready_after = False
+        stable = False
+        try:
+            environment = self._environment(issue_id)
+            for cache_name in ("UV_CACHE_DIR", "NPM_CONFIG_CACHE"):
+                cache = Path(environment[cache_name])
+                if cache.is_symlink():
+                    raise ValidationError("dependency cache is not a private directory")
+                with tempfile.TemporaryFile(dir=cache):
+                    pass
+            if (self.workspace / ".venv").is_symlink() or (
+                self.workspace / "node_modules"
+            ).is_symlink():
+                raise ValidationError("dependency artifacts may not be symlinks")
+            if not self._dependency_contract_unchanged():
+                raise ValidationError(
+                    "dependency setup contract differs from accepted base"
+                )
+            ready_before = self._dependencies_ready(environment)
+            if not ready_before:
+                result = self._run_command(
+                    ValidationCommand(
+                        "deps", ("/usr/bin/make", "deps"), DEPENDENCY_TIMEOUT_SECONDS
+                    ),
+                    environment,
+                )
+            ready_after = self._dependencies_ready(environment)
+            stable = (
+                self._workspace_fingerprint(self._identity(issue_id, issue_id))
+                == before
+            )
+            passed = (
+                ready_after
+                and stable
+                and (
+                    result is None
+                    or (result["exit_code"] == 0 and not result["timed_out"])
+                )
+            )
+        except (OSError, ValidationError, subprocess.TimeoutExpired) as exc:
+            passed = False
+            receipt["failure_class"] = type(exc).__name__
+        receipt.update(
+            {
+                "state": (
+                    "existing"
+                    if passed and ready_before
+                    else "created" if passed else "failed"
+                ),
+                "initial_state": (
+                    "existing" if ready_before else "missing_or_incomplete"
+                ),
+                "ready_after": ready_after,
+                "workspace_stable": stable,
+                "exit_code": None if result is None else result["exit_code"],
+                "timed_out": False if result is None else result["timed_out"],
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "completed_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        _atomic_private_json(receipt_path, receipt)
+        return {
+            "state": receipt["state"],
+            "passed": passed,
+            "receipt_id": receipt_id,
+            "duration_ms": receipt["duration_ms"],
         }
 
     def run(

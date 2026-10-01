@@ -27,11 +27,15 @@ workspace:
 
 hooks:
   after_create: |
+    set -eu
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c core.hooksPath=/dev/null clone --depth 1 --single-branch --branch "v1.3-dev" https://github.com/vnsparacio/sanctum.git .
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare --fresh-workspace
+    "$SANCTUM_VALIDATION_RUNNER_PYTHON" "$SANCTUM_VALIDATION_RUNNER_SCRIPT" preflight-deps
   before_run: |
+    set -eu
     "$SANCTUM_GIT_BROKER_PYTHON" "$SANCTUM_GIT_BROKER_SCRIPT" prepare
-  timeout_ms: 120000
+    "$SANCTUM_VALIDATION_RUNNER_PYTHON" "$SANCTUM_VALIDATION_RUNNER_SCRIPT" preflight-deps
+  timeout_ms: 1800000
 
 agent:
   max_concurrent_agents: 5
