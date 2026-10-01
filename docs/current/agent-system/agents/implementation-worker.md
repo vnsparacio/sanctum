@@ -123,6 +123,11 @@ must not be replayed under a new ID. There is no arbitrary Git/GitHub
 argument tool, force push, branch deletion, merge, protected-branch write, or
 caller-selected repository/remote/base/head.
 
+After clone and Git broker prepare, the host uses the reviewed dependency
+preflight to inspect or prepare fresh Codex workspace dependencies before
+dispatch. Source verification and validation remain separate worker and host
+validation steps.
+
 The broker executable is the source-manifest-verified canonical copy, not the
 copy inside the issue workspace. It binds the real workspace path, device,
 inode, in-place Git directory, issue identifier, canonical remote, accepted
