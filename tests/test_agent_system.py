@@ -23,6 +23,7 @@ from sanctum_agents.authority import (
     validate_issue_mutation,
 )
 from sanctum_agents.config import ConfigError, load_config, validate_model_catalog
+from sanctum_agents.git_control_plane import CI_WAIT_TIMEOUT_SECONDS
 from sanctum_agents.implementation import (
     ImplementationBackendDispatch,
     LifecycleError,
@@ -159,6 +160,7 @@ def catalog() -> list[dict[str, object]]:
         }
         for model in (
             "gpt-6-astra",
+            "gpt-6.1-sol",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -231,7 +233,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", config.model_for("repo_steward").model)
         self.assertEqual("gpt-5.6-luna", config.model_for("triage").model)
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
+        self.assertEqual("gpt-6.1-sol", config.model_for("implementation").model)
+        self.assertEqual("medium", config.model_for("implementation").reasoning)
         self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
+        self.assertEqual("high", config.model_for("implementation_deep").reasoning)
         self.assertEqual(5, config.symphony["max_concurrency"])
         self.assertEqual(120, config.symphony["state_startup_grace_seconds"])
         self.assertEqual(30, config.symphony["state_stall_grace_seconds"])
@@ -257,7 +262,38 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_unavailable_model_has_no_fallback(self):
         with self.assertRaisesRegex(ConfigError, "configured model unavailable"):
-            validate_model_catalog(load_config(CONFIG), catalog()[1:])
+            validate_model_catalog(
+                load_config(CONFIG),
+                [item for item in catalog() if item["id"] != "gpt-6.1-sol"],
+            )
+        with self.assertRaisesRegex(ConfigError, "configured reasoning unavailable"):
+            validate_model_catalog(
+                load_config(CONFIG),
+                [
+                    (
+                        {
+                            **item,
+                            "supportedReasoningEfforts": [{"reasoningEffort": "high"}],
+                        }
+                        if item["id"] == "gpt-6.1-sol"
+                        else item
+                    )
+                    for item in catalog()
+                ],
+            )
+
+    def test_malformed_standard_model_fails_config_loading(self):
+        for field, value, message in (
+            ("model", "", "identifier must be non-empty"),
+            ("reasoning", "invalid", "unsupported reasoning value"),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                raw = json.loads(CONFIG.read_text())
+                raw["models"]["implementation"][field] = value
+                path = Path(directory) / "agents.json"
+                path.write_text(json.dumps(raw))
+                with self.assertRaisesRegex(ConfigError, message):
+                    load_config(path)
 
     def test_runtime_prefix_must_stay_outside_source(self):
         config = load_config(CONFIG)
@@ -314,6 +350,8 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual("standard", status["worker_class"])
             self.assertEqual("codex", status["implementation_backend"])
             self.assertEqual(str(ROOT / "WORKFLOW.md"), status["workflow"])
+            self.assertEqual("gpt-6.1-sol", status["model"])
+            self.assertEqual("medium", status["reasoning_effort"])
 
     def test_implementation_wall_clock_timeout_rejects_malformed_value(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1290,7 +1328,19 @@ class ImplementationLifecycleTests(unittest.TestCase):
     def test_workflow_pins_model_limits_and_never_merges(self):
         workflow = (ROOT / "WORKFLOW.md").read_text()
         deep_workflow = (ROOT / "WORKFLOW.deep.md").read_text()
-        self.assertIn('model="gpt-5.6-sol"', workflow)
+        self.assertIn('model="gpt-6.1-sol"', workflow)
+        self.assertIn('model_reasoning_effort="medium"', workflow)
+        code_mode_wait = "features.code_mode.default_exec_yield_time_ms=660000"
+        self.assertIn(code_mode_wait, workflow)
+        self.assertIn(code_mode_wait, deep_workflow)
+        self.assertEqual(1, workflow.count(code_mode_wait))
+        self.assertEqual(1, deep_workflow.count(code_mode_wait))
+        code_mode_ms = int(
+            re.search(r"default_exec_yield_time_ms=(\d+)", workflow).group(1)
+        )
+        stall_ms = int(re.search(r"stall_timeout_ms: (\d+)", workflow).group(1))
+        self.assertLess(CI_WAIT_TIMEOUT_SECONDS * 1000, code_mode_ms)
+        self.assertLess(code_mode_ms, stall_ms)
         self.assertIn("agent-standard", workflow)
         self.assertIn("max_turns: 20", workflow)
         self.assertIn("turn_timeout_ms: 3600000", workflow)
@@ -1347,7 +1397,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
         normalized = (
             deep.replace("    - agent-deep\n", "    - agent-standard\n")
             .replace("max_turns: 30", "max_turns: 20")
-            .replace('model="gpt-6-astra"', 'model="gpt-5.6-sol"')
+            .replace('model="gpt-6-astra"', 'model="gpt-6.1-sol"')
             .replace('model_reasoning_effort="high"', 'model_reasoning_effort="medium"')
             .replace(
                 "Worker class: deep (`agent-deep`).",
