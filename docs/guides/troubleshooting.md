@@ -5,6 +5,7 @@
 | Dependency download fails | Separate unavailable cache/DNS/network access from a bad version pin. Keep the failure log. Do not substitute latest. |
 | Plugin metadata generator rejects entry | Hook plugins use definePluginEntry; tool-only metadata generation does not apply. Use make build. |
 | Source/runtime drift | Compare reviewed hashes and changes. Do not auto-refresh pins. |
+| `make verify-source` fails with a source-manifest mismatch | Compare the reported path and digest with the intentional file diff. Unexplained drift blocks qualification; do not blindly refresh hashes. For a reviewed source change, update only its corresponding `SOURCE-MANIFEST.json` entry and rerun verification. See the [release source-integrity checks](release.md#reproducible-build-and-automated-gates). |
 | Setup refuses nonempty prefix | Preserve the contents and inspect partial installation; choose an empty private directory. |
 | Managed stack start refuses an occupied port or separate gateway | Run `./sanctum status --prefix ...`, inspect the exact listener and private logs, then stop the known owner. The runner never adopts or broadly kills an unknown process. |
 | Managed stack reports `failed` | Run `./sanctum status --prefix ...`, `./sanctum ready --prefix ...` and `./sanctum logs --prefix ...`; inspect `stack.log` and the named component log. Resolve the exact failure before restarting. Managed startup quarantines only a provably stale, owner-controlled broker socket; a live, new, changed or unsafe path is deliberately refused for inspection. |
