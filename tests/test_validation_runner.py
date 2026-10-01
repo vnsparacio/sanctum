@@ -203,7 +203,7 @@ class HostValidationRunnerTests(unittest.TestCase):
         venv = self.workspace / ".venv"
         (venv / "bin").mkdir(parents=True)
         (venv / "bin" / "python").write_text("synthetic interpreter placeholder\n")
-        (venv / "pyvenv.cfg").write_text("version = 3.12.4\n")
+        (venv / "pyvenv.cfg").write_text("version_info = 3.12\n")
         (self.workspace / "gate" / "runtime").mkdir(parents=True)
         (self.workspace / "gate" / "runtime" / "requirements.txt").write_text(
             "Pillow==12.3.0\n"
@@ -225,6 +225,18 @@ class HostValidationRunnerTests(unittest.TestCase):
             self.assertTrue(
                 self.runner._dependencies_ready(self.runner._environment("TTE-14"))
             )
+        (venv / "pyvenv.cfg").write_text("version = 3.12.4\n")
+        with patch("sanctum_agents.validation.subprocess.run", side_effect=responses):
+            self.assertTrue(
+                self.runner._dependencies_ready(self.runner._environment("TTE-14"))
+            )
+        (venv / "pyvenv.cfg").write_text("version_info = 3.13\n")
+        with patch("sanctum_agents.validation.subprocess.run") as inspect:
+            self.assertFalse(
+                self.runner._dependencies_ready(self.runner._environment("TTE-14"))
+            )
+        inspect.assert_not_called()
+        (venv / "pyvenv.cfg").write_text("version_info = 3.12\n")
         responses[0] = completed('[{"name":"Pillow","version":"12.3.0"}]')
         with patch("sanctum_agents.validation.subprocess.run", side_effect=responses):
             self.assertFalse(

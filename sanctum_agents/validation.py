@@ -280,7 +280,10 @@ class HostValidationRunner:
             return False
         try:
             venv_config = (venv / "pyvenv.cfg").read_text()
-            if not re.search(r"(?m)^version\s*=\s*3\.12(?:\.|$)", venv_config):
+            if not re.search(
+                r"(?m)^(?:version|version_info)\s*=\s*3\.12(?:\.|$)",
+                venv_config,
+            ):
                 return False
             installed = subprocess.run(
                 ["uv", "pip", "list", "--python", str(python), "--format", "json"],
