@@ -10,6 +10,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,12 +28,14 @@ from .ao_correlation import (
 from .config import AgentConfig, ConfigError
 from .implementation import LifecycleError, implementation_backend_dispatch
 from .runtime import (
+    Budget,
     ExclusiveRoleLock,
     JsonlRunLog,
     RunMode,
     ensure_private_prefix,
     new_run_id,
 )
+from .supervisor import BoundedProcess
 from .work_projects import ProjectProfileError, load_project_profiles
 
 
@@ -629,6 +632,66 @@ def _sanitized_supervisor_environment(
     return {key: value for key, value in values.items() if key in allowed}
 
 
+def _probe_codex_access(model: str, reasoning: str, environ: dict[str, str]) -> None:
+    """Require one real account-backed turn before any issue can dispatch."""
+    with tempfile.TemporaryDirectory(prefix="sanctum-model-probe-") as directory:
+        cwd = Path(directory)
+        result = BoundedProcess().run(
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--strict-config",
+                "-m",
+                model,
+                "-c",
+                f'model_reasoning_effort="{reasoning}"',
+                "-s",
+                "read-only",
+                "-C",
+                str(cwd),
+                "Reply with OK only.",
+            ],
+            cwd,
+            Budget(45, 1, 0, 0, 1, 32000),
+            env=environ,
+            stall_seconds=30,
+            output_limit_bytes=16384,
+        )
+    messages: list[str] = []
+    completed = False
+    for line in result.output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "item.completed":
+            item = event.get("item")
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "agent_message"
+                and isinstance(item.get("text"), str)
+            ):
+                messages.append(item["text"])
+        elif event.get("type") == "turn.completed":
+            completed = True
+    if (
+        result.reason != "completed"
+        or result.returncode != 0
+        or not completed
+        or messages != ["OK"]
+    ):
+        raise ConfigError(
+            f"configured Symphony Codex model {model} with {reasoning} reasoning "
+            "failed the account access probe"
+        )
+
+
 def _work_mode_host_binding(
     config: AgentConfig,
     repository: Path,
@@ -1076,6 +1139,40 @@ def supervise(
         raise RuntimeError("invalid Symphony supervisor ledger") from exc
     port = config.symphony["state_port"]
     _ensure_port_available(port)
+    if checked["implementation_backend"] == "codex":
+        log.emit(
+            "model_access_probe_started",
+            model=checked["model"],
+            reasoning_effort=checked["reasoning_effort"],
+        )
+        probe_environment = {
+            key: value
+            for key, value in values.items()
+            if key
+            in {
+                "CODEX_HOME",
+                "HOME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "LOGNAME",
+                "PATH",
+                "TMPDIR",
+                "USER",
+                "XDG_CACHE_HOME",
+                "XDG_CONFIG_HOME",
+            }
+        }
+        try:
+            _probe_codex_access(
+                checked["model"],
+                checked["reasoning_effort"],
+                probe_environment,
+            )
+        except ConfigError:
+            log.emit("model_access_probe_failed", model=checked["model"])
+            raise
+        log.emit("model_access_probe_completed", model=checked["model"])
     output = prefix / "logs" / "implementation" / f"{run_id}.symphony.log"
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with lock.acquired_for(run_id), output.open("wb") as stream:

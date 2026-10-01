@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import smtplib
 import ssl
 import subprocess
+import time
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
 from .config import AgentConfig, ConfigError
 from .reasoner import CodexReasoner
-from .runtime import Budget, ExclusiveRoleLock, new_run_id
-from .symphony_supervisor import _ledger_epoch_sha256, _save_json, supervise
+from .runtime import Budget, ExclusiveRoleLock, ensure_private_prefix, new_run_id
+from .symphony_supervisor import (
+    _ledger_epoch_sha256,
+    _ledger_totals,
+    _save_json,
+    supervise,
+)
 
 _ISSUE = re.compile(r"[A-Z][A-Z0-9]*-[1-9][0-9]*\Z")
 _LIMITS = {"wall_clock_seconds": 1800, "max_turns": 6, "max_tokens": 250000}
@@ -38,8 +45,14 @@ def _pending_git_operation(prefix: Path) -> bool:
     return False
 
 
-def _workspace_progress(issue: str) -> dict[str, int]:
-    raw_root = os.environ.get("SYMPHONY_WORKSPACE_ROOT")
+def _workspace_progress(
+    issue: str, workspace_root: Path | None = None
+) -> dict[str, int]:
+    raw_root = (
+        str(workspace_root)
+        if workspace_root is not None
+        else os.environ.get("SYMPHONY_WORKSPACE_ROOT")
+    )
     if not raw_root:
         raise ConfigError("Symphony workspace root is unavailable")
     root = Path(raw_root)
@@ -92,6 +105,273 @@ def _workspace_progress(issue: str) -> dict[str, int]:
     changed = len(git("status", "--porcelain", "-uno").splitlines())
     commits = int(git("rev-list", "--count", "v1.3-dev..HEAD"))
     return {"changed_paths": changed, "commits_ahead": commits}
+
+
+def _rejected_model_rollout(
+    path: Path,
+    sessions_root: Path,
+    workspace: Path,
+    model: str,
+    first_seen: float,
+    stopped_at: float,
+) -> dict[str, object]:
+    if (
+        path.is_symlink()
+        or not path.is_file()
+        or not path.resolve().is_relative_to(sessions_root)
+        or path.stat().st_size > 5 * 1024 * 1024
+    ):
+        raise ConfigError("model access recovery rollout is missing or unsafe")
+    try:
+        raw = path.read_bytes()
+        events = [json.loads(line) for line in raw.splitlines() if line]
+        meta = events[0]
+        started = datetime.fromisoformat(
+            meta["timestamp"].replace("Z", "+00:00")
+        ).timestamp()
+    except (
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+        KeyError,
+        IndexError,
+        TypeError,
+    ) as exc:
+        raise ConfigError("model access recovery rollout is malformed") from exc
+    if (
+        not isinstance(meta, dict)
+        or not isinstance(meta.get("payload"), dict)
+        or meta.get("type") != "session_meta"
+        or meta.get("payload", {}).get("cwd") != str(workspace)
+        or not first_seen <= started <= stopped_at
+    ):
+        raise ConfigError("model access recovery rollout identity differs")
+    contexts = 0
+    failures = 0
+    aborted = 0
+    expected_error = (
+        f"The '{model}' model is not supported when using Codex with a ChatGPT account."
+    )
+    for event in events[1:]:
+        if not isinstance(event, dict):
+            raise ConfigError("model access recovery rollout is malformed")
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if event.get("type") == "turn_context":
+            if (
+                payload.get("cwd") != str(workspace)
+                or payload.get("model") != model
+                or payload.get("effort") != "medium"
+            ):
+                raise ConfigError("model access recovery turn policy differs")
+            contexts += 1
+        elif (
+            event.get("type") == "event_msg" and payload.get("type") == "task_complete"
+        ):
+            try:
+                failure = json.loads(payload["error"]["message"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ConfigError(
+                    "model access recovery contains a completed model turn"
+                ) from exc
+            backend_error = (
+                isinstance(failure, dict)
+                and failure.get("type") == "error"
+                and failure.get("status") == 400
+                and isinstance(failure.get("error"), dict)
+                and failure["error"].get("type") == "invalid_request_error"
+                and failure["error"].get("message") == expected_error
+            )
+            repeated_error = failure == {"detail": expected_error}
+            if payload.get("last_agent_message") is not None or not (
+                backend_error or repeated_error
+            ):
+                raise ConfigError(
+                    "model access recovery contains a different model result"
+                )
+            failures += 1
+        elif event.get("type") == "event_msg" and payload.get("type") == "turn_aborted":
+            aborted += 1
+    if contexts == 0 or contexts != failures + aborted:
+        raise ConfigError("model access recovery has unaccounted turns")
+    return {
+        "basename": path.name,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "turns": contexts,
+        "rejections": failures,
+        "aborted": aborted,
+    }
+
+
+def reset_rejected_model_epoch(
+    config: AgentConfig,
+    incident: Path,
+    issue: str,
+    model: str,
+    rollouts: list[Path],
+    environ: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """Archive only a clean, near-exhausted issue epoch proven to contain rejected turns."""
+    values = os.environ if environ is None else environ
+    prefix = config.runtime_prefix(values)
+    ensure_private_prefix(prefix)
+    if not _ISSUE.fullmatch(issue) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", model):
+        raise ConfigError("model access recovery identifiers are invalid")
+    if model == config.model_for("implementation").model:
+        raise ConfigError("model access recovery requires a corrected standard model")
+    if not 1 <= len(rollouts) <= 5 or len(set(rollouts)) != len(rollouts):
+        raise ConfigError("model access recovery needs distinct rollout evidence")
+    lock = ExclusiveRoleLock(
+        prefix / "locks" / "implementation.lock", config.runtime["lock_stale_seconds"]
+    )
+    with lock.acquired_for(new_run_id("model-access-recovery")):
+        if incident.is_symlink():
+            raise ConfigError("model access recovery incident is unsafe")
+        source = incident.expanduser().resolve(strict=True)
+        if (
+            source.parent != (prefix / "incidents").resolve()
+            or source.suffix != ".json"
+        ):
+            raise ConfigError(
+                "model access recovery incident is outside private receipts"
+            )
+        try:
+            stop = json.loads(source.read_text())
+            stopped_at = datetime.fromisoformat(
+                stop["stopped_at"].replace("Z", "+00:00")
+            ).timestamp()
+            ledger_path = prefix / "state" / "symphony-ledger.json"
+            ledger = json.loads(ledger_path.read_text())
+        except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
+            raise ConfigError(
+                "model access recovery incident or ledger is unreadable"
+            ) from exc
+        run_id = stop.get("run_id")
+        violations = stop.get("violations")
+        if (
+            stop.get("worker_class") != "standard"
+            or stop.get("linear_state_changed") is not False
+            or not isinstance(run_id, str)
+            or not isinstance(violations, list)
+            or not any(
+                v.get("reason") == "turns_budget"
+                for v in violations
+                if isinstance(v, dict)
+            )
+            or any(
+                v.get("issue_identifier") == issue
+                for v in violations
+                if isinstance(v, dict)
+            )
+        ):
+            raise ConfigError(
+                "model access recovery requires another issue's standard turn stop"
+            )
+        history_path = (
+            prefix
+            / "state"
+            / "symphony-ledger-history"
+            / issue
+            / f"{source.stem}-model-access.json"
+        )
+        receipt_path = (
+            prefix
+            / "state"
+            / "symphony-model-recoveries"
+            / f"{issue}-{source.stem}.json"
+        )
+        current_record = ledger.get("issues", {}).get(issue)
+        record = current_record
+        if record is None and receipt_path.exists() and history_path.exists():
+            try:
+                record = json.loads(history_path.read_text())["issue"]
+            except (OSError, UnicodeDecodeError, ValueError, KeyError) as exc:
+                raise ConfigError(
+                    "model access recovery history is unreadable"
+                ) from exc
+        if not isinstance(record, dict) or set(record.get("runtimes", {})) != {run_id}:
+            raise ConfigError("model access recovery ledger runtime differs")
+        totals = _ledger_totals(record, time.time())
+        turns = int(totals["turn_count"])
+        max_turns = config.roles["implementation"].max_turns
+        if (
+            not max_turns - 5 <= turns <= max_turns
+            or totals["tokens"] != 0
+            or totals["input_tokens"] != 0
+            or totals["output_tokens"] != 0
+            or record.get("max_retry", 0) > config.roles["implementation"].max_retries
+        ):
+            raise ConfigError(
+                "model access recovery ledger has useful work or is outside the bounded stop"
+            )
+        if _pending_git_operation(prefix):
+            raise ConfigError("model access recovery has unresolved Git operations")
+        workspace_root = Path(values.get("SYMPHONY_WORKSPACE_ROOT", ""))
+        if not workspace_root.is_absolute() or _workspace_progress(
+            issue, workspace_root
+        ) != {"changed_paths": 0, "commits_ahead": 0}:
+            raise ConfigError("model access recovery workspace has progress")
+        sessions_root = (
+            Path(values.get("CODEX_HOME", "~/.codex")).expanduser().resolve()
+            / "sessions"
+        )
+        evidence = [
+            _rejected_model_rollout(
+                path,
+                sessions_root,
+                workspace_root / issue,
+                model,
+                float(record["first_seen"]),
+                stopped_at,
+            )
+            for path in rollouts
+        ]
+        if (
+            sum(int(item["turns"]) for item in evidence) != turns
+            or sum(int(item["aborted"]) for item in evidence) > 1
+        ):
+            raise ConfigError(
+                "model access recovery evidence does not match the ledger"
+            )
+        epoch = _ledger_epoch_sha256(record)
+        receipt = {
+            "schema_version": 1,
+            "state": "pending",
+            "issue_identifier": issue,
+            "incident": source.name,
+            "run_id": run_id,
+            "rejected_model": model,
+            "ledger_epoch_sha256": epoch,
+            "turns": turns,
+            "rollouts": evidence,
+            "history": str(history_path),
+            "linear_state_changed": False,
+        }
+        if receipt_path.exists():
+            prior = json.loads(receipt_path.read_text())
+            if {k: prior.get(k) for k in receipt if k != "state"} != {
+                k: v for k, v in receipt.items() if k != "state"
+            }:
+                raise ConfigError("model access recovery receipt conflicts")
+            if prior.get("state") == "applied":
+                return {"status": "already_applied", **prior}
+        else:
+            _save_json(receipt_path, receipt)
+        if history_path.exists():
+            history = json.loads(history_path.read_text())
+            if history.get("issue") != record:
+                raise ConfigError("model access recovery history conflicts")
+        else:
+            _save_json(history_path, {"schema_version": 1, "issue": record})
+        if current_record is not None:
+            del ledger["issues"][issue]
+            _save_json(ledger_path, ledger)
+        receipt.update(
+            {"state": "applied", "recovered_at": datetime.now(UTC).isoformat()}
+        )
+        _save_json(receipt_path, receipt)
+        return {"status": "applied", **receipt}
 
 
 def _candidate(prefix: Path, incident: Path) -> tuple[str | None, str]:

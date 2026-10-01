@@ -40,7 +40,7 @@ agent:
 
 codex:
   command: >-
-    codex -c 'model="gpt-6.1-sol"' -c 'model_reasoning_effort="medium"'
+    codex -c 'model="gpt-6-sol"' -c 'model_reasoning_effort="medium"'
     -c 'features.code_mode.default_exec_yield_time_ms=660000'
     -c 'default_permissions="sanctum-workspace"'
     -c 'permissions.sanctum-workspace.extends=":workspace"'

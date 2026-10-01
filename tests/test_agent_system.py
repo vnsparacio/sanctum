@@ -79,18 +79,20 @@ from sanctum_agents.runtime import (
     new_run_id,
 )
 from sanctum_agents.scheduler import ScheduleError, load_schedule_plan
-from sanctum_agents.supervisor import BoundedProcess
+from sanctum_agents.supervisor import BoundedProcess, ProcessResult
 from sanctum_agents.symphony_recovery import (
     _candidate,
     _grant,
     _notify,
     _report,
+    reset_rejected_model_epoch,
     run_with_recovery,
 )
 from sanctum_agents.symphony_supervisor import (
     TerminationClass,
     _ledger_epoch_sha256,
     _ledger_totals,
+    _probe_codex_access,
     _sanitized_supervisor_environment,
     _state_api_grace_seconds,
     classify_termination,
@@ -160,7 +162,7 @@ def catalog() -> list[dict[str, object]]:
         }
         for model in (
             "gpt-6-astra",
-            "gpt-6.1-sol",
+            "gpt-6-sol",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -169,6 +171,39 @@ def catalog() -> list[dict[str, object]]:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_symphony_model_access_probe_requires_real_completed_turn(self):
+        success = ProcessResult(
+            0,
+            "completed",
+            '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":1}}\n',
+            1.0,
+            {"turns": 1, "tokens": 11},
+        )
+        with patch.object(BoundedProcess, "run", return_value=success) as run:
+            _probe_codex_access("gpt-6-sol", "medium", {"PATH": "/bin"})
+        command = run.call_args.args[0]
+        self.assertEqual("gpt-6-sol", command[command.index("-m") + 1])
+        self.assertIn('model_reasoning_effort="medium"', command)
+        self.assertEqual("read-only", command[command.index("-s") + 1])
+        self.assertIn("sanctum-model-probe-", command[command.index("-C") + 1])
+        self.assertEqual(45, run.call_args.args[2].wall_clock_seconds)
+        self.assertEqual(32000, run.call_args.args[2].max_tokens)
+
+        for result in (
+            ProcessResult(1, "completed", success.output, 1.0, {}),
+            ProcessResult(0, "completed", success.output.splitlines()[0], 1.0, {}),
+            ProcessResult(
+                0, "completed", success.output.replace('"OK"', '"NO"'), 1.0, {}
+            ),
+        ):
+            with (
+                self.subTest(result=result),
+                patch.object(BoundedProcess, "run", return_value=result),
+                self.assertRaisesRegex(ConfigError, "failed the account access probe"),
+            ):
+                _probe_codex_access("gpt-6-sol", "medium", {"PATH": "/bin"})
+
     def test_protected_branch_ruleset_preserves_pr_flow_and_admin_only_bypass(self):
         ruleset = json.loads(PROTECTED_BRANCH_RULESET.read_text())
 
@@ -233,7 +268,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", config.model_for("repo_steward").model)
         self.assertEqual("gpt-5.6-luna", config.model_for("triage").model)
         self.assertEqual("gpt-5.6-terra", config.model_for("triage_escalation").model)
-        self.assertEqual("gpt-6.1-sol", config.model_for("implementation").model)
+        self.assertEqual("gpt-6-sol", config.model_for("implementation").model)
         self.assertEqual("medium", config.model_for("implementation").reasoning)
         self.assertEqual("gpt-6-astra", config.model_for("implementation_deep").model)
         self.assertEqual("high", config.model_for("implementation_deep").reasoning)
@@ -264,7 +299,7 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "configured model unavailable"):
             validate_model_catalog(
                 load_config(CONFIG),
-                [item for item in catalog() if item["id"] != "gpt-6.1-sol"],
+                [item for item in catalog() if item["id"] != "gpt-6-sol"],
             )
         with self.assertRaisesRegex(ConfigError, "configured reasoning unavailable"):
             validate_model_catalog(
@@ -275,7 +310,7 @@ class ConfigurationTests(unittest.TestCase):
                             **item,
                             "supportedReasoningEfforts": [{"reasoningEffort": "high"}],
                         }
-                        if item["id"] == "gpt-6.1-sol"
+                        if item["id"] == "gpt-6-sol"
                         else item
                     )
                     for item in catalog()
@@ -350,7 +385,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual("standard", status["worker_class"])
             self.assertEqual("codex", status["implementation_backend"])
             self.assertEqual(str(ROOT / "WORKFLOW.md"), status["workflow"])
-            self.assertEqual("gpt-6.1-sol", status["model"])
+            self.assertEqual("gpt-6-sol", status["model"])
             self.assertEqual("medium", status["reasoning_effort"])
 
     def test_implementation_wall_clock_timeout_rejects_malformed_value(self):
@@ -1328,7 +1363,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
     def test_workflow_pins_model_limits_and_never_merges(self):
         workflow = (ROOT / "WORKFLOW.md").read_text()
         deep_workflow = (ROOT / "WORKFLOW.deep.md").read_text()
-        self.assertIn('model="gpt-6.1-sol"', workflow)
+        self.assertIn('model="gpt-6-sol"', workflow)
         self.assertIn('model_reasoning_effort="medium"', workflow)
         code_mode_wait = "features.code_mode.default_exec_yield_time_ms=660000"
         self.assertIn(code_mode_wait, workflow)
@@ -1397,7 +1432,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
         normalized = (
             deep.replace("    - agent-deep\n", "    - agent-standard\n")
             .replace("max_turns: 30", "max_turns: 20")
-            .replace('model="gpt-6-astra"', 'model="gpt-6.1-sol"')
+            .replace('model="gpt-6-astra"', 'model="gpt-6-sol"')
             .replace('model_reasoning_effort="high"', 'model_reasoning_effort="medium"')
             .replace(
                 "Worker class: deep (`agent-deep`).",
@@ -1885,17 +1920,23 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             gh = bin_dir / "gh"
             gh.write_text("#!/bin/sh\nexit 0\n")
             gh.chmod(0o700)
-            result = supervise(
-                config,
-                ROOT,
-                {
-                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
-                    "LINEAR_API_KEY": "synthetic-test-token",
-                    "SYMPHONY_WORKSPACE_ROOT": str(workspace),
-                    "SANCTUM_AGENT_PREFIX": str(prefix),
-                    "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
-                },
-            )
+            with patch(
+                "sanctum_agents.symphony_supervisor._probe_codex_access"
+            ) as access_probe:
+                result = supervise(
+                    config,
+                    ROOT,
+                    {
+                        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                        "LINEAR_API_KEY": "synthetic-test-token",
+                        "SYMPHONY_WORKSPACE_ROOT": str(workspace),
+                        "SANCTUM_AGENT_PREFIX": str(prefix),
+                        "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                    },
+                )
+            self.assertEqual("gpt-6-sol", access_probe.call_args.args[0])
+            self.assertEqual("medium", access_probe.call_args.args[1])
+            self.assertNotIn("LINEAR_API_KEY", access_probe.call_args.args[2])
             self.assertEqual(75, result)
             incidents = list((prefix / "incidents").glob("*.json"))
             self.assertEqual(1, len(incidents))
@@ -1929,17 +1970,18 @@ HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             gh.write_text("#!/bin/sh\nexit 0\n")
             gh.chmod(0o700)
             prefix = root / "private-agents"
-            result = supervise(
-                config,
-                ROOT,
-                {
-                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
-                    "LINEAR_API_KEY": "synthetic-test-token",
-                    "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
-                    "SANCTUM_AGENT_PREFIX": str(prefix),
-                    "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
-                },
-            )
+            with patch("sanctum_agents.symphony_supervisor._probe_codex_access"):
+                result = supervise(
+                    config,
+                    ROOT,
+                    {
+                        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                        "LINEAR_API_KEY": "synthetic-test-token",
+                        "SYMPHONY_WORKSPACE_ROOT": str(root / "workspaces"),
+                        "SANCTUM_AGENT_PREFIX": str(prefix),
+                        "SANCTUM_GIT_GH_CONFIG_DIR": str(github_config),
+                    },
+                )
             self.assertEqual(75, result)
             incident = json.loads(
                 next((prefix / "incidents").glob("*.json")).read_text()
@@ -2342,6 +2384,122 @@ class SymphonyRecoveryTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_rejected_model_epoch_requires_exact_private_evidence_and_archives_once(
+        self,
+    ):
+        run_id = "implementation-test"
+        self.record = {
+            "first_seen": 1790816555.0,
+            "last_seen": 1790816628.0,
+            "max_retry": 0,
+            "runtimes": {
+                run_id: {
+                    "attempts": {
+                        "2026-10-01T01:02:39Z": {
+                            "turns": 36,
+                            "tokens": 0,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                        }
+                    }
+                }
+            },
+        }
+        ledger_path = self.prefix / "state" / "symphony-ledger.json"
+        ledger_path.write_text(
+            json.dumps({"schema_version": 1, "issues": {self.issue: self.record}})
+        )
+        self.incident.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "worker_class": "standard",
+                    "linear_state_changed": False,
+                    "stopped_at": "2026-10-01T01:03:48Z",
+                    "violations": [
+                        {"issue_identifier": "SAN-8", "reason": "turns_budget"}
+                    ],
+                }
+            )
+        )
+        codex_home = Path(self.temporary.name) / "codex"
+        rollout = codex_home / "sessions" / "2026" / "10" / "01" / "rollout.jsonl"
+        rollout.parent.mkdir(parents=True)
+        workspace_root = Path(self.temporary.name) / "workspaces"
+        workspace = workspace_root / self.issue
+        error = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
+        events = [
+            {
+                "type": "session_meta",
+                "timestamp": "2026-10-01T01:02:39Z",
+                "payload": {"cwd": str(workspace)},
+            }
+        ]
+        for _ in range(36):
+            events.extend(
+                [
+                    {
+                        "type": "turn_context",
+                        "payload": {
+                            "cwd": str(workspace),
+                            "model": "gpt-6.1-sol",
+                            "effort": "medium",
+                        },
+                    },
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "task_complete",
+                            "error": {"message": json.dumps({"detail": error})},
+                            "last_agent_message": None,
+                        },
+                    },
+                ]
+            )
+        rollout.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        values = {
+            "SANCTUM_AGENT_PREFIX": str(self.prefix),
+            "SYMPHONY_WORKSPACE_ROOT": str(workspace_root),
+            "CODEX_HOME": str(codex_home),
+        }
+        with patch(
+            "sanctum_agents.symphony_recovery._workspace_progress",
+            return_value={"changed_paths": 0, "commits_ahead": 0},
+        ):
+            damaged = events.copy()
+            damaged[-1] = {
+                **events[-1],
+                "payload": {
+                    "type": "task_complete",
+                    "error": {"message": json.dumps({"detail": "other"})},
+                },
+            }
+            rollout.write_text("\n".join(json.dumps(event) for event in damaged) + "\n")
+            with self.assertRaisesRegex(ConfigError, "different model result"):
+                reset_rejected_model_epoch(
+                    self.config,
+                    self.incident,
+                    self.issue,
+                    "gpt-6.1-sol",
+                    [rollout],
+                    values,
+                )
+            self.assertIn(self.issue, json.loads(ledger_path.read_text())["issues"])
+            rollout.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+            result = reset_rejected_model_epoch(
+                self.config, self.incident, self.issue, "gpt-6.1-sol", [rollout], values
+            )
+            repeated = reset_rejected_model_epoch(
+                self.config, self.incident, self.issue, "gpt-6.1-sol", [rollout], values
+            )
+        self.assertEqual("applied", result["status"])
+        self.assertEqual("already_applied", repeated["status"])
+        self.assertNotIn(self.issue, json.loads(ledger_path.read_text())["issues"])
+        history = json.loads(Path(result["history"]).read_text())
+        self.assertEqual(self.record, history["issue"])
+        self.assertEqual(36, result["turns"])
+        self.assertFalse(result["linear_state_changed"])
 
     def test_one_time_extension_is_bound_to_existing_epoch(self):
         self.assertEqual(

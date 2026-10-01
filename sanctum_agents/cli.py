@@ -32,7 +32,7 @@ from .repo_steward import run_repo_steward
 from .reviewer import run_reviewer
 from .runtime import RunMode
 from .scheduler import load_schedule_plan
-from .symphony_recovery import run_with_recovery
+from .symphony_recovery import reset_rejected_model_epoch, run_with_recovery
 from .symphony_supervisor import (
     preflight as symphony_preflight,
 )
@@ -60,6 +60,11 @@ def parser() -> argparse.ArgumentParser:
     resume = subcommands.add_parser("symphony-resume")
     resume.add_argument("--incident", type=Path, required=True)
     resume.add_argument("--issue", required=True)
+    model_recovery = subcommands.add_parser("symphony-recover-model-access")
+    model_recovery.add_argument("--incident", type=Path, required=True)
+    model_recovery.add_argument("--issue", required=True)
+    model_recovery.add_argument("--rejected-model", required=True)
+    model_recovery.add_argument("--rollout", type=Path, action="append", required=True)
     ao_reconcile = subcommands.add_parser("symphony-ao-reconcile")
     ao_reconcile.add_argument("--issue", required=True)
     ao_reconcile.add_argument(
@@ -128,6 +133,20 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     resume_from_incident(config, args.incident, args.issue),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.command == "symphony-recover-model-access":
+            print(
+                json.dumps(
+                    reset_rejected_model_epoch(
+                        config,
+                        args.incident,
+                        args.issue,
+                        args.rejected_model,
+                        args.rollout,
+                    ),
                     sort_keys=True,
                 )
             )
