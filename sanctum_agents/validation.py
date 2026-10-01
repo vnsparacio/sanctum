@@ -84,6 +84,12 @@ def _atomic_private_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 class HostValidationRunner:
     """Execute only reviewed validation profiles in a leased issue workspace."""
 
@@ -380,6 +386,90 @@ class HostValidationRunner:
         )
         return result.returncode == 0
 
+    def _dependency_identity(self) -> dict[str, str] | None:
+        """Bind readiness to this directory, dependency inputs, and installed artifacts."""
+        try:
+            workspace_stat = self.workspace.stat()
+            contract = []
+            for relative in DEPENDENCY_CONTRACT_PATHS:
+                path = self.workspace / relative
+                if path.is_symlink() or not path.is_file():
+                    return None
+                contract.append(
+                    (relative, hashlib.sha256(path.read_bytes()).hexdigest())
+                )
+            artifacts = []
+            for relative, directory in (
+                (".venv", True),
+                (".venv/bin/python", False),
+                (".venv/pyvenv.cfg", False),
+                ("node_modules", True),
+            ):
+                path = self.workspace / relative
+                if path.is_symlink() and relative != ".venv/bin/python":
+                    return None
+                if not (path.is_dir() if directory else path.is_file()):
+                    return None
+                metadata = path.stat()
+                artifacts.append((relative, metadata.st_dev, metadata.st_ino))
+            config_digest = hashlib.sha256(
+                (self.workspace / ".venv/pyvenv.cfg").read_bytes()
+            ).hexdigest()
+            return {
+                "workspace_identity": _digest(
+                    (str(self.workspace), workspace_stat.st_dev, workspace_stat.st_ino)
+                ),
+                "dependency_contract_digest": _digest(contract),
+                "prepared_environment_identity": _digest((artifacts, config_digest)),
+            }
+        except OSError:
+            return None
+
+    def dependency_readiness(self) -> dict[str, str]:
+        """Inspect and durably invalidate a prior host-preflight decision."""
+        issue_id = self.workspace.name
+        self._identity(issue_id, issue_id)
+        path = self.validation_state_root / "dependency-readiness" / f"{issue_id}.json"
+        if not path.exists():
+            return {"status": "missing"}
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {"status": "stale"}
+        if not isinstance(record, dict):
+            return {"status": "stale"}
+        identity = self._dependency_identity()
+        if record.get("schema_version") != 1 or record.get("issue_id") != issue_id:
+            reason = "record_invalid"
+        elif record.get("status") != "ready":
+            return {"status": "stale"}
+        elif identity is None:
+            reason = "artifact_or_input_missing"
+        elif record.get("workspace_identity") != identity["workspace_identity"]:
+            reason = "workspace_changed"
+        elif (
+            record.get("dependency_contract_digest")
+            != identity["dependency_contract_digest"]
+        ):
+            reason = "contract_changed"
+        elif (
+            record.get("prepared_environment_identity")
+            != identity["prepared_environment_identity"]
+        ):
+            reason = "environment_changed"
+        elif not self._dependencies_ready(self._environment(issue_id)):
+            reason = "environment_incomplete"
+        else:
+            return {"status": "ready", "receipt_id": record["receipt_id"]}
+        record = {
+            "schema_version": 1,
+            "issue_id": issue_id,
+            "status": "stale",
+            "reason": reason,
+        }
+        _atomic_private_json(path, record)
+        return {"status": "stale", "reason": reason}
+
     def preflight_dependencies(self) -> dict[str, Any]:
         """Prepare one leased workspace before Symphony dispatches Codex."""
         issue_id = self.workspace.name
@@ -392,6 +482,14 @@ class HostValidationRunner:
             / "dependency-preflight"
             / issue_id
             / f"{receipt_id}.json"
+        )
+        readiness_path = (
+            self.validation_state_root / "dependency-readiness" / f"{issue_id}.json"
+        )
+        # A failed or interrupted attempt must never leave an earlier ready record.
+        _atomic_private_json(
+            readiness_path,
+            {"schema_version": 1, "issue_id": issue_id, "status": "stale"},
         )
         receipt: dict[str, Any] = {
             "schema_version": 1,
@@ -409,6 +507,7 @@ class HostValidationRunner:
         ready_before = False
         ready_after = False
         stable = False
+        identity = None
         try:
             environment = self._environment(issue_id)
             for cache_name in ("UV_CACHE_DIR", "NPM_CONFIG_CACHE"):
@@ -438,9 +537,11 @@ class HostValidationRunner:
                 self._workspace_fingerprint(self._identity(issue_id, issue_id))
                 == before
             )
+            identity = self._dependency_identity()
             passed = (
                 ready_after
                 and stable
+                and identity is not None
                 and (
                     result is None
                     or (result["exit_code"] == 0 and not result["timed_out"])
@@ -468,6 +569,17 @@ class HostValidationRunner:
             }
         )
         _atomic_private_json(receipt_path, receipt)
+        if passed:
+            _atomic_private_json(
+                readiness_path,
+                {
+                    "schema_version": 1,
+                    "issue_id": issue_id,
+                    "status": "ready",
+                    "receipt_id": receipt_id,
+                    **identity,
+                },
+            )
         return {
             "state": receipt["state"],
             "passed": passed,
