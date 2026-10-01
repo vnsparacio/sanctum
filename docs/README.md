@@ -17,8 +17,10 @@ with the [development bootstrap](current/agent-system/V1.3-DEVELOPMENT-BOOTSTRAP
 the [Qwen lifecycle qualification](current/agent-system/V1.3-QWEN-LIFECYCLE-QUALIFICATION.md)
 records one owner-gated non-Sanctum Work Mode implementation, and the
 [Codex AO correlation guide](current/agent-system/V1.3-CODEX-AO-CORRELATION.md)
-records the local development telemetry lane. Accepted V1.2 component evidence
-remains in the [agent-system handoff](current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md),
+records the local development telemetry lane. The
+[workflow reliability guide](current/agent-system/V1.3-WORKFLOW-RELIABILITY.md)
+explains host dependency preflight and bounded agent execution. Accepted V1.2
+component evidence remains in the [agent-system handoff](current/agent-system/V1.2-AGENT-SYSTEM-HANDOFF.md),
 [Linear live qualification](current/agent-system/V1.2-LINEAR-LIVE-QUALIFICATION.md),
 [Git control plane](current/agent-system/V1.2-GIT-CONTROL-PLANE.md) and
 [Splunk Observability guide](observability/SPLUNK-O11Y-CLOUD.md).
