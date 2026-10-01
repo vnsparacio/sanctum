@@ -305,7 +305,7 @@
   "gate/tests/local-synthesis.test.mjs": "773c44bf1d83fc5601a9472ec0a187e86b04d50911a75ade511efe29ae1778a1",
   "gate/tests/moodlog-acceptance.test.mjs": "43b61f2cfe5a359aab26b46b7a40c625b952f28a783010163c5ec2ef3e11959b",
   "gate/tests/observability.test.mjs": "3fe4dd8fab28864009b4e480fd78d48f3e94b9afe27dac3ee3b63862ba4e2fc4",
-  "gate/tests/prelive.test.mjs": "fe3bd95ff86d9bb6f295e99b3550fcc281c2b2fb7ff867c25cf282282ede8e27",
+  "gate/tests/prelive.test.mjs": "68b01b3d07409dbcac407cbd712e0787647296a99fd8af4aeb35ce6f1619e4b7",
   "gate/tests/protocol-repair.test.mjs": "be5ffe257c1ba96f9b79f255e20148dc5d177ab499889c7d4039678a4a1950c0",
   "gate/tests/protocol-targeted.test.mjs": "5f97ca24d48e44115b18dc07c699941ae72936635783e443471fc44c455e40a7",
   "gate/tests/quality-benchmark.test.mjs": "87d904a5b91b52848e66c1872915a65bbc7b8edd3d4af24223317c58b71bd614",
