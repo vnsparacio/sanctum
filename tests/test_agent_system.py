@@ -1394,6 +1394,18 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertIn("github_ensure_issue_pull_request", workflow)
         self.assertIn("prepare --fresh-workspace", workflow)
         self.assertEqual(1, workflow.count("prepare --fresh-workspace"))
+        for candidate in (workflow, deep_workflow):
+            hooks = candidate.split("\nhooks:\n", 1)[1].split("\nagent:\n", 1)[0]
+            self.assertEqual(2, hooks.count("preflight-deps"))
+            self.assertEqual(2, hooks.count("set -eu"))
+            self.assertIn(
+                'prepare --fresh-workspace\n    "$SANCTUM_VALIDATION_RUNNER_PYTHON"',
+                hooks,
+            )
+            self.assertIn('prepare\n    "$SANCTUM_VALIDATION_RUNNER_PYTHON"', hooks)
+            self.assertIn("timeout_ms: 1800000", hooks)
+            self.assertNotIn("make verify-source", hooks)
+            self.assertNotIn("github_wait_issue_ci", hooks)
         self.assertNotIn(" gh ", workflow)
         self.assertNotIn("gh pr merge", workflow)
 

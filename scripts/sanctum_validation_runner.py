@@ -188,7 +188,19 @@ def serve_mcp() -> int:
 def main() -> int:
     if sys.argv[1:] == ["mcp"]:
         return serve_mcp()
-    raise SystemExit("usage: sanctum_validation_runner.py mcp")
+    if sys.argv[1:] == ["preflight-deps"]:
+        try:
+            result = runner().preflight_dependencies()
+        except ValidationError:
+            print("dependency preflight: workspace rejected", file=sys.stderr)
+            return 1
+        print(
+            f"dependency preflight: {result['state']} receipt={result['receipt_id']} "
+            f"duration_ms={result['duration_ms']}",
+            file=sys.stderr if not result["passed"] else sys.stdout,
+        )
+        return 0 if result["passed"] else 1
+    raise SystemExit("usage: sanctum_validation_runner.py mcp|preflight-deps")
 
 
 if __name__ == "__main__":
