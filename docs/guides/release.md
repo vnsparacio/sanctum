@@ -184,6 +184,9 @@ the `v1.3.0` milestone, or merging a `v1.3/project-*` branch does not change the
 package version or create a release. V1.3 work starts from the latest reviewed
 `origin/v1.3-dev`, returns through pull requests, and accumulates until a
 separate release-completion change sets all authoritative release metadata.
+The [V1.3 Codex AO correlation guide](../current/agent-system/V1.3-CODEX-AO-CORRELATION.md)
+records observational agent-work evidence; it does not authorize publication,
+merge or completion.
 
 When owner testing needs a published candidate, use SemVer pre-release forms in
 order: `1.3.0-alpha.N` for incomplete integration, `1.3.0-beta.N` for a
