@@ -28,7 +28,18 @@ class HostValidationRunnerTests(unittest.TestCase):
         self._run(["git", "init", "--bare", str(self.remote)], self.root)
         self._run(["git", "init", "-b", "v1.3-dev", str(self.seed)], self.root)
         (self.seed / "README.md").write_text("accepted base\n")
-        self._run(["git", "add", "README.md"], self.seed)
+        (self.seed / ".gitignore").write_text(".venv/\nnode_modules/\n")
+        for relative in (
+            "Makefile",
+            "package.json",
+            "package-lock.json",
+            "requirements-dev.txt",
+            "gate/runtime/requirements.txt",
+        ):
+            path = self.seed / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic dependency input\n")
+        self._run(["git", "add", "."], self.seed)
         self._run(
             [
                 "git",
@@ -79,6 +90,13 @@ class HostValidationRunnerTests(unittest.TestCase):
         return subprocess.run(
             arguments, cwd=cwd, text=True, capture_output=True, check=True
         )
+
+    def _artifacts(self):
+        venv = self.workspace / ".venv"
+        (venv / "bin").mkdir(parents=True, exist_ok=True)
+        (venv / "bin" / "python").write_text("synthetic python\n")
+        (venv / "pyvenv.cfg").write_text("version_info = 3.12\n")
+        (self.workspace / "node_modules").mkdir(exist_ok=True)
 
     def test_profile_is_bounded_receipted_and_idempotent(self):
         calls = []
@@ -143,8 +161,7 @@ class HostValidationRunnerTests(unittest.TestCase):
 
         def setup(command, environment):
             observed.append((command, environment))
-            (self.workspace / ".venv").mkdir()
-            (self.workspace / "node_modules").mkdir()
+            self._artifacts()
             return {"exit_code": 0, "timed_out": False}
 
         with (
@@ -171,7 +188,7 @@ class HostValidationRunnerTests(unittest.TestCase):
         self.assertTrue(self.runner.git.status()["clean"])
 
     def test_dependency_preflight_retains_existing_environment_on_resume(self):
-        (self.workspace / ".venv").mkdir()
+        self._artifacts()
         with (
             patch.object(self.runner, "_dependencies_ready", return_value=True),
             patch.object(self.runner, "_run_command") as setup,
@@ -182,8 +199,81 @@ class HostValidationRunnerTests(unittest.TestCase):
         self.assertEqual("existing", second["state"])
         setup.assert_not_called()
         self.assertTrue((self.workspace / ".venv").exists())
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertEqual("ready", self.runner.dependency_readiness()["status"])
+
+    def test_dependency_readiness_is_private_and_bound_to_workspace(self):
+        self._artifacts()
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            result = self.runner.preflight_dependencies()
+        self.assertTrue(result["passed"])
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertEqual("ready", self.runner.dependency_readiness()["status"])
+        path = self.validation_state / "dependency-readiness" / "TTE-14.json"
+        record = json.loads(path.read_text())
+        self.assertEqual(0o600, path.stat().st_mode & 0o777)
+        self.assertEqual("ready", record["status"])
+        self.assertEqual(result["receipt_id"], record["receipt_id"])
+        self.assertNotIn(str(self.root), path.read_text())
+        self.assertNotIn("synthetic dependency input", path.read_text())
+        identity = self.runner._dependency_identity()
+        with patch.object(
+            self.runner,
+            "_dependency_identity",
+            return_value={**identity, "workspace_identity": "different-workspace"},
+        ):
+            self.assertEqual(
+                "workspace_changed", self.runner.dependency_readiness()["reason"]
+            )
+        self.assertEqual("stale", self.runner.dependency_readiness()["status"])
+
+    def test_dependency_readiness_invalidates_changed_contract_and_missing_artifact(
+        self,
+    ):
+        self._artifacts()
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertTrue(self.runner.preflight_dependencies()["passed"])
+        (self.workspace / "package-lock.json").write_text("changed dependency\n")
+        self.assertEqual(
+            "contract_changed", self.runner.dependency_readiness()["reason"]
+        )
+        (self.workspace / "package-lock.json").write_text(
+            "synthetic dependency input\n"
+        )
+        self.assertEqual("stale", self.runner.dependency_readiness()["status"])
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertTrue(self.runner.preflight_dependencies()["passed"])
+        (self.workspace / ".venv" / "bin" / "python").unlink()
+        self.assertEqual(
+            "artifact_or_input_missing", self.runner.dependency_readiness()["reason"]
+        )
+
+    def test_dependency_readiness_invalidates_incomplete_installed_packages(self):
+        self._artifacts()
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertTrue(self.runner.preflight_dependencies()["passed"])
+        with patch.object(self.runner, "_dependencies_ready", return_value=False):
+            self.assertEqual(
+                "environment_incomplete", self.runner.dependency_readiness()["reason"]
+            )
+
+    def test_dependency_readiness_failed_resume_invalidates_prior_ready_record(self):
+        self._artifacts()
+        with patch.object(self.runner, "_dependencies_ready", return_value=True):
+            self.assertTrue(self.runner.preflight_dependencies()["passed"])
+        with (
+            patch.object(self.runner, "_dependencies_ready", return_value=False),
+            patch.object(
+                self.runner,
+                "_run_command",
+                return_value={"exit_code": 1, "timed_out": False},
+            ),
+        ):
+            self.assertFalse(self.runner.preflight_dependencies()["passed"])
+        self.assertEqual("stale", self.runner.dependency_readiness()["status"])
 
     def test_dependency_preflight_ignores_unwritable_default_cache(self):
+        self._artifacts()
         with (
             patch.dict("os.environ", {"UV_CACHE_DIR": "/unwritable/default"}),
             patch.object(self.runner, "_dependencies_ready", side_effect=[False, True]),
@@ -204,7 +294,7 @@ class HostValidationRunnerTests(unittest.TestCase):
         (venv / "bin").mkdir(parents=True)
         (venv / "bin" / "python").write_text("synthetic interpreter placeholder\n")
         (venv / "pyvenv.cfg").write_text("version_info = 3.12\n")
-        (self.workspace / "gate" / "runtime").mkdir(parents=True)
+        (self.workspace / "gate" / "runtime").mkdir(parents=True, exist_ok=True)
         (self.workspace / "gate" / "runtime" / "requirements.txt").write_text(
             "Pillow==12.3.0\n"
         )
