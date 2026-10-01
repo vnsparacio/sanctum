@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import subprocess
@@ -751,6 +752,49 @@ class GitControlPlaneTests(unittest.TestCase):
         self.assertIn(
             pr["headRefOid"], next(call[1] for call in calls if call[0] == "api")
         )
+
+    def test_ci_wait_mcp_call_blocks_across_host_polls_until_one_terminal_result(self):
+        broker, pr, checks = self._ci_broker()
+        pending = [{**check} for check in checks]
+        pending[0]["status"] = "in_progress"
+        pending[0]["conclusion"] = None
+        api_reads = 0
+        output = io.StringIO()
+
+        def read(*arguments, **kwargs):
+            nonlocal api_reads
+            if arguments[0] == "api":
+                api_reads += 1
+            current = pending if api_reads <= 1 else checks
+            return self._ci_reader(pr, current)(*arguments, **kwargs)
+
+        request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "github_wait_issue_ci", "arguments": {}},
+            }
+        )
+
+        def host_poll(_seconds):
+            self.assertEqual("", output.getvalue())
+
+        with (
+            patch.object(broker, "_gh", side_effect=read),
+            patch.object(sanctum_git_broker, "control_plane", return_value=broker),
+            patch("sanctum_agents.git_control_plane.time.sleep", side_effect=host_poll),
+            patch("sys.stdin", io.StringIO(request + "\n")),
+            patch("sys.stdout", output),
+        ):
+            self.assertEqual(0, sanctum_git_broker.serve_mcp())
+        responses = output.getvalue().splitlines()
+        self.assertEqual(1, len(responses))
+        result = json.loads(responses[0])
+        self.assertEqual(7, result["id"])
+        self.assertEqual("PASSED", result["result"]["structuredContent"]["status"])
+        self.assertEqual(2, result["result"]["structuredContent"]["poll_count"])
+        self.assertEqual(2, api_reads)
 
     def test_ci_wait_failure_returns_compact_evidence_without_logs(self):
         broker, pr, checks = self._ci_broker()

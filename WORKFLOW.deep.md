@@ -41,6 +41,7 @@ agent:
 codex:
   command: >-
     codex -c 'model="gpt-6-astra"' -c 'model_reasoning_effort="high"'
+    -c 'features.code_mode.default_exec_yield_time_ms=660000'
     -c 'default_permissions="sanctum-workspace"'
     -c 'permissions.sanctum-workspace.extends=":workspace"'
     -c 'permissions.sanctum-workspace.network.enabled=true'
