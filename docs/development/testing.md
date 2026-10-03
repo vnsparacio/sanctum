@@ -14,17 +14,18 @@ make format-check  # verify formatting without changes
 make lint          # Ruff checks
 ```
 
-The complete regression suite remains `make test`. Its 562 baseline tests are preserved in seven independently runnable groups:
+The complete regression suite remains `make test`. Its 1,018 baseline tests are preserved in eight independently runnable groups:
 
 | Local command | Surface | Baseline tests |
 | --- | --- | ---: |
-| `make test-gate-js` | Gate authority, Source-First, Work Mode and protocol contracts in Node | 126 |
-| `make test-gate-python` | Gate policy, lifecycle, protected-test, provider and workspace contracts in Python | 295 |
-| `make test-reliability` | Capability, egress, verifier, utility and source-grounding contracts | 42 |
+| `make test-gate-js` | Gate authority, Source-First, Work Mode, observability and protocol contracts in Node | 277 |
+| `make test-gate-python` | Gate policy, lifecycle, protected-test, provider and workspace contracts in Python | 380 |
+| `make test-reliability` | Capability, egress, verifier, utility and source-grounding contracts | 43 |
 | `make test-mcp` | MCP containment and approval guard | 8 |
-| `make test-plugins` | Owned TypeScript plugin contracts | 11 |
-| `make test-release` | Setup, amendment, rollback and Linux/macOS portability | 28 |
-| `make test-agents` | V1.2 management, budgets, supervision and execution gates | 52 |
+| `make test-router` | Retained session-state privacy and shadow-routing contracts | 59 |
+| `make test-plugins` | Owned TypeScript plugin contracts | 12 |
+| `make test-release` | Setup, amendment, rollback and Linux/macOS portability | 85 |
+| `make test-agents` | V1.3 management, budgets, supervision, review and execution gates | 154 |
 
 `make test-gate` combines the two gate groups. No test was removed when the runner was decomposed; the old workflow's duplicate second execution of `tests.test_agent_system` was removed.
 
