@@ -80,7 +80,7 @@ test('signed actual worker persists global reservations across processes and rej
  const h=signedHarness([]);
  try{
   writeFileSync(join(h.dir,'receipt.json'),JSON.stringify({work_mode_source_manifest_sha256:'b'.repeat(64)}));
-  const binding={experiment_id:'a'.repeat(32),source_id:'b'.repeat(64),install_id:sha(readFileSync(join(h.pkg,'FREEZE.json'))),deadline:Date.now()/1000+900};
+  const binding={experiment_id:'a'.repeat(32),source_id:'b'.repeat(64),install_id:sha(readFileSync(join(h.pkg,'FREEZE.json'))),deadline:Date.now()/1000+840};
   const init=`import sys,json,os,time\nfrom pathlib import Path\nsys.path.insert(0,sys.argv[1])\nfrom experiment import ExperimentLedger,process_identity\nroot,b,pid=json.loads(sys.argv[2]);ledger=ExperimentLedger(root);ledger.create(b,owner_pid=pid,owner_process=process_identity(pid))\nwith ledger.transaction() as c:\n r=ledger._bound(c,b);r.update(ready=True,allocation='OWNED',allocation_id='synthetic-pod',supervisor_pid=pid,supervisor_process=process_identity(pid),supervisor_heartbeat=time.time());ledger._write(c,r)\n`;
   execFileSync(h.settings.python,['-B','-c',init,join(h.pkg,'src'),JSON.stringify([join(h.settings.state_directory,'private-lead'),binding,process.pid])]);
   writeFileSync(join(h.dir,'transport/worker.py'),`import runpy\nrunpy.run_path(${JSON.stringify(join(root,'gate/tests/fixtures/prelive_worker.py'))},init_globals={'PACKAGE_ROOT':${JSON.stringify(h.pkg)},'FIXTURE_ROOT':${JSON.stringify(h.dir)}},run_name='__main__')\n`);
